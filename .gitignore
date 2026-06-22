@@ -21,3 +21,6 @@ __pycache__/
 /.deploy-marker
 /.deploy.lock
 /.deploy
+
+# internal deploy script (contains infra hostnames/credentials)
+/deploy.sh
