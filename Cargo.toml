@@ -1,0 +1,36 @@
+[package]
+name = "protect_carrot"
+version = "0.1.0"
+edition = "2024"
+description = "保卫萝卜 tower-defense, ported to Bevy (single-player). WebGPU/wasm learning project."
+
+[dependencies]
+# Pinned to the latest stable Bevy. Default features + mp3 (SFX) + webp
+# (story portraits are WebP — ~91% smaller than PNG for illustrations).
+bevy = { version = "0.19", features = ["mp3", "webp"] }
+
+# Pin wasm-bindgen to the version of the `wasm-bindgen-cli` provided by the Nix
+# dev shell (flake.nix). The CLI and crate versions MUST match exactly.
+wasm-bindgen = "=0.2.121"
+
+[features]
+# Build the web target with the WebGPU backend. Bevy makes `webgpu` take
+# precedence over the default `webgl2`, so enabling this is all that's needed:
+#   cargo build --target wasm32-unknown-unknown --release --features webgpu
+webgpu = ["bevy/webgpu"]
+
+# Native dev profile: optimize dependencies even in debug so Bevy runs smoothly,
+# while keeping our own crate fast to compile. This is the standard Bevy setup.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev]
+opt-level = 1
+
+# Release/wasm: small + fast.
+[profile.release]
+opt-level = "z"
+lto = "thin"       # "fat" OOM-killed the linker here for ~modest gain; thin is plenty
+codegen-units = 1
+panic = "abort"
+strip = true       # strip symbols from the rust binary before wasm-bindgen

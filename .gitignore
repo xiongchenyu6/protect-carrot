@@ -1,0 +1,23 @@
+.direnv
+result
+
+# Rust / Bevy build artifacts
+/target
+
+# Generated web bundle (build-web.sh output)
+/web
+
+# Local HTTPS dev certs (private key — never commit)
+/tools/certs/
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Working scratch (sim logs, content audits, comfy extracts, contact sheets)
+/tmp
+
+# Stray deploy state (from a separate deploy loop)
+/.deploy-marker
+/.deploy.lock
+/.deploy
