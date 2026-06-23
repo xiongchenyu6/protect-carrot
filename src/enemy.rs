@@ -218,6 +218,10 @@ fn spawn_one(
     } else {
         base_speed
     };
+    // 隐形：级别越高越难被探测——探测塔的有效射程要乘以这个折扣才能照出它。
+    // 普通 1.0、中级 ~0.67、高级 0.5。冲锋的爆发速度、攻塔的索敌范围则在
+    // update_enemies 里按 skill_mult 放大（见下）。
+    let stealth = if def.invisible { 1.0 / skill_mult } else { 1.0 };
     let start = board.spawn_pos();
     let px = def.size * 4.5 * if is_elite { 1.45 } else { 1.0 };
     let bar_w = (px * 0.5).max(18.0);
@@ -262,6 +266,8 @@ fn spawn_one(
                 element_resist: species.resist_profile(),
                 flying: def.flying,
                 invisible: def.invisible,
+                skill_mult,
+                stealth,
                 regen,
                 boss: def.boss,
                 size: def.size,
@@ -1453,12 +1459,13 @@ pub fn update_enemies(
             }
         }
 
-        // Chargers periodically burst forward (1s burst every 4s).
+        // Chargers periodically burst forward (1s burst every 4s). 冲锋按级别加强：
+        // 普通 ×2、中级 ×2.5、高级 ×3（爆发倍率 = 1 + 技能倍率）。
         let mut speed = e.current_speed();
         if e.charger {
             e.charge_timer += dt;
             if e.charge_timer % 4.0 < 1.0 {
-                speed *= 2.0;
+                speed *= 1.0 + e.skill_mult;
             }
         }
         if !e.frozen && !e.blocked && e.path_index < last {
@@ -1471,10 +1478,12 @@ pub fn update_enemies(
                 path[e.path_index + 1]
             };
             let raid_target = if e.tower_raider || e.moss_destroy {
+                // 吞塔按级别加强：除了 tower_dps 随级别提升外，索敌半径也按技能倍率
+                // 放大（普通 ×1、中级 ×1.1、高级 ×1.2），高级吞塔更早脱离路线扑塔。
                 let sense = if e.moss_destroy {
                     MOSS_TOWER_SENSE
                 } else {
-                    TOWER_RAIDER_SENSE
+                    TOWER_RAIDER_SENSE * (0.8 + 0.2 * e.skill_mult)
                 };
                 tower_positions
                     .iter()
@@ -1727,6 +1736,8 @@ fn spawn_splinter(commands: &mut Commands, creatures: &Creatures, parent: &Enemy
             element_resist: parent.element_resist,
             flying: parent.flying,
             invisible: false,
+            skill_mult: parent.skill_mult,
+            stealth: 1.0,
             regen: 0.0,
             boss: false,
             size,
@@ -1797,6 +1808,8 @@ fn spawn_child(
             element_resist: def.resist,
             flying: false,
             invisible: false,
+            skill_mult: 1.0,
+            stealth: 1.0,
             regen: 0.0,
             boss: false,
             size,

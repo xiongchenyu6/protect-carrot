@@ -1272,17 +1272,23 @@ fn dict() -> &'static HashMap<&'static str, &'static str> {
             ("范围内防御塔被压制，无法开火", "Towers in range are suppressed and cannot fire"),
             ("普通 ×1 · 中级 ×1.5 · 高级 ×2（静默范围）", "Basic ×1 · Intermediate ×1.5 · Advanced ×2 (silence radius)"),
             ("离开路线撕咬、摧毁防御塔", "Leaves the path to maul and destroy towers"),
+            ("离开路线撕咬、摧毁防御塔；级别越高拆塔越狠、索敌越远", "Leaves the path to maul towers; higher tiers hit harder and seek from farther"),
             ("普通 ×1 · 中级 ×1.5 · 高级 ×2（拆塔伤害）", "Basic ×1 · Intermediate ×1.5 · Advanced ×2 (tower damage)"),
+            ("普通 ×1 · 中级 ×1.5 · 高级 ×2（拆塔伤害+索敌范围）", "Basic ×1 · Intermediate ×1.5 · Advanced ×2 (tower damage + seek range)"),
             ("护甲与魔抗强化，物理减伤明显，需破甲或秘法", "Hardened armor & magic resist; use armor-pierce or arcane"),
             ("普通 ×1 · 中级 ×1.5 · 高级 ×2（护甲/魔抗）", "Basic ×1 · Intermediate ×1.5 · Advanced ×2 (armor/resist)"),
             ("无视地形，走最短直线扑向萝卜；部分塔无法锁定", "Ignores terrain, beelines straight to the carrot; some towers can't target it"),
             ("普通：常速 · 中级/高级：飞行更快，更难拦截", "Basic: normal speed · Intermediate/Advanced: faster, harder to intercept"),
             ("潜行接近，未被侦测时无法被锁定", "Sneaks in; can't be targeted until detected"),
+            ("潜行接近，未被侦测时无法被锁定；级别越高越难被照出", "Sneaks in; can't be targeted until detected; higher tiers are harder to reveal"),
             ("三级均需侦测塔或反隐英雄揭示", "All tiers require a detection tower or true-sight hero"),
+            ("侦测有效射程 普通 ×1 · 中级 ×0.67 · 高级 ×0.5", "Detector effective range: Basic ×1 · Intermediate ×0.67 · Advanced ×0.5"),
             ("周期性突进提速，并寻找附近防御塔撕咬", "Periodic speed bursts; also lunges at nearby towers"),
             ("突进强度随品级提升", "Charge intensity scales with grade"),
+            ("突进爆发 普通 ×2 · 中级 ×2.5 · 高级 ×3", "Charge burst: Basic ×2 · Intermediate ×2.5 · Advanced ×3"),
             ("首领级技能，会直接摧毁或重创防御塔", "Boss-tier skill: outright destroys or cripples towers"),
             ("首领专属，威压最强", "Boss-exclusive; the most oppressive"),
+            ("首领专属（高级），威压最强", "Boss-exclusive (Advanced); the most oppressive"),
         ];
         pairs.iter().copied().collect()
     })

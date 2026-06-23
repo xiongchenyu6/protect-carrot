@@ -285,8 +285,8 @@ pub fn skill_codex() -> &'static [SkillCodexEntry] {
         SkillCodexEntry {
             icon: "⚔️",
             name: "攻塔",
-            desc: "离开路线撕咬、摧毁防御塔",
-            tiers: "普通 ×1 · 中级 ×1.5 · 高级 ×2（拆塔伤害）",
+            desc: "离开路线撕咬、摧毁防御塔；级别越高拆塔越狠、索敌越远",
+            tiers: "普通 ×1 · 中级 ×1.5 · 高级 ×2（拆塔伤害+索敌范围）",
         },
         SkillCodexEntry {
             icon: "🪨",
@@ -303,20 +303,20 @@ pub fn skill_codex() -> &'static [SkillCodexEntry] {
         SkillCodexEntry {
             icon: "👻",
             name: "隐形",
-            desc: "潜行接近，未被侦测时无法被锁定",
-            tiers: "三级均需侦测塔或反隐英雄揭示",
+            desc: "潜行接近，未被侦测时无法被锁定；级别越高越难被照出",
+            tiers: "侦测有效射程 普通 ×1 · 中级 ×0.67 · 高级 ×0.5",
         },
         SkillCodexEntry {
             icon: "💨",
             name: "冲锋",
             desc: "周期性突进提速，并寻找附近防御塔撕咬",
-            tiers: "突进强度随品级提升",
+            tiers: "突进爆发 普通 ×2 · 中级 ×2.5 · 高级 ×3",
         },
         SkillCodexEntry {
             icon: "🌀",
             name: "吞塔",
             desc: "首领级技能，会直接摧毁或重创防御塔",
-            tiers: "首领专属，威压最强",
+            tiers: "首领专属（高级），威压最强",
         },
     ]
 }

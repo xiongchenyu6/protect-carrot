@@ -426,6 +426,8 @@ pub struct EnemySnap {
     pub path_index: usize,
     pub flying: bool,
     pub invisible: bool,
+    /// 隐形等级折扣：探测塔射程需乘以此值才能照出（高级隐形更难被发现）。
+    pub stealth: f32,
     pub boss: bool,
     pub tower_raider: bool,
     pub moss_destroy: bool,
@@ -460,6 +462,7 @@ pub fn build_snapshot(
             path_index: enemy.path_index,
             flying: enemy.flying,
             invisible: enemy.invisible,
+            stealth: enemy.stealth,
             boss: enemy.boss,
             tower_raider: enemy.tower_raider,
             moss_destroy: enemy.moss_destroy,
@@ -486,9 +489,11 @@ impl Snapshot {
         if !e.invisible {
             return true;
         }
+        // 隐形分级：高级隐形把探测塔的有效射程压缩到 0.5（中级 ~0.67），探测塔得
+        // 凑得更近才能照出它。
         self.detectors
             .iter()
-            .any(|(pos, range)| pos.distance(e.pos) <= *range)
+            .any(|(pos, range)| pos.distance(e.pos) <= *range * e.stealth)
     }
 
     fn can_target(&self, tower: &Tower, e: &EnemySnap) -> bool {
@@ -3024,8 +3029,13 @@ pub fn update_fire_grounds(
         }
         for (mut enemy, etf) in &mut enemies {
             let epos = etf.translation.truncate();
-            // Undetected invisible enemies don't take fire-wall burn.
-            if enemy.invisible && !detect.iter().any(|(p, r)| p.distance(epos) <= *r) {
+            // Undetected invisible enemies don't take fire-wall burn. 隐形分级：
+            // 探测塔有效射程按 stealth 折扣后才算照到（高级隐形要求探测塔更近）。
+            if enemy.invisible
+                && !detect
+                    .iter()
+                    .any(|(p, r)| p.distance(epos) <= *r * enemy.stealth)
+            {
                 continue;
             }
             if point_in_fire_wall(epos, pos, g.angle, g.half_len, g.half_width) {

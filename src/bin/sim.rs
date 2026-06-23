@@ -243,7 +243,8 @@ fn greedy_player(
     let invis_uncovered = enemies.iter().any(|(e, tf)| {
         e.invisible && {
             let p = tf.translation.truncate();
-            !detectors.iter().any(|(c, r)| c.distance(p) <= *r)
+            // 隐形分级：探测塔有效射程按 stealth 折扣（与游戏内 is_detected 一致）。
+            !detectors.iter().any(|(c, r)| c.distance(p) <= *r * e.stealth)
         }
     });
     if invis_uncovered {

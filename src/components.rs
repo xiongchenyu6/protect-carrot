@@ -23,6 +23,12 @@ pub struct Enemy {
     pub element_resist: ElementProfile,
     pub flying: bool,
     pub invisible: bool,
+    /// 技能等级倍率（普通 1.0 / 中级 1.5 / 高级 2.0）。冲锋爆发、攻塔索敌范围
+    /// 等运行期行为按此放大。
+    pub skill_mult: f32,
+    /// 隐形单位的“探测半径折扣”：探测塔需把有效射程乘以此值才能照出它
+    /// （普通 1.0、中级 ~0.67、高级 0.5，越高级越难被发现）。非隐形单位为 1.0。
+    pub stealth: f32,
     /// Fraction of max hp regained per second (0 if none).
     pub regen: f32,
     pub boss: bool,
