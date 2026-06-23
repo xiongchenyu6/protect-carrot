@@ -4,8 +4,11 @@ result
 # Rust / Bevy build artifacts
 /target
 
-# Generated web bundle (build-web.sh output)
-/web
+# Generated web bundle (build-web.sh output). Keep the hand-authored shell
+# (index.html + favicon.ico) tracked — everything else here is build output.
+/web/*
+!/web/index.html
+!/web/favicon.ico
 
 # Local HTTPS dev certs (private key — never commit)
 /tools/certs/

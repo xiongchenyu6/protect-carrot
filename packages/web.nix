@@ -18,6 +18,7 @@
   binaryen,
   brotli,
   curl,
+  lld,
   stdenv,
   openssl,
   # Bevy native deps are NOT needed for wasm32-unknown-unknown target,
@@ -38,9 +39,6 @@ in
     pname = "protect-carrot-web";
     version = "0.1.0";
     src = ./..;
-
-    # Only the web-relevant files.
-    sourceRoot = ".";
 
     cargoLock = {
       lockFile = ../Cargo.lock;
@@ -63,6 +61,7 @@ in
       binaryen
       brotli
       curl
+      lld # wasm32-unknown-unknown linker (.cargo config sets linker = lld)
     ];
 
     buildInputs = [
