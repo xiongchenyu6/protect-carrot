@@ -11,3 +11,11 @@
 *.ttf filter=lfs diff=lfs merge=lfs -text
 *.ttc filter=lfs diff=lfs merge=lfs -text
 *.otf filter=lfs diff=lfs merge=lfs -text
+
+# Nix's `github:` flake fetcher does NOT resolve Git LFS, so any LFS-tracked
+# file ships to the build as a ~130-byte pointer and breaks asset loading at
+# runtime (bevy_audio panics with UnrecognizedFormat). Keep the assets that are
+# actually bundled into the web build — everything under assets/ and the
+# favicon — as plain git blobs so they survive the github: fetch intact.
+assets/** -filter -diff -merge -text
+web/favicon.ico -filter -diff -merge -text
