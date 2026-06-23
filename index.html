@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="icon" type="image/x-icon" href="favicon.ico" />
+  <title>保卫萝卜</title>
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
+      background: #15201a; -webkit-tap-highlight-color: transparent; }
+    /* Bevy/winit creates the canvas; fit_canvas_to_parent sizes it to <body>. */
+    canvas { display: block; width: 100vw; height: 100vh; outline: none; touch-action: none; }
+
+    #fallback { position: fixed; inset: 0; display: none; place-content: center;
+      z-index: 40; background: #15201a;
+      color: #ffb86b; font-family: system-ui, sans-serif; text-align: center; padding: 2rem; }
+
+    /* Rotate-to-landscape prompt: only shown on touch devices held in portrait.
+       The game's playfield is a wide 1040×600 board, so portrait is unusable. */
+    #rotate { position: fixed; inset: 0; display: none; flex-direction: column;
+      align-items: center; justify-content: center; gap: 1.2rem; z-index: 10;
+      background: #15201a; color: #ffe6a8; font-family: system-ui, sans-serif;
+      text-align: center; padding: 2rem; }
+    #rotate .phone { width: 64px; height: 104px; border: 4px solid #ffcf6b;
+      border-radius: 12px; animation: tilt 1.6s ease-in-out infinite; }
+    #rotate .hint { font-size: 1.1rem; line-height: 1.6; opacity: 0.92; }
+    #rotate .sub { font-size: 0.85rem; opacity: 0.6; }
+    @keyframes tilt { 0%,40% { transform: rotate(0deg); } 70%,100% { transform: rotate(-90deg); } }
+    /* Coarse pointer (touch) + portrait → ask the player to rotate. */
+    @media (pointer: coarse) and (orientation: portrait) {
+      #rotate { display: flex; }
+      canvas { visibility: hidden; }
+    }
+
+    /* Loading screen shown while the wasm bundle downloads + initializes. */
+    #loading { position: fixed; inset: 0; z-index: 20; display: flex;
+      flex-direction: column; align-items: center; justify-content: center; gap: 1.1rem;
+      background: radial-gradient(circle at 50% 38%, #1f3326 0%, #131c16 70%, #0c120e 100%);
+      color: #ffe6a8; font-family: system-ui, sans-serif;
+      transition: opacity .5s ease; }
+    #loading.hidden { opacity: 0; pointer-events: none; }
+    #loading .carrot { font-size: 76px; line-height: 1;
+      animation: bob 1.1s ease-in-out infinite; filter: drop-shadow(0 6px 10px rgba(0,0,0,.45)); }
+    #loading .title { font-size: 2.1rem; font-weight: 800; letter-spacing: .12em;
+      color: #ffcf6b; text-shadow: 0 2px 0 rgba(0,0,0,.35); }
+    #loading .bar { width: 260px; max-width: 60vw; height: 8px; border-radius: 6px;
+      background: rgba(255,255,255,.10); overflow: hidden; }
+    #loading .bar .fill { height: 100%; width: 40%; border-radius: 6px;
+      background: linear-gradient(90deg, #ffb347, #ffd479, #ffb347);
+      animation: slide 1.2s ease-in-out infinite; }
+    #loading .tip { font-size: .95rem; opacity: .8; }
+    #loading .sub { font-size: .8rem; opacity: .5; letter-spacing:.05em; }
+    @keyframes bob { 0%,100% { transform: translateY(0) rotate(-4deg); }
+      50% { transform: translateY(-16px) rotate(4deg); } }
+    @keyframes slide { 0% { margin-left: -42%; } 100% { margin-left: 102%; } }
+    /* "Enter the battle" button — only revealed once the game is truly ready. */
+    #enter { display: none; margin-top: 8px; padding: 14px 34px; cursor: pointer;
+      font: 700 1.15rem system-ui, sans-serif; color: #102016; border: none;
+      border-radius: 10px; background: linear-gradient(180deg,#ffd479,#ffb347);
+      box-shadow: 0 4px 0 #a9701f, 0 8px 18px rgba(0,0,0,.4);
+      animation: pulse 1.3s ease-in-out infinite; -webkit-tap-highlight-color: transparent; }
+    #enter:active { transform: translateY(3px); box-shadow: 0 1px 0 #a9701f; }
+    @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+  </style>
+</head>
+<body>
+  <div id="loading">
+    <div class="carrot">🥕</div>
+    <div class="title">保卫萝卜</div>
+    <div class="bar"><div class="fill"></div></div>
+    <div class="tip">加载中…</div>
+    <div class="sub">Loading defenses…</div>
+    <button id="enter">▶ 点击进入战场</button>
+  </div>
+  <div id="fallback">本游戏需要 WebGPU：请用最新版 Chrome/Edge，或在 Firefox 开启 dom.webgpu.enabled。</div>
+  <div id="rotate">
+    <div class="phone"></div>
+    <div class="hint">请把手机旋转到<b>横屏</b>开始游戏 🥕</div>
+    <div class="sub">Rotate your device to landscape</div>
+  </div>
+  <script type="module">
+    // WebGPU is required. If the browser lacks it, show the fallback message ON TOP
+    // (z-index 40 > loader) and hide the loader, instead of fading into a blank canvas.
+    const hasWebGPU = !!navigator.gpu;
+    if (!hasWebGPU) {
+      document.getElementById('fallback').style.display = 'grid';
+      const l0 = document.getElementById('loading');
+      if (l0) l0.style.display = 'none';
+    }
+
+    // On the first user gesture, go fullscreen and lock to landscape on mobile.
+    // Both calls require a user gesture and may reject on desktop/unsupported
+    // browsers — that's fine, we swallow the errors.
+    let engaged = false;
+    async function goImmersive() {
+      if (engaged) return;
+      engaged = true;
+      const coarse = matchMedia('(pointer: coarse)').matches;
+      if (!coarse) return; // desktop: leave windowed (F11 still works)
+      try { await document.documentElement.requestFullscreen({ navigationUI: 'hide' }); } catch (_) {}
+      try { await screen.orientation.lock('landscape'); } catch (_) {}
+    }
+    window.addEventListener('pointerdown', goImmersive, { once: false, passive: true });
+    window.addEventListener('touchstart', goImmersive, { once: false, passive: true });
+
+    function hideLoading() {
+      const l = document.getElementById('loading');
+      if (!l || l.classList.contains('hidden')) return;
+      l.classList.add('hidden');
+      setTimeout(() => { l.style.display = 'none'; }, 600);
+    }
+
+    // The loader does NOT auto-hide into a blank screen. Instead, once the Rust app
+    // signals it has actually rendered the menu (carrot_game_ready), we reveal an
+    // explicit "进入战场" button. Tapping it provides the user gesture needed for
+    // fullscreen + landscape lock, then hides the loader onto the live game.
+    const enterBtn = document.getElementById('enter');
+    const subEl = document.querySelector('#loading .sub');
+    let gameReady = false;
+    function showEnter() {
+      if (!enterBtn || enterBtn.style.display === 'inline-block') return;
+      const fill = document.querySelector('#loading .fill');
+      if (fill) { fill.style.animation = 'none'; fill.style.width = '100%'; fill.style.marginLeft = '0'; }
+      if (tip) tip.textContent = '✓ 准备就绪';
+      if (subEl) subEl.textContent = 'Tap to enter';
+      enterBtn.style.display = 'inline-block';
+    }
+    function enterGame() {
+      goImmersive();           // fullscreen + landscape lock on the user's tap
+      window.dispatchEvent(new Event('resize')); // make the engine re-fit the canvas
+      hideLoading();
+    }
+    if (enterBtn) enterBtn.addEventListener('click', enterGame);
+    window.__carrotReady = () => { gameReady = true; showEnter(); };
+
+    const bar = document.querySelector('#loading .fill');
+    const tip = document.querySelector('#loading .tip');
+    function setPct(p) {
+      if (!bar) return;
+      bar.style.animation = 'none';
+      bar.style.marginLeft = '0';
+      bar.style.transition = 'width .15s ease';
+      bar.style.width = Math.max(0, Math.min(100, p)).toFixed(0) + '%';
+    }
+    const MB = (b) => (b / 1048576).toFixed(1);
+
+    import init from './protect_carrot.js';
+
+    // Real WASM begins with the magic bytes \0asm — used to verify a download actually
+    // decompressed to a wasm module (not raw br/gz or an empty/304 body).
+    const isWasm = (ab) =>
+      ab && ab.byteLength >= 8 &&
+      (() => { const h = new Uint8Array(ab, 0, 4); return h[0] === 0 && h[1] === 0x61 && h[2] === 0x73 && h[3] === 0x6d; })();
+
+    // Stream a response body with a progress bar. For the .br path the server sets
+    // Content-Encoding: br, so the browser decompresses and `body` yields the wasm;
+    // we size the bar by the known uncompressed total and show the real (compressed)
+    // transfer MB from Content-Length.
+    async function pullEncoded(url, uncompressed) {
+      let resp;
+      try { resp = await fetch(url); } catch (_) { return null; }
+      if (!resp.ok || !resp.body) return null;
+      const wire = +(resp.headers.get('Content-Length') || 0);
+      const reader = resp.body.getReader();
+      const chunks = []; let decoded = 0;
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value); decoded += value.length;
+          const frac = uncompressed ? Math.min(1, decoded / uncompressed) : 0;
+          if (frac) setPct(frac * 100);
+          if (tip) tip.textContent = wire
+            ? `下载主程序 ${MB(frac * wire)} / ${MB(wire)} MB`
+            : `下载主程序 ${MB(decoded)} MB`;
+        }
+      } catch (_) { return null; }
+      const buf = new Uint8Array(decoded); let o = 0;
+      for (const c of chunks) { buf.set(c, o); o += c.length; }
+      return isWasm(buf.buffer) ? buf.buffer : null;
+    }
+
+    // Manual gzip path (robust fallback): fetch raw .gz, decompress in-browser.
+    async function pullGzip(url) {
+      if (typeof DecompressionStream !== 'function') return null;
+      let resp;
+      try { resp = await fetch(url); } catch (_) { return null; }
+      if (!resp.ok || !resp.body) return null;
+      const total = +(resp.headers.get('Content-Length') || 0);
+      let received = 0;
+      const meter = new TransformStream({
+        transform(chunk, ctrl) {
+          received += chunk.length;
+          if (total) setPct((received / total) * 100);
+          if (tip) tip.textContent = total
+            ? `下载主程序 ${MB(received)} / ${MB(total)} MB`
+            : `下载主程序 ${MB(received)} MB`;
+          ctrl.enqueue(chunk);
+        },
+      });
+      try {
+        const stream = resp.body.pipeThrough(meter).pipeThrough(new DecompressionStream('gzip'));
+        const ab = await new Response(stream).arrayBuffer();
+        return isWasm(ab) ? ab : null;
+      } catch (_) { return null; }
+    }
+
+    async function boot() {
+      let uncompressed = 0;
+      try { uncompressed = +(await (await fetch('wasm_size.txt')).text()) || 0; } catch (_) {}
+      // 1) brotli (smallest, ~7MB) via a .br URL the browser decompresses; 2) gzip
+      // (manual); 3) wasm-bindgen's default fetch. Each is validated to be real wasm.
+      let wasmBytes = await pullEncoded('protect_carrot_bg.wasm.br', uncompressed);
+      if (!wasmBytes) wasmBytes = await pullGzip('protect_carrot_bg.wasm.gz');
+      setPct(100);
+      if (tip) tip.textContent = '初始化引擎…';
+      if (wasmBytes) {
+        await init(wasmBytes);
+      } else {
+        await init(); // last resort
+      }
+      if (tip) tip.textContent = '加载资源…';
+    }
+
+    // On success we do NOT hide here — the Rust app fires `window.__carrotReady`
+    // once the menu is on screen, which reveals the "进入战场" button.
+    if (hasWebGPU) {
+      boot().catch(async (e) => {
+        if (`${e}`.includes('Using exceptions for control flow')) {
+          // Bevy's winit throws this to escape its run loop — the app IS running;
+          // the "进入战场" button appears via __carrotReady once the menu renders.
+          return;
+        }
+        console.warn('progress boot failed, trying default init:', e);
+        try {
+          await init(); // default fetch path; on success __carrotReady shows the button
+        } catch (e2) {
+          if (`${e2}`.includes('Using exceptions for control flow')) return;
+          console.error('init failed:', e2);
+          if (tip) tip.textContent = '加载失败，请刷新重试';
+          if (subEl) subEl.textContent = 'Load failed — please reload';
+        }
+      });
+    }
+  </script>
+</body>
+</html>
