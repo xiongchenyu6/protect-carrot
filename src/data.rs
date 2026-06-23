@@ -1828,28 +1828,30 @@ pub fn levels() -> Vec<Level> {
     // Baked per-level economy from the Layer-3 optimizer (`sim … opt`): the minimum
     // starting gold + kill reward at which the greedy player can clear each level,
     // replacing the original near-linear curve that left levels 10+ unwinnable
-    // against geometric HP scaling. Levels 1–9 keep their hand-tuned values; 10–20
-    // are lifted non-uniformly (11 & 15 are composition spikes that need the most).
+    // against geometric HP scaling. Re-baked after the tiered-skill enemy buffs
+    // (split generations, flying short-cut, scaled regen/shield/armor): the curve
+    // follows a descending target win-rate (0.95→0.57) so later levels stay tense
+    // without being gold-starved; 11 & 15 are composition spikes already high.
     const ECON: [(i32, f32); 20] = [
         (180, 8.0),
         (200, 9.0),
         (220, 10.0),
-        (250, 11.0),
+        (250, 12.0),
         (280, 12.0),
         (300, 13.0),
         (320, 15.0),
-        (350, 15.0),
-        (380, 19.0),
-        (473, 24.0),
+        (364, 18.0),
+        (437, 22.0),
+        (546, 27.0),
         (800, 40.0),
-        (728, 36.0),
-        (963, 48.0),
-        (970, 49.0),
+        (923, 46.0),
+        (1076, 54.0),
+        (1100, 55.0),
         (1564, 78.0),
         (1444, 72.0),
         (1650, 83.0),
-        (1698, 85.0),
-        (2061, 103.0),
+        (1925, 96.0),
+        (2338, 117.0),
         (3025, 151.0),
     ];
     for (i, lvl) in levels.iter_mut().enumerate() {
