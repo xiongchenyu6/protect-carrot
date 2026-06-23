@@ -13,6 +13,18 @@ bevy = { version = "0.19", features = ["mp3", "webp"] }
 # dev shell (flake.nix). The CLI and crate versions MUST match exactly.
 wasm-bindgen = "=0.2.121"
 
+# Web-only: src/asset_io.rs implements a retrying HTTP asset reader (bevy 0.19's
+# built-in wasm reader panics on a stream reset mid-body). These versions match
+# the ones bevy already locks, so no duplicate crate versions are introduced.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3.98"
+wasm-bindgen-futures = "0.4.71"
+web-sys = { version = "0.3.98", features = [
+  "Window",
+  "WorkerGlobalScope",
+  "Response",
+] }
+
 [features]
 # Build the web target with the WebGPU backend. Bevy makes `webgpu` take
 # precedence over the default `webgl2`, so enabling this is all that's needed:

@@ -20,6 +20,11 @@ use protect_carrot::{
     sprites, states, tower, tutorial, ui, vfx, Levels,
 };
 
+// Web-only: a retrying HTTP asset reader, installed before AssetPlugin so a
+// transient fetch failure retries instead of panicking the game.
+#[cfg(target_arch = "wasm32")]
+mod asset_io;
+
 use build::Selection;
 use data::{hex, levels, BOARD_H, BOARD_W};
 use game::{
@@ -95,6 +100,24 @@ fn main() {
         ((BOARD_W + PANEL_W) as u32, BOARD_H as u32).into();
 
     let mut app = App::new();
+
+    // Web: install our retrying HTTP asset reader as the default asset source.
+    // MUST run before `AssetPlugin` (added via `DefaultPlugins`) builds the
+    // sources. Bevy's stock wasm reader unwraps on a body-read rejection, so a
+    // single HTTP/2 stream reset while bulk-loading sprites panics the game;
+    // ours retries transient failures with backoff instead.
+    #[cfg(target_arch = "wasm32")]
+    {
+        use bevy::asset::io::{AssetSourceBuilder, AssetSourceId, ErasedAssetReader};
+        use bevy::asset::AssetApp;
+        app.register_asset_source(
+            AssetSourceId::Default,
+            AssetSourceBuilder::new(|| {
+                Box::new(asset_io::RobustHttpAssetReader::new("assets")) as Box<dyn ErasedAssetReader>
+            }),
+        );
+    }
+
     app.add_plugins(
         DefaultPlugins
             // Bevy 0.19's text backend (parley→icu_segmenter) has no bundled CJK
