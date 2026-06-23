@@ -17,7 +17,7 @@ use bevy::window::{MonitorSelection, WindowMode};
 
 use protect_carrot::{
     audio, bestiary, build, creatures, data, enemy, equipment, game, hero, i18n, meta, quality,
-    sprites, states, tower, ui, vfx, Levels,
+    sprites, states, tower, tutorial, ui, vfx, Levels,
 };
 
 use build::Selection;
@@ -146,6 +146,7 @@ fn main() {
     .init_resource::<Selection>()
     .init_resource::<Snapshot>()
     .init_resource::<Progress>()
+    .init_resource::<tutorial::Tutorial>()
     .init_resource::<ui::TouchMode>()
     .init_resource::<ui::HudPanels>()
     .init_resource::<ui::JoystickState>()
@@ -273,7 +274,13 @@ fn main() {
     // ---- level lifecycle ----
     .add_systems(
         OnEnter(GameState::Playing),
-        (load_level, spawn_hud, build::auto_spawn_hero).chain(),
+        (
+            load_level,
+            spawn_hud,
+            build::auto_spawn_hero,
+            tutorial::maybe_start_tutorial,
+        )
+            .chain(),
     )
     .add_systems(
         OnExit(GameState::Playing),
@@ -281,6 +288,7 @@ fn main() {
             despawn_with::<ui::HudRoot>,
             despawn_with::<ui::MobileHudRoot>,
             despawn_with::<build::BuildGhost>,
+            despawn_with::<tutorial::TutorialRoot>,
         ),
     )
     // simulation (frozen while paused)
@@ -333,6 +341,16 @@ fn main() {
             build::rotate_towers,
             build::tint_silenced_towers,
             build::update_tower_hp_bars,
+        )
+            .run_if(in_state(GameState::Playing)),
+    )
+    .add_systems(
+        Update,
+        (
+            tutorial::watch_tutorial,
+            tutorial::tutorial_buttons,
+            tutorial::refresh_panel,
+            tutorial::draw_tutorial_hint,
         )
             .run_if(in_state(GameState::Playing)),
     )

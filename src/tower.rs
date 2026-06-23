@@ -936,13 +936,32 @@ pub fn update_towers(
             }
 
             Behavior::Laser => {
-                if let Some(t) = snap.target(&tower) {
+                let is_laser = tower.kind == TowerKind::Laser;
+                // Sticky targeting (Laser only): keep melting the SAME target while
+                // it's alive, targetable and in range, so the exponential focus ramp
+                // can actually build. `snap.target()` re-picks the "best" enemy every
+                // frame, which against a moving stream would reset the charge each
+                // frame — the reason the ramp felt absent. We only re-acquire once the
+                // held target is gone.
+                let eff_range = tower.range * (1.0 + tower.aura_range);
+                let held = if is_laser {
+                    tower.laser_target.and_then(|prev| {
+                        snap.enemies.iter().copied().find(|e| {
+                            e.entity == prev
+                                && snap.can_target(&tower, e)
+                                && c.distance(e.pos) <= eff_range
+                        })
+                    })
+                } else {
+                    None
+                };
+                if let Some(t) = held.or_else(|| snap.target(&tower)) {
                     tower.angle = (t.pos - c).to_angle();
                     // The Laser tower is the anti-boss weapon: dwelling on one target
-                    // ramps its DPS *exponentially* (doubling ~every 1.2s focus) up to a
-                    // hard 1000-dps cap. Switching target resets the charge, so it only
-                    // pays off against something that stays in the beam (i.e. bosses).
-                    let is_laser = tower.kind == TowerKind::Laser;
+                    // ramps its DPS *exponentially* (doubling ~every 1.0s focus) up to a
+                    // hard cap. Switching target resets the charge, so it only pays off
+                    // against something that stays in the beam (bosses, tanky leads).
+                    const LASER_CAP: f32 = 3000.0;
                     let dps = if is_laser {
                         if tower.laser_target == Some(t.entity) {
                             tower.laser_charge += dt;
@@ -950,12 +969,12 @@ pub fn update_towers(
                             tower.laser_target = Some(t.entity);
                             tower.laser_charge = 0.0;
                         }
-                        (tower.damage * 2f32.powf(tower.laser_charge / 1.2)).min(1000.0)
+                        (tower.damage * 2f32.powf(tower.laser_charge)).min(LASER_CAP)
                     } else {
                         tower.damage
                     };
                     let charge_frac = if is_laser {
-                        (dps / 1000.0).clamp(0.0, 1.0)
+                        (tower.laser_charge / 5.0).clamp(0.0, 1.0)
                     } else {
                         0.0
                     };
@@ -2574,6 +2593,40 @@ fn draw_equipment_glyph(
     }
 }
 
+/// Draw glowing flapping "angel wings" (天使之翼) flanking a tower — the signature
+/// flourish for a FULL elemental resonance (all three relic slots share one
+/// element). Makes the top-tier set bonus instantly readable, so it no longer
+/// looks the same as merely wearing three unrelated relics.
+fn draw_angel_wings(gizmos: &mut Gizmos, center: Vec2, t: f32, tint: Color) {
+    let flap = (t * 3.2).sin(); // -1..1 wing beat
+    let shoulder = center + Vec2::new(0.0, TILE_SIZE * 0.12);
+    let span = TILE_SIZE * (0.95 + 0.12 * flap); // outward reach, beats with flap
+    let rise = TILE_SIZE * (0.55 + 0.14 * flap); // upward sweep
+    const FEATHERS: usize = 6;
+    for side in [-1.0f32, 1.0] {
+        for k in 0..FEATHERS {
+            let f = k as f32 / (FEATHERS - 1) as f32; // 0 (inner) .. 1 (outer)
+            let len = span * (0.35 + 0.65 * f);
+            let lift = rise * (0.2 + 0.8 * f);
+            // Feathers bend upward as they fan out (a mid control point fakes a curve).
+            let tip = shoulder + Vec2::new(side * len, lift);
+            let mid =
+                shoulder + Vec2::new(side * len * 0.55, lift * 0.35 - TILE_SIZE * 0.05);
+            let a = 0.45 + 0.35 * f;
+            gizmos.line_2d(shoulder, mid, tint.with_alpha(a * 0.5));
+            gizmos.line_2d(mid, tip, tint.with_alpha(a));
+            gizmos.circle_2d(tip, 1.6 + 0.9 * f, Color::WHITE.with_alpha(0.6 * a));
+        }
+    }
+    // Soft radiant halo behind the shoulders.
+    gizmos.circle_2d(shoulder, TILE_SIZE * 0.5, tint.with_alpha(0.10));
+    gizmos.circle_2d(
+        center + Vec2::new(0.0, TILE_SIZE * 0.62),
+        TILE_SIZE * 0.16,
+        Color::srgb(1.0, 0.95, 0.7).with_alpha(0.35 + 0.2 * (flap * 0.5 + 0.5)),
+    );
+}
+
 pub fn draw_equipment_resonance(time: Res<Time>, mut gizmos: Gizmos, towers: Query<&Tower>) {
     let t = time.elapsed_secs();
     let pulse = (t * 2.8).sin() * 0.5 + 0.5;
@@ -2634,6 +2687,15 @@ pub fn draw_equipment_resonance(time: Res<Time>, mut gizmos: Gizmos, towers: Que
                     base_radius * (0.48 + 0.08 * set_bonus.grade_tier as f32),
                     Color::srgb(1.0, 0.86, 0.42).with_alpha(0.12 + 0.08 * pulse),
                 );
+            }
+            // FULL elemental resonance (3 same-element relics): unfurl angel wings.
+            if set_bonus.resonance_count >= 3 {
+                let wing_tint = set_bonus
+                    .resonance_element
+                    .map(|e| e.color())
+                    .unwrap_or(Color::srgb(1.0, 0.9, 0.6))
+                    .mix(&Color::WHITE, 0.5);
+                draw_angel_wings(&mut gizmos, pos, t, wing_tint);
             }
         }
 

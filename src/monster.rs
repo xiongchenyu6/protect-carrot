@@ -239,6 +239,88 @@ pub fn species_skill(species: &MonsterSpecies) -> (&'static str, &'static str) {
     }
 }
 
+/// One entry in the monster-skill codex (技能图鉴): the skill, what it does, and
+/// how its three tiers (普通/中级/高级) differ. The tier of a given monster's
+/// skills is derived from its grade (see [`SkillTier::from_grade`]).
+pub struct SkillCodexEntry {
+    pub icon: &'static str,
+    pub name: &'static str, // zh
+    pub desc: &'static str, // zh
+    pub tiers: &'static str, // zh — how 普通/中级/高级 differ
+}
+
+/// The full catalogue of monster skills, for the bestiary's skill codex screen.
+pub fn skill_codex() -> &'static [SkillCodexEntry] {
+    &[
+        SkillCodexEntry {
+            icon: "🪓",
+            name: "分裂",
+            desc: "死亡后分裂成更小的同类，每一代体型与属性减半",
+            tiers: "普通：分裂 1 代 · 中级：2 代 · 高级：4 代",
+        },
+        SkillCodexEntry {
+            icon: "❤️",
+            name: "再生",
+            desc: "持续回复自身生命，需要爆发集火压制",
+            tiers: "普通 ×1 · 中级 ×1.5 · 高级 ×2（回复速度）",
+        },
+        SkillCodexEntry {
+            icon: "🛡️",
+            name: "护盾",
+            desc: "先消耗护盾条，溢出伤害才会伤及生命",
+            tiers: "普通 ×1 · 中级 ×1.5 · 高级 ×2（护盾值）",
+        },
+        SkillCodexEntry {
+            icon: "✨",
+            name: "治疗",
+            desc: "治疗光环持续为附近怪物回血，建议优先集火",
+            tiers: "普通 ×1 · 中级 ×1.5 · 高级 ×2（治疗量）",
+        },
+        SkillCodexEntry {
+            icon: "🔇",
+            name: "静默",
+            desc: "范围内防御塔被压制，无法开火",
+            tiers: "普通 ×1 · 中级 ×1.5 · 高级 ×2（静默范围）",
+        },
+        SkillCodexEntry {
+            icon: "⚔️",
+            name: "攻塔",
+            desc: "离开路线撕咬、摧毁防御塔",
+            tiers: "普通 ×1 · 中级 ×1.5 · 高级 ×2（拆塔伤害）",
+        },
+        SkillCodexEntry {
+            icon: "🪨",
+            name: "硬化",
+            desc: "护甲与魔抗强化，物理减伤明显，需破甲或秘法",
+            tiers: "普通 ×1 · 中级 ×1.5 · 高级 ×2（护甲/魔抗）",
+        },
+        SkillCodexEntry {
+            icon: "🪽",
+            name: "飞行",
+            desc: "无视地形，走最短直线扑向萝卜；部分塔无法锁定",
+            tiers: "普通：常速 · 中级/高级：飞行更快，更难拦截",
+        },
+        SkillCodexEntry {
+            icon: "👻",
+            name: "隐形",
+            desc: "潜行接近，未被侦测时无法被锁定",
+            tiers: "三级均需侦测塔或反隐英雄揭示",
+        },
+        SkillCodexEntry {
+            icon: "💨",
+            name: "冲锋",
+            desc: "周期性突进提速，并寻找附近防御塔撕咬",
+            tiers: "突进强度随品级提升",
+        },
+        SkillCodexEntry {
+            icon: "🌀",
+            name: "吞塔",
+            desc: "首领级技能，会直接摧毁或重创防御塔",
+            tiers: "首领专属，威压最强",
+        },
+    ]
+}
+
 impl MonsterSpecies {
     pub fn def(self) -> &'static EnemyDef {
         self.kind.def()
@@ -288,50 +370,106 @@ impl MonsterSpecies {
 
     pub fn traits(self) -> String {
         let def = self.def();
-        let mut tags: Vec<&str> = self.tags.split('/').filter(|s| !s.is_empty()).collect();
+        // Every active skill carries a tier (普通/中级/高级) derived from grade, so
+        // each ability tag is suffixed with its level, e.g. 再生·高级 / Regenerate·Advanced.
+        let tier = SkillTier::from_grade(self.grade());
+        let tier_label = crate::i18n::t(tier.label());
+        let skill = |base: &str| format!("{}·{}", crate::i18n::t(base), tier_label);
+        // Descriptive species-category tags (e.g. 犬群/火焰) are not skills — keep plain.
+        let mut tags: Vec<String> = self
+            .tags
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .map(crate::i18n::t)
+            .collect();
         if def.boss {
-            tags.push("BOSS");
+            tags.push(crate::i18n::t("BOSS"));
         }
         if def.flying {
-            tags.push("飞行");
+            tags.push(skill("飞行"));
         }
         if def.invisible {
-            tags.push("隐形");
+            tags.push(skill("隐形"));
         }
         if def.regen > 0.0 {
-            tags.push("再生");
+            tags.push(skill("再生"));
         }
         if def.shield > 0.0 {
-            tags.push("护盾");
+            tags.push(skill("护盾"));
         }
         if def.splits > 0 {
-            tags.push("分裂");
+            tags.push(skill("分裂"));
         }
         if def.heal_aura > 0.0 {
-            tags.push("治疗");
+            tags.push(skill("治疗"));
         }
         if def.charger {
-            tags.push("冲锋");
+            tags.push(skill("冲锋"));
         }
         if def.tower_raider {
-            tags.push("攻塔");
+            tags.push(skill("攻塔"));
         }
         if def.silence_aura > 0.0 {
-            tags.push("静默");
+            tags.push(skill("静默"));
         }
         if def.moss_destroy {
-            tags.push("吞塔");
+            tags.push(skill("吞塔"));
         }
         tags.sort_unstable();
         tags.dedup();
         if tags.is_empty() {
             crate::i18n::t("普通")
         } else {
-            // Translate each tag (no-op in Chinese mode) before joining.
-            tags.iter()
-                .map(|tag| crate::i18n::t(tag))
-                .collect::<Vec<_>>()
-                .join("/")
+            tags.join("/")
+        }
+    }
+}
+
+/// Tier of a monster's active skill (普通 / 中级 / 高级), derived from its grade.
+/// Higher-grade monsters wield stronger versions of the same ability — e.g. a
+/// 中级 splitter splits 2 generations, a 高级 splitter 4, each generation halving
+/// the splinter's body size and stats.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum SkillTier {
+    Common,       // 普通
+    Intermediate, // 中级
+    Advanced,     // 高级
+}
+
+impl SkillTier {
+    pub fn from_grade(grade: MonsterGrade) -> Self {
+        match grade {
+            MonsterGrade::Common => SkillTier::Common,
+            MonsterGrade::Elite | MonsterGrade::Rare => SkillTier::Intermediate,
+            MonsterGrade::Epic | MonsterGrade::Boss => SkillTier::Advanced,
+        }
+    }
+
+    /// How many generations a splitter of this tier can split.
+    pub fn split_generations(self) -> i32 {
+        match self {
+            SkillTier::Common => 1,
+            SkillTier::Intermediate => 2,
+            SkillTier::Advanced => 4,
+        }
+    }
+
+    /// Magnitude multiplier applied to a monster's numeric ability stats (regen,
+    /// shield, heal aura, silence radius, tower-raid dps …). 普通 leaves stats as
+    /// authored; 中级/高级 make the same skill progressively stronger.
+    pub fn power_mult(self) -> f32 {
+        match self {
+            SkillTier::Common => 1.0,
+            SkillTier::Intermediate => 1.5,
+            SkillTier::Advanced => 2.0,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SkillTier::Common => "普通",
+            SkillTier::Intermediate => "中级",
+            SkillTier::Advanced => "高级",
         }
     }
 }

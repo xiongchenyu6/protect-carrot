@@ -166,11 +166,19 @@ fn spawn_one(
     if elite_affix == EliteAffix::Carapace {
         shield += (hp * 0.22).floor();
     }
-    let splits = def.splits
-        + match elite_affix {
-            EliteAffix::Brood => 2,
-            _ => 0,
-        };
+    // `splits` now means remaining split GENERATIONS (not a one-shot splinter
+    // count): a 普通 splitter splits 1 generation, 中级 2, 高级 4 — tier derived
+    // from the species' grade. Each generation halves the splinter's size & stats.
+    // The Brood elite affix grants one extra generation.
+    let splits = if def.splits > 0 {
+        crate::monster::SkillTier::from_grade(species.grade()).split_generations()
+            + match elite_affix {
+                EliteAffix::Brood => 1,
+                _ => 0,
+            }
+    } else {
+        0
+    };
     let regen = def.regen
         + match elite_affix {
             EliteAffix::Bloodrite => 0.012,
@@ -191,6 +199,24 @@ fn spawn_one(
         def.silence_aura.max(82.0)
     } else {
         def.silence_aura
+    };
+    // 技能分级：每个怪物的技能都有 普通/中级/高级 三个级别（由品级推导）。高级版
+    // 数值更强 —— 再生更快、护盾更厚、硬化（护甲/抗性）更高、治疗/静默范围更大、
+    // 攻塔更狠、飞行更快。（分裂走的是“代数”而非倍率，已在上面按级别设置。）
+    let skill_mult = crate::monster::SkillTier::from_grade(species.grade()).power_mult();
+    let regen = regen * skill_mult;
+    let heal_aura = heal_aura * skill_mult;
+    let tower_dps = tower_dps * skill_mult;
+    let silence_aura = silence_aura * skill_mult;
+    let shield = (shield * skill_mult).floor();
+    // 硬化：护甲与魔抗按级别提升（普通不变，中级 ×1.5，高级 ×2）。
+    let armor = armor * skill_mult;
+    let magic_resist = magic_resist * skill_mult;
+    // 飞行：高级飞行单位飞得更快（直线最短路线 + 加速，更难拦截）。
+    let base_speed = if def.flying {
+        base_speed * (1.0 + (skill_mult - 1.0) * 0.6)
+    } else {
+        base_speed
     };
     let start = board.spawn_pos();
     let px = def.size * 4.5 * if is_elite { 1.45 } else { 1.0 };
@@ -1436,8 +1462,14 @@ pub fn update_enemies(
             }
         }
         if !e.frozen && !e.blocked && e.path_index < last {
-            let target = path[e.path_index + 1];
             let pos = tf.translation.truncate();
+            // Flying units ignore the winding ground path and beeline straight to
+            // the carrot (the final path point) — the shortest possible route.
+            let target = if e.flying {
+                path[last]
+            } else {
+                path[e.path_index + 1]
+            };
             let raid_target = if e.tower_raider || e.moss_destroy {
                 let sense = if e.moss_destroy {
                     MOSS_TOWER_SENSE
@@ -1462,7 +1494,13 @@ pub fn update_enemies(
             let delta = goal - pos;
             let dist = delta.length();
             if !off_path && dist < 5.0 {
-                e.path_index += 1;
+                // Ground units advance one waypoint; a flyer that reaches the carrot
+                // point (its straight-line goal) is done.
+                if e.flying {
+                    e.path_index = last;
+                } else {
+                    e.path_index += 1;
+                }
             } else {
                 let mult = if off_path { 0.9 } else { 1.0 };
                 let step_len = (speed * mult * dt).min(dist);
@@ -1652,12 +1690,14 @@ pub fn update_enemies(
                     ),
                 });
             }
-            // Splitters spawn small fast spawn-lings at the death spot.
+            // Tiered split: on death, a splitter with generations remaining splits
+            // into two smaller copies of itself, each halved in size & stats and
+            // able to split one fewer generation. 普通 splits once, 中级 twice,
+            // 高级 four times — a cascading shower of ever-tinier splinters.
             if e.splits > 0 {
-                let child_hp = (e.max_hp * 0.22).max(8.0);
                 let pos = tf.translation.truncate();
-                for _ in 0..e.splits {
-                    spawn_child(&mut commands, &creatures, pos, e.path_index, child_hp);
+                for _ in 0..2 {
+                    spawn_splinter(&mut commands, &creatures, &*e, pos);
                 }
             }
             commands.entity(entity).despawn();
@@ -1665,8 +1705,74 @@ pub fn update_enemies(
     }
 }
 
-/// Spawn a small splinter enemy (from a splitter's death). Uses the swarmer art,
-/// inherits the parent's path progress, and never splits further.
+/// Spawn one splinter from a dying splitter: a half-scale clone of the parent
+/// that inherits its art, species and path progress, with size and stats halved
+/// and one fewer split generation left. If it dies with generations remaining it
+/// splits again — producing the cascading 普通/中级/高级 tier effect.
+fn spawn_splinter(commands: &mut Commands, creatures: &Creatures, parent: &Enemy, pos: Vec2) {
+    let size = (parent.size * 0.5).max(6.0);
+    let hp = (parent.max_hp * 0.5).max(6.0);
+    let (sprite, anim) = creatures.sprite(parent.kind, size * 4.5);
+    commands.spawn((
+        Enemy {
+            kind: parent.kind,
+            species_id: parent.species_id,
+            hp,
+            max_hp: hp,
+            base_speed: parent.base_speed,
+            reward: (parent.reward / 2).max(1),
+            path_index: parent.path_index,
+            armor: parent.armor * 0.5,
+            magic_resist: parent.magic_resist * 0.5,
+            element_resist: parent.element_resist,
+            flying: parent.flying,
+            invisible: false,
+            regen: 0.0,
+            boss: false,
+            size,
+            slow_timer: 0.0,
+            stun_timer: 0.0,
+            frozen: false,
+            poison_timer: 0.0,
+            poison_damage: 0.0,
+            fire_timer: 0.0,
+            fire_damage: 0.0,
+            fire_element: Element::Fire,
+            poison_source_tower: None,
+            fire_source_tower: None,
+            curse_timer: 0.0,
+            armor_reduce: 0.0,
+            shield: 0.0,
+            max_shield: 0.0,
+            splits: parent.splits - 1,
+            heal_aura: 0.0,
+            charger: false,
+            charge_timer: 0.0,
+            hit_flash: 0.0,
+            last_hit_tower: None,
+            blocked: false,
+            melee: parent.melee * 0.5,
+            elite: false,
+            elite_affix: EliteAffix::None,
+            boss_skill_timer: 0.0,
+            enraged: false,
+            phase_timer: 0.0,
+            tower_raider: false,
+            tower_dps: 0.0,
+            silence_aura: 0.0,
+            moss_destroy: false,
+            moss_destroyed: false,
+            facing: Vec2::ZERO,
+        },
+        sprite,
+        anim,
+        Transform::from_translation(pos.extend(5.0)),
+        LevelEntity,
+    ));
+}
+
+/// Spawn a small swarmling add (boss summon skills like BroodHeal). Uses the
+/// swarmer art at a fixed hp, inherits path progress, and never splits.
 fn spawn_child(
     commands: &mut Commands,
     creatures: &Creatures,

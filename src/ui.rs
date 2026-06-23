@@ -6917,6 +6917,78 @@ pub fn spawn_bestiary(
                     });
                 }
             });
+
+            // ---- 怪物技能图鉴 (skill codex) ----
+            p.spawn((
+                Text::new(crate::i18n::t("怪物技能图鉴")),
+                text_font(f, 22.0),
+                TextColor(Color::srgb(0.95, 0.78, 0.42)),
+                Node {
+                    margin: UiRect::top(Val::Px(14.0)),
+                    ..default()
+                },
+            ));
+            p.spawn((
+                Text::new(crate::i18n::t("每种技能都有 普通 / 中级 / 高级 三个级别，由怪物品级决定")),
+                text_font(f, 13.0),
+                TextColor(Color::srgb(0.7, 0.7, 0.8)),
+            ));
+            p.spawn(Node {
+                width: Val::Px(720.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(6.0),
+                margin: UiRect::top(Val::Px(6.0)),
+                ..default()
+            })
+            .with_children(|list| {
+                for sk in crate::monster::skill_codex() {
+                    list.spawn((
+                        Node {
+                            width: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Row,
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(10.0),
+                            padding: UiRect::axes(Val::Px(10.0), Val::Px(6.0)),
+                            ..default()
+                        },
+                        BackgroundColor(UI_CARD),
+                    ))
+                    .with_children(|card| {
+                        card.spawn((
+                            Text::new(sk.icon),
+                            text_font(f, 24.0),
+                            TextColor(Color::WHITE),
+                            Node {
+                                width: Val::Px(34.0),
+                                ..default()
+                            },
+                        ));
+                        card.spawn(Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(1.0),
+                            ..default()
+                        })
+                        .with_children(|txt| {
+                            txt.spawn((
+                                Text::new(crate::i18n::t(sk.name)),
+                                text_font(f, 15.0),
+                                TextColor(Color::srgb(1.0, 0.86, 0.4)),
+                            ));
+                            txt.spawn((
+                                Text::new(crate::i18n::t(sk.desc)),
+                                text_font(f, 12.0),
+                                TextColor(Color::srgb(0.82, 0.85, 0.8)),
+                            ));
+                            txt.spawn((
+                                Text::new(crate::i18n::t(sk.tiers)),
+                                text_font(f, 12.0),
+                                TextColor(Color::srgb(0.55, 0.82, 0.95)),
+                            ));
+                        });
+                    });
+                }
+            });
+
             p.spawn(Node {
                 margin: UiRect::top(Val::Px(10.0)),
                 ..default()

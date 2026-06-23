@@ -16,6 +16,15 @@
         "aarch64-darwin"
         "x86_64-darwin"
       ];
+
+      # NixOS modules for easy deployment.
+      flake.nixosModules.default = ./nixos/nginx-module.nix;
+
+      # Overlay so the NixOS module can reference pkgs.protect-carrot-web.
+      flake.overlays.default = final: prev: {
+        protect-carrot-web = final.callPackage ./packages/web.nix {};
+      };
+
       perSystem =
         {
           config,
@@ -27,6 +36,12 @@
           ...
         }:
         {
+          # Web package: builds the game to wasm and produces static files.
+          packages.web = pkgs.callPackage ./packages/web.nix {};
+
+          # Default package points to the web build.
+          packages.default = config.packages.web;
+
           devShells.default =
             with pkgs;
             mkShell.override { stdenv = pkgs.clangStdenv; } {

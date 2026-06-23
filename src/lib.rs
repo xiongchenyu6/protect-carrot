@@ -22,6 +22,7 @@ pub mod quality;
 pub mod sprites;
 pub mod states;
 pub mod tower;
+pub mod tutorial;
 pub mod ui;
 pub mod vfx;
 
