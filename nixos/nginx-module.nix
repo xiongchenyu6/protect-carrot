@@ -30,6 +30,17 @@
 }: let
   cfg = config.services.protect-carrot;
   package = cfg.package;
+
+  # nginx's `add_header` REPLACES all parent-level headers in a location that
+  # declares its own `add_header` — so every location below that sets a header
+  # must re-state these security headers, or they silently vanish there. (The
+  # gixy linter, which srvos runs at build time, also fails the build on this.)
+  securityHeaders = ''
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Cross-Origin-Embedder-Policy "require-corp" always;
+    add_header Cross-Origin-Opener-Policy "same-origin" always;
+  '';
 in {
   options.services.protect-carrot = {
     enable = lib.mkEnableOption "保卫萝卜 (Protect the Carrot) web game";
@@ -144,14 +155,15 @@ in {
         gzip_vary on;
 
         # --- Security headers ---
-        add_header X-Content-Type-Options "nosniff" always;
-        add_header X-Frame-Options "SAMEORIGIN" always;
-        add_header Cross-Origin-Embedder-Policy "require-corp" always;
-        add_header Cross-Origin-Opener-Policy "same-origin" always;
+        # Applied at server level for locations that add no headers of their
+        # own; locations below that DO add headers must repeat these (nginx
+        # add_header is replace-all, not additive).
+        ${securityHeaders}
 
         # --- Caching ---
         # Cache immutable assets aggressively (filenames include content hash via wasm-bindgen).
         location ~* \.(wasm|js)$ {
+          ${securityHeaders}
           add_header Cache-Control "public, max-age=31536000, immutable";
           # CORS headers for SharedArrayBuffer if needed.
           add_header Access-Control-Allow-Origin "*";
@@ -159,6 +171,7 @@ in {
 
         # Cache compressed variants.
         location ~* \.(wasm|js)\.(br|gz)$ {
+          ${securityHeaders}
           add_header Cache-Control "public, max-age=31536000, immutable";
           add_header Content-Type "application/wasm";
           add_header Access-Control-Allow-Origin "*";
@@ -166,16 +179,19 @@ in {
 
         # Assets can also be cached long-term.
         location /assets/ {
+          ${securityHeaders}
           add_header Cache-Control "public, max-age=86400";
         }
 
         # index.html should NOT be cached (users need the latest loader).
         location = /index.html {
+          ${securityHeaders}
           add_header Cache-Control "no-cache, must-revalidate";
         }
 
         # wasm_size.txt is fetched by the loader — short cache.
         location = /wasm_size.txt {
+          ${securityHeaders}
           add_header Cache-Control "no-cache";
         }
 
