@@ -88,10 +88,18 @@ in {
       root = "${package}/share/protect-carrot";
 
       # Listen ports: always HTTP; add HTTPS when ACME is enabled.
+      # `addr` is required by newer nixpkgs (the listen submodule has no
+      # default for it), so set it explicitly on every entry.
       listen = lib.mkMerge [
         # HTTP
         [
           {
+            addr = "0.0.0.0";
+            port = cfg.listenPort;
+            ssl = false;
+          }
+          {
+            addr = "[::]";
             port = cfg.listenPort;
             ssl = false;
           }
@@ -99,6 +107,12 @@ in {
         # HTTPS (only when ACME enabled)
         (lib.mkIf cfg.enableACME [
           {
+            addr = "0.0.0.0";
+            port = 443;
+            ssl = true;
+          }
+          {
+            addr = "[::]";
             port = 443;
             ssl = true;
           }
