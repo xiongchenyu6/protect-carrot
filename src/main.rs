@@ -335,7 +335,8 @@ fn main() {
             enemy::spawn_enemies,
             enemy::update_enemies,
             tower::necromancer_raise,
-            enemy::heal_auras,
+            // 嵌套成二元组以绕开单个 add_systems 最多 20 个系统的上限。
+            (enemy::heal_auras, enemy::incubation),
             tick_auto_wave,
             tick_message,
         )

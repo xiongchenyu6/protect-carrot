@@ -318,6 +318,12 @@ pub fn skill_codex() -> &'static [SkillCodexEntry] {
             desc: "首领级技能，会直接摧毁或重创防御塔",
             tiers: "首领专属（高级），威压最强",
         },
+        SkillCodexEntry {
+            icon: "🥚",
+            name: "孵化",
+            desc: "存活越久越危险：拖着不杀会持续变强，史诗虫群更会孵化成首领",
+            tiers: "普通：每6秒强化 · 中级：强化更猛 · 高级：直接孵化为本关 boss",
+        },
     ]
 }
 
@@ -414,6 +420,9 @@ impl MonsterSpecies {
         }
         if def.moss_destroy {
             tags.push(skill("吞塔"));
+        }
+        if def.incubate {
+            tags.push(skill("孵化"));
         }
         tags.sort_unstable();
         tags.dedup();
@@ -1741,7 +1750,7 @@ pub static MONSTER_SPECIES: &[MonsterSpecies] = &[
         Swarmer,
         17,
         15,
-        1.02,
+        1.10,
         1.38,
         1.90,
         2.0,

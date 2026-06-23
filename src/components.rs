@@ -86,6 +86,11 @@ pub struct Enemy {
     /// MOSS boss one-shot tower destruction skill.
     pub moss_destroy: bool,
     pub moss_destroyed: bool,
+    /// 孵化：存活满固定时间会变强。普通/中级周期性强化（incubate_stacks 计数），
+    /// 高级则直接孵化为本关 boss。incubate_timer 累计存活时间。
+    pub incubate: bool,
+    pub incubate_timer: f32,
+    pub incubate_stacks: i32,
     /// Normalized movement direction, updated as the enemy walks. Used to detect
     /// the assassin's 背击 (backstab): a hit landed from behind this facing.
     pub facing: Vec2,

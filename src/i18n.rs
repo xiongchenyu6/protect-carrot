@@ -635,6 +635,7 @@ fn dict() -> &'static HashMap<&'static str, &'static str> {
             ("隐形", "Invisible"),
             ("冲锋", "Charge"),
             ("攻塔", "Tower Raid"),
+            ("孵化", "Incubate"),
             ("静默", "Silence"),
             ("治疗", "Heal"),
             ("{}抗{}%", "{} Resist {}%"),
@@ -1289,6 +1290,8 @@ fn dict() -> &'static HashMap<&'static str, &'static str> {
             ("首领级技能，会直接摧毁或重创防御塔", "Boss-tier skill: outright destroys or cripples towers"),
             ("首领专属，威压最强", "Boss-exclusive; the most oppressive"),
             ("首领专属（高级），威压最强", "Boss-exclusive (Advanced); the most oppressive"),
+            ("存活越久越危险：拖着不杀会持续变强，史诗虫群更会孵化成首领", "The longer it lives the deadlier: it keeps growing if not killed; epic swarms even hatch into a boss"),
+            ("普通：每6秒强化 · 中级：强化更猛 · 高级：直接孵化为本关 boss", "Basic: buffs every 6s · Intermediate: buffs harder · Advanced: hatches straight into the level boss"),
         ];
         pairs.iter().copied().collect()
     })

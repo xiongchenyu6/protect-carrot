@@ -78,6 +78,9 @@ fn spawn_one(
     diff: crate::game::Difficulty,
     elite_affix: EliteAffix,
     endless: bool,
+    // 孵化升级用：在指定位置/路径进度处生成（高级孵化原地变身为 boss）。
+    // None 表示常规从出生点入场。
+    start_at: Option<(Vec2, usize)>,
 ) {
     let kind = species.kind;
     let def = kind.def();
@@ -222,7 +225,7 @@ fn spawn_one(
     // 普通 1.0、中级 ~0.67、高级 0.5。冲锋的爆发速度、攻塔的索敌范围则在
     // update_enemies 里按 skill_mult 放大（见下）。
     let stealth = if def.invisible { 1.0 / skill_mult } else { 1.0 };
-    let start = board.spawn_pos();
+    let (start, start_path_index) = start_at.unwrap_or((board.spawn_pos(), 0));
     let px = def.size * 4.5 * if is_elite { 1.45 } else { 1.0 };
     let bar_w = (px * 0.5).max(18.0);
     let bar_y = px * 0.5 + 2.0;
@@ -260,7 +263,7 @@ fn spawn_one(
                 max_hp: hp,
                 base_speed,
                 reward,
-                path_index: 0,
+                path_index: start_path_index,
                 armor,
                 magic_resist,
                 element_resist: species.resist_profile(),
@@ -312,6 +315,9 @@ fn spawn_one(
                 silence_aura,
                 moss_destroy: def.moss_destroy,
                 moss_destroyed: false,
+                incubate: def.incubate,
+                incubate_timer: 0.0,
+                incubate_stacks: 0,
                 facing: Vec2::ZERO,
             },
             sprite,
@@ -569,6 +575,7 @@ pub fn spawn_enemies(
             diff.0,
             elite_affix,
             run.is_endless(),
+            None,
         );
         // Dramatic boss entrance: heavy shockwave + shake + banner at the gate.
         if species.is_boss() {
@@ -1773,6 +1780,9 @@ fn spawn_splinter(commands: &mut Commands, creatures: &Creatures, parent: &Enemy
             silence_aura: 0.0,
             moss_destroy: false,
             moss_destroyed: false,
+            incubate: false,
+            incubate_timer: 0.0,
+            incubate_stacks: 0,
             facing: Vec2::ZERO,
         },
         sprite,
@@ -1845,6 +1855,9 @@ fn spawn_child(
             silence_aura: 0.0,
             moss_destroy: false,
             moss_destroyed: false,
+            incubate: false,
+            incubate_timer: 0.0,
+            incubate_stacks: 0,
             facing: Vec2::ZERO,
         },
         sprite,
@@ -1852,6 +1865,97 @@ fn spawn_child(
         Transform::from_translation(pos.extend(5.0)),
         LevelEntity,
     ));
+}
+
+/// 孵化系统：带 `incubate` 的怪物（虫群）存活满固定时间会变强。技能分三级：
+/// - 普通/中级（skill_mult < 2.0）：每隔 `INCUBATE_PERIOD` 秒叠加一层强化
+///   （血量/体型/攻击随之提升），中级长得更猛，最多 `MAX_INCUBATE_STACKS` 层。
+/// - 高级（skill_mult ≥ 2.0）：满一个周期后直接原地孵化为本关 boss——
+///   despawn 自身并在原位、按当前路径进度生成一只 boss，附 boss 入场特效。
+///
+/// 设计意图：玩家必须及时清掉虫群卵，拖久了普通虫群越滚越大，史诗虫群更会
+/// 孵出关底首领，制造“别让它孵化”的压力。
+pub fn incubation(
+    mut commands: Commands,
+    time: Res<Time>,
+    run: Res<RunState>,
+    board: Res<Board>,
+    levels: Res<Levels>,
+    current: Res<CurrentLevel>,
+    mut rng: ResMut<Rng>,
+    sprites: Res<Sprites>,
+    font: Res<UiFont>,
+    diff: Res<crate::game::GameDifficulty>,
+    mut enemies: Query<(Entity, &mut Enemy, &mut Transform, &mut Sprite)>,
+    mut vfx: MessageWriter<crate::vfx::VfxEvent>,
+) {
+    let dt = time.delta_secs() * run.game_speed;
+    if dt <= 0.0 {
+        return;
+    }
+    const INCUBATE_PERIOD: f32 = 6.0;
+    const MAX_INCUBATE_STACKS: i32 = 4;
+    let level = &levels.0[current.0];
+    for (entity, mut e, tf, mut sprite) in &mut enemies {
+        // 已经是 boss（含刚孵化出来的）不再孵化。
+        if !e.incubate || e.boss {
+            continue;
+        }
+        e.incubate_timer += dt;
+        if e.incubate_timer < INCUBATE_PERIOD {
+            continue;
+        }
+        e.incubate_timer -= INCUBATE_PERIOD;
+
+        if e.skill_mult >= 1.9 {
+            // 高级：原地孵化为本关 boss。
+            let pos = tf.translation.truncate();
+            let path_index = e.path_index;
+            commands.entity(entity).despawn();
+            let boss = pick_boss(run.wave, run.boss_pick_total_waves(), current.0, &mut rng);
+            spawn_one(
+                &mut commands,
+                boss,
+                &board,
+                level.enemies.hp,
+                level.enemies.speed,
+                level.enemies.reward,
+                run.wave,
+                current.0,
+                &sprites,
+                &font,
+                diff.0,
+                EliteAffix::None,
+                run.is_endless(),
+                Some((pos, path_index)),
+            );
+            vfx.write(crate::vfx::VfxEvent::BossEntrance {
+                pos,
+                color: boss_skill_color(boss_skill(boss.id)),
+                name: boss.name.to_string(),
+            });
+        } else if e.incubate_stacks < MAX_INCUBATE_STACKS {
+            // 普通/中级：叠加一层强化（中级 ×1.55，普通 ×1.32）。
+            e.incubate_stacks += 1;
+            let g = if e.skill_mult >= 1.4 { 1.55 } else { 1.32 };
+            e.max_hp *= g;
+            e.hp = (e.hp * g).min(e.max_hp);
+            e.melee *= g;
+            e.base_speed *= 1.0 + (g - 1.0) * 0.2;
+            e.size *= 1.0 + (g - 1.0) * 0.45;
+            if e.tower_dps > 0.0 {
+                e.tower_dps *= g;
+            }
+            if let Some(sz) = sprite.custom_size {
+                sprite.custom_size = Some(sz * (1.0 + (g - 1.0) * 0.45));
+            }
+            vfx.write(crate::vfx::VfxEvent::ElementPulse {
+                pos: tf.translation.truncate(),
+                color: Color::srgb(0.55, 1.0, 0.45),
+                strong: e.incubate_stacks >= 2,
+            });
+        }
+    }
 }
 
 /// Healer enemies restore HP to nearby allies each frame.

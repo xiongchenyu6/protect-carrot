@@ -739,6 +739,9 @@ pub struct EnemyDef {
     pub silence_aura: f32,
     /// One-shot boss skill: obliterates the first tower it reaches.
     pub moss_destroy: bool,
+    /// 孵化：存活超过固定时间会变强（普通/中级周期性强化，高级直接孵化为本关
+    /// boss）。详见 enemy.rs 的 incubation 系统。
+    pub incubate: bool,
 }
 
 const fn enemy_base() -> EnemyDef {
@@ -765,6 +768,7 @@ const fn enemy_base() -> EnemyDef {
         tower_dps: 0.0,
         silence_aura: 0.0,
         moss_destroy: false,
+        incubate: false,
     }
 }
 
@@ -907,6 +911,8 @@ pub static ENEMY_DEFS: &[EnemyDef] = &[
         speed_mod: 1.2,
         reward_mod: 0.6,
         resist: ElementProfile::new(-0.15, 0.0, 0.0, 0.0, 0.0, 0.0, -0.10),
+        // 孵化：虫群是“卵/幼体”，放着不杀会越长越壮，高级虫群更会孵化成首领。
+        incubate: true,
         ..enemy_base()
     },
     EnemyDef {
