@@ -169,12 +169,35 @@ in {
           add_header Access-Control-Allow-Origin "*";
         }
 
-        # Cache compressed variants.
-        location ~* \.(wasm|js)\.(br|gz)$ {
+        # Pre-compressed wasm/js variants. The loader (web/index.html) fetches
+        # these by their exact .br/.gz URL.
+        #
+        # The .br variant is decoded by the *browser*, so it MUST be tagged
+        # Content-Encoding: br — otherwise the browser hands the loader raw
+        # brotli bytes, the \0asm magic-byte check fails, and the loader falls
+        # back to re-downloading the (larger) .gz, i.e. the wasm is fetched
+        # twice. default_type (not add_header) sets the decoded type so there
+        # is a single, correct Content-Type. Re-compression is disabled since
+        # the body is already compressed.
+        location ~* \.(wasm|js)\.br$ {
           ${securityHeaders}
           add_header Cache-Control "public, max-age=31536000, immutable";
-          add_header Content-Type "application/wasm";
           add_header Access-Control-Allow-Origin "*";
+          add_header Content-Encoding "br";
+          default_type application/wasm;
+          gzip off;
+          brotli off;
+        }
+
+        # The .gz variant is decoded manually in JS (DecompressionStream), so it
+        # must stay raw — NO Content-Encoding, or the browser would decode it
+        # first and the manual gunzip would then fail on already-plain bytes.
+        location ~* \.(wasm|js)\.gz$ {
+          ${securityHeaders}
+          add_header Cache-Control "public, max-age=31536000, immutable";
+          add_header Access-Control-Allow-Origin "*";
+          gzip off;
+          brotli off;
         }
 
         # Assets can also be cached long-term.
