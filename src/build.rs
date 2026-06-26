@@ -5,16 +5,16 @@
 
 use crate::board::Board;
 use crate::components::{LevelEntity, Particle, TowerHpBar};
-use crate::data::{cell_center, TowerKind, BOARD_H, BOARD_W, COLS, ROWS, TILE_SIZE};
+use crate::data::Behavior;
+use crate::data::{BOARD_H, BOARD_W, COLS, ROWS, TILE_SIZE, TowerKind, cell_center};
 use crate::equipment::{
-    return_equipment_to_inventory, unequip_all_to_inventory, EquipmentInventory,
+    EquipmentInventory, return_equipment_to_inventory, unequip_all_to_inventory,
 };
 use crate::game::RunState;
-use crate::hero::{hero_move_speed, Class, HeroLoadout};
+use crate::hero::{Class, HeroLoadout, Race, hero_move_speed};
 use crate::meta::Talents;
 use crate::sprites::Sprites;
-use crate::data::Behavior;
-use crate::tower::{GodTower, Tower};
+use crate::tower::{GodTower, HERO_MELEE_ATTACK_TIME, Tower};
 use crate::ui::UiAction;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
@@ -534,20 +534,33 @@ pub fn summon_god_tower(
 /// A class's walk-cycle sprite sheet: a horizontal strip of 128px square frames,
 /// frame 0 = idle portrait, frames 1.. = walk poses (Flux-Kontext generated, see
 /// `tools/comfy_kontext.py`). Plugged into Bevy's `TextureAtlas` like the creatures.
+const HERO_WORLD_SIZE: f32 = TILE_SIZE * 1.18;
+const HERO_GHOST_SIZE: f32 = TILE_SIZE * 1.04;
+
 pub struct HeroWalkCfg {
     pub image: Handle<Image>,
     pub layout: Handle<TextureAtlasLayout>,
     pub frames: usize,
+    pub size: f32,
 }
 
 #[derive(Resource, Default)]
-pub struct HeroWalks(pub std::collections::HashMap<Class, HeroWalkCfg>);
+pub struct HeroWalks {
+    pub class_walks: std::collections::HashMap<Class, HeroWalkCfg>,
+    pub race_worlds: std::collections::HashMap<(Class, Race), HeroWalkCfg>,
+}
 
 /// Per-hero walk animation cursor.
 #[derive(Component)]
 pub struct HeroWalkAnim {
     pub timer: Timer,
     pub frames: usize,
+}
+
+#[derive(Component)]
+pub struct HeroRaceBadge {
+    pub owner: Entity,
+    pub offset: Vec2,
 }
 
 /// Classes that have a walk strip in `assets/heroes_walk/<name>.webp` (frame count
@@ -566,13 +579,21 @@ fn hero_walk_mapping() -> &'static [(Class, &'static str, usize)] {
     ]
 }
 
+fn hero_race_file(race: Race) -> &'static str {
+    match race {
+        Race::Human => "human",
+        Race::Elf => "elf",
+        Race::Orc => "orc",
+    }
+}
+
 /// Startup: load the per-class walk sheets into a `HeroWalks` resource.
 pub fn load_hero_walks(
     mut commands: Commands,
     assets: Res<AssetServer>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
 ) {
-    let mut m = std::collections::HashMap::new();
+    let mut class_walks = std::collections::HashMap::new();
     for (class, file, frames) in hero_walk_mapping() {
         let image = assets.load(format!("heroes_walk/{}.webp", file));
         let layout = layouts.add(TextureAtlasLayout::from_grid(
@@ -582,20 +603,60 @@ pub fn load_hero_walks(
             None,
             None,
         ));
-        m.insert(
+        class_walks.insert(
             *class,
             HeroWalkCfg {
                 image,
                 layout,
                 frames: *frames,
+                size: HERO_WORLD_SIZE,
             },
         );
     }
-    commands.insert_resource(HeroWalks(m));
+
+    let mut race_worlds = std::collections::HashMap::new();
+    for class in Class::ALL {
+        for race in Race::ALL {
+            let image = assets.load(format!(
+                "heroes_world/{}_{}.webp",
+                class.sprite_name(),
+                hero_race_file(race)
+            ));
+            let layout = layouts.add(TextureAtlasLayout::from_grid(
+                UVec2::splat(192),
+                4,
+                4,
+                None,
+                None,
+            ));
+            race_worlds.insert(
+                (class, race),
+                HeroWalkCfg {
+                    image,
+                    layout,
+                    frames: 16,
+                    size: TILE_SIZE * 1.12,
+                },
+            );
+        }
+    }
+
+    commands.insert_resource(HeroWalks {
+        class_walks,
+        race_worlds,
+    });
 }
 
-/// Advance the hero's walk cycle while it moves (legs/arms move); hold the idle
-/// frame 0 when standing still.
+fn hero_world_cfg(walks: &HeroWalks, class: Class, race: Race) -> Option<&HeroWalkCfg> {
+    walks
+        .race_worlds
+        .get(&(class, race))
+        .or_else(|| walks.class_walks.get(&class))
+}
+
+/// Advance the hero's walk/attack cycle. Frame 0 is idle; movement cycles the walk
+/// frames, while melee attacks briefly hold generated sword-out frames from the
+/// same sheet so the hero body appears to swing.
 pub fn animate_hero_walk(
     time: Res<Time>,
     mut q: Query<(&Tower, &mut HeroWalkAnim, &mut Sprite)>,
@@ -611,7 +672,16 @@ pub fn animate_hero_walk(
         let Some(atlas) = &mut sprite.texture_atlas else {
             continue;
         };
-        if moving && a.frames > 1 {
+        if t.hero_attack_timer > 0.0 && a.frames > 2 {
+            let progress = 1.0 - (t.hero_attack_timer / HERO_MELEE_ATTACK_TIME).clamp(0.0, 1.0);
+            atlas.index = if progress < 0.42 {
+                2.min(a.frames - 1)
+            } else if progress < 0.82 {
+                (a.frames - 1).max(1)
+            } else {
+                1.min(a.frames - 1)
+            };
+        } else if moving && a.frames > 1 {
             a.timer.tick(time.delta());
             if a.timer.just_finished() {
                 // Cycle frames 1..=frames-1 (frame 0 is the idle pose).
@@ -629,12 +699,17 @@ pub fn spawn_hero(
     sprites: &Sprites,
     walks: &HeroWalks,
     class: Class,
+    race: Race,
 ) {
     let pos = tower.hero_pos;
     let tint = tower.color;
-    let mut ec = commands.spawn((tower, Transform::from_translation(pos.extend(5.0)), LevelEntity));
-    if let Some(cfg) = walks.0.get(&class) {
-        // Animated walk sheet (idle frame held when not moving).
+    let mut ec = commands.spawn((
+        tower,
+        Transform::from_translation(pos.extend(5.0)),
+        LevelEntity,
+    ));
+    if let Some(cfg) = hero_world_cfg(walks, class, race) {
+        // Race-specific world atlas first; old class walk strips are only fallback.
         let mut sprite = Sprite::from_atlas_image(
             cfg.image.clone(),
             TextureAtlas {
@@ -643,7 +718,7 @@ pub fn spawn_hero(
             },
         );
         sprite.color = tint;
-        sprite.custom_size = Some(Vec2::splat(TILE_SIZE * 1.45));
+        sprite.custom_size = Some(Vec2::splat(cfg.size));
         ec.insert((
             sprite,
             HeroWalkAnim {
@@ -656,11 +731,28 @@ pub fn spawn_hero(
         ec.insert(Sprite {
             image: sprites.heroes[&class].clone(),
             color: tint,
-            custom_size: Some(Vec2::splat(TILE_SIZE * 1.1)),
+            custom_size: Some(Vec2::splat(HERO_WORLD_SIZE)),
             ..default()
         });
     }
     let hero_entity = ec.id();
+
+    commands.spawn((
+        Sprite {
+            image: sprites.races[&race].clone(),
+            color: Color::WHITE,
+            custom_size: Some(Vec2::splat(TILE_SIZE * 0.34)),
+            ..default()
+        },
+        Transform::from_translation(
+            (pos + Vec2::new(TILE_SIZE * 0.36, -TILE_SIZE * 0.34)).extend(7.1),
+        ),
+        HeroRaceBadge {
+            owner: hero_entity,
+            offset: Vec2::new(TILE_SIZE * 0.36, -TILE_SIZE * 0.34),
+        },
+        LevelEntity,
+    ));
 
     let bar_w = TILE_SIZE * 0.9;
     let bar_h = 5.0;
@@ -747,6 +839,7 @@ pub fn hero_afterimage(
     run: Res<RunState>,
     loadout: Res<HeroLoadout>,
     sprites: Res<Sprites>,
+    walks: Res<HeroWalks>,
     heroes: Query<&Tower>,
     mut commands: Commands,
     mut last: Local<Vec2>,
@@ -769,13 +862,30 @@ pub fn hero_afterimage(
     *acc = 0.0;
     // Match the hero's left/right facing so the ghost isn't mirrored wrong.
     let flip = if t.angle.cos() < 0.0 { -1.0 } else { 1.0 };
-    commands.spawn((
+    let mut sprite = if let Some(cfg) = hero_world_cfg(&walks, loadout.class, loadout.race) {
+        let mut sprite = Sprite::from_atlas_image(
+            cfg.image.clone(),
+            TextureAtlas {
+                layout: cfg.layout.clone(),
+                index: 0,
+            },
+        );
+        sprite.custom_size = Some(Vec2::splat(cfg.size * (HERO_GHOST_SIZE / HERO_WORLD_SIZE)));
+        sprite
+    } else {
         Sprite {
             image: sprites.heroes[&loadout.class].clone(),
-            color: loadout.class.skill_color().with_alpha(0.5),
-            custom_size: Some(Vec2::splat(TILE_SIZE * 1.1)),
+            custom_size: Some(Vec2::splat(HERO_GHOST_SIZE)),
             ..default()
-        },
+        }
+    };
+    sprite.color = loadout
+        .race
+        .color()
+        .mix(&loadout.class.skill_color(), 0.35)
+        .with_alpha(0.58);
+    commands.spawn((
+        sprite,
         Transform::from_translation(pos.extend(4.6)).with_scale(Vec3::new(flip, 1.0, 1.0)),
         // life < max_life → starts at ~0.5 alpha, fades to 0 over `life` seconds.
         Particle {
@@ -915,7 +1025,14 @@ pub fn auto_spawn_hero(
     loadout.respawn_waves = 0;
     let pos = crate::hero::hero_spawn_pos();
     let tower = crate::hero::make_hero_tower(&loadout, pos);
-    spawn_hero(&mut commands, tower, &sprites, &walks, loadout.class);
+    spawn_hero(
+        &mut commands,
+        tower,
+        &sprites,
+        &walks,
+        loadout.class,
+        loadout.race,
+    );
     loadout.alive = true;
 }
 
@@ -935,7 +1052,14 @@ pub fn hero_respawn(
     }
     let pos = crate::hero::hero_spawn_pos();
     let tower = crate::hero::make_hero_tower(&loadout, pos);
-    spawn_hero(&mut commands, tower, &sprites, &walks, loadout.class);
+    spawn_hero(
+        &mut commands,
+        tower,
+        &sprites,
+        &walks,
+        loadout.class,
+        loadout.race,
+    );
     loadout.alive = true;
 }
 
@@ -993,21 +1117,40 @@ pub fn rotate_towers(
             *last_hero = c;
             // Face the travel direction by mirroring horizontally (no rotation).
             let facing = t.angle.cos();
-            if facing.abs() > 0.05 {
-                tf.scale.x = tf.scale.x.abs() * if facing < 0.0 { -1.0 } else { 1.0 };
-            }
+            let current_sign = if tf.scale.x < 0.0 { -1.0 } else { 1.0 };
+            let facing_sign = if facing.abs() > 0.05 {
+                if facing < 0.0 { -1.0 } else { 1.0 }
+            } else {
+                current_sign
+            };
+            let attack_progress = if t.hero_attack_timer > 0.0 {
+                1.0 - (t.hero_attack_timer / HERO_MELEE_ATTACK_TIME).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let attack_pop = if t.hero_attack_timer > 0.0 {
+                (attack_progress * std::f32::consts::PI).sin().max(0.0)
+            } else {
+                0.0
+            };
+            tf.scale.x = facing_sign * (1.0 + attack_pop * 0.10);
+            tf.scale.y = 1.0 - attack_pop * 0.035;
             // Bouncier walk bob while moving so the hero clearly strides, not floats.
             let bob = if moving {
                 (time.elapsed_secs() * 16.0).sin().abs() * 5.5
             } else {
                 0.0
             };
+            let attack_step = Vec2::from_angle(t.angle) * (attack_pop * 5.0);
             t.recoil *= (1.0 - 16.0 * dt).clamp(0.0, 1.0);
             if t.recoil.length_squared() < 0.05 {
                 t.recoil = Vec2::ZERO;
             }
-            tf.translation.x = c.x + t.recoil.x;
-            tf.translation.y = c.y + t.recoil.y + bob;
+            if t.hero_attack_timer > 0.0 {
+                t.hero_attack_timer = (t.hero_attack_timer - dt).max(0.0);
+            }
+            tf.translation.x = c.x + t.recoil.x + attack_step.x;
+            tf.translation.y = c.y + t.recoil.y + attack_step.y + bob;
         } else if t.recoil != Vec2::ZERO {
             // Grid towers move only via transient muzzle recoil.
             let c = t.center();
@@ -1020,6 +1163,26 @@ pub fn rotate_towers(
                 tf.translation.y = c.y;
             }
         }
+    }
+}
+
+pub fn update_hero_race_badges(
+    mut commands: Commands,
+    towers: Query<&Tower>,
+    mut badges: Query<(Entity, &HeroRaceBadge, &mut Transform)>,
+) {
+    for (entity, badge, mut tf) in &mut badges {
+        let Ok(hero) = towers.get(badge.owner) else {
+            commands.entity(entity).despawn();
+            continue;
+        };
+        if !hero.hero {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        let pos = hero.center() + badge.offset;
+        tf.translation.x = pos.x;
+        tf.translation.y = pos.y;
     }
 }
 

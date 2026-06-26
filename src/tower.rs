@@ -12,12 +12,12 @@
 use crate::board::Board;
 use crate::components::{Enemy, LevelEntity, Particle, SummonHpBarFg};
 use crate::data::{
-    cell_center, Behavior, Category, Element, TowerDef, TowerKind, MOSS_TOWER_SENSE, TILE_SIZE,
-    TOWER_RAIDER_ENGAGE, TOWER_RAIDER_SENSE,
+    Behavior, Category, Element, MOSS_TOWER_SENSE, TILE_SIZE, TOWER_RAIDER_ENGAGE,
+    TOWER_RAIDER_SENSE, TowerDef, TowerKind, cell_center,
 };
 use crate::equipment::{
-    equipment_set_bonus, return_equipment_to_inventory, Equipment, EquipmentInventory,
-    EquipmentVisual, Rarity,
+    Equipment, EquipmentInventory, EquipmentVisual, Rarity, equipment_set_bonus,
+    return_equipment_to_inventory,
 };
 use crate::game::RunState;
 use bevy::prelude::*;
@@ -25,6 +25,9 @@ use bevy::sprite::Anchor;
 use std::collections::{HashMap, HashSet};
 
 // ============================ Components ============================
+
+pub const HERO_MELEE_ATTACK_TIME: f32 = 0.28;
+const TOWER_SUMMON_VISUAL_SCALE: f32 = 0.70;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TargetPriority {
@@ -118,6 +121,9 @@ pub struct Tower {
     /// Transient muzzle-recoil offset (world px); set on fire, decays in
     /// `rotate_towers` so the sprite kicks back when it shoots.
     pub recoil: Vec2,
+    /// Short melee animation latch for the hero sprite sheet. Set when a close
+    /// hero attacks, consumed by `build::animate_hero_walk` / `rotate_towers`.
+    pub hero_attack_timer: f32,
     /// True for the unique movable hero tower (see `hero.rs`).
     pub hero: bool,
     /// Reveals invisible enemies in range (detection towers, and the Warden hero's
@@ -186,6 +192,7 @@ impl Tower {
             color: def.color,
             angle: 0.0,
             recoil: Vec2::ZERO,
+            hero_attack_timer: 0.0,
             hero: false,
             hero_pos: Vec2::ZERO,
             move_target: None,
@@ -278,6 +285,7 @@ impl Tower {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ProjKind {
     Normal,
+    Fireball,
     Missile,
     Slow,
     Poison,
@@ -298,6 +306,7 @@ pub struct Projectile {
     pub kind: ProjKind,
     pub aoe_radius: f32,
     pub slow_duration: f32,
+    pub freeze_duration: f32,
     pub dot_damage: f32,
     pub poison_duration: f32,
     pub armor_reduce: f32,
@@ -329,6 +338,7 @@ pub struct Summon {
     pub damage: f32,
     pub speed: f32, // px/sec
     pub target: Option<Entity>,
+    pub facing: Vec2,
     pub attack_timer: f32,
     pub owner: Entity,
     /// Visual = this creature's animated sprite (blue-tinted).
@@ -430,6 +440,7 @@ pub struct EnemySnap {
     pub stealth: f32,
     pub boss: bool,
     pub tower_raider: bool,
+    pub ranged_tower: bool,
     pub moss_destroy: bool,
     pub facing: Vec2,
 }
@@ -442,12 +453,13 @@ pub struct Snapshot {
     pub detectors: Vec<(Vec2, f32)>,
     pub silencers: Vec<(Vec2, f32)>,
     pub summon_counts: HashMap<Entity, usize>,
+    pub tower_zones: HashMap<Entity, (Vec2, f32)>,
 }
 
 pub fn build_snapshot(
     mut snap: ResMut<Snapshot>,
     enemies: Query<(Entity, &Enemy, &Transform)>,
-    towers: Query<(&Tower, &Transform)>,
+    towers: Query<(Entity, &Tower, &Transform)>,
     summons: Query<&Summon>,
 ) {
     snap.enemies.clear();
@@ -465,6 +477,7 @@ pub fn build_snapshot(
             stealth: enemy.stealth,
             boss: enemy.boss,
             tower_raider: enemy.tower_raider,
+            ranged_tower: enemy.ranged_tower,
             moss_destroy: enemy.moss_destroy,
             facing: enemy.facing,
         });
@@ -473,7 +486,9 @@ pub fn build_snapshot(
         }
     }
     snap.detectors.clear();
-    for (t, _) in &towers {
+    snap.tower_zones.clear();
+    for (entity, t, _) in &towers {
+        snap.tower_zones.insert(entity, (t.center(), t.range));
         if t.detector {
             snap.detectors.push((t.center(), t.range));
         }
@@ -519,6 +534,8 @@ impl Snapshot {
             3
         } else if e.tower_raider {
             2
+        } else if e.ranged_tower {
+            1
         } else {
             0
         }
@@ -610,6 +627,53 @@ fn proj_px_s(js_speed: f32) -> f32 {
     js_speed * 1000.0 / 16.0
 }
 
+fn fireball_color() -> Color {
+    Color::srgb(1.0, 0.34, 0.08)
+}
+
+fn is_mage_fireball_attack(tower: &Tower) -> bool {
+    tower.hero && tower.behavior == Behavior::Aoe && tower.element == Element::Arcane
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HeroShotStyle {
+    Warden,
+    Priest,
+    Engineer,
+}
+
+fn hero_shot_style(tower: &Tower) -> Option<HeroShotStyle> {
+    if !tower.hero || tower.range < 100.0 {
+        return None;
+    }
+    if tower.detector && tower.behavior == Behavior::Slow && tower.element == Element::Frost {
+        Some(HeroShotStyle::Warden)
+    } else if tower.behavior == Behavior::Curse && tower.element == Element::Arcane {
+        Some(HeroShotStyle::Priest)
+    } else if matches!(tower.behavior, Behavior::Single | Behavior::Slow)
+        && tower.element == Element::Storm
+        && tower.buff_range > 0.0
+    {
+        Some(HeroShotStyle::Engineer)
+    } else {
+        None
+    }
+}
+
+fn attack_muzzle_color(tower: &Tower) -> Color {
+    if is_mage_fireball_attack(tower) {
+        fireball_color().mix(&Color::WHITE, 0.12)
+    } else if hero_shot_style(tower) == Some(HeroShotStyle::Warden) {
+        Color::srgb(0.48, 1.0, 0.74)
+    } else if hero_shot_style(tower) == Some(HeroShotStyle::Priest) {
+        Color::srgb(1.0, 0.93, 0.62)
+    } else if hero_shot_style(tower) == Some(HeroShotStyle::Engineer) {
+        Color::srgb(0.55, 1.0, 0.92)
+    } else {
+        tower.element.color().mix(&Color::WHITE, 0.2)
+    }
+}
+
 fn fire_wall_angle(target: EnemySnap, board: &Board, fallback_from: Vec2) -> f32 {
     let path = &board.path_world;
     let idx = target.path_index.min(path.len().saturating_sub(1));
@@ -646,10 +710,13 @@ fn point_in_fire_wall(
 
 fn projectile_tint(kind: TowerKind, proj: &Projectile, tower_color: Color) -> Color {
     use TowerKind::*;
+    if proj.kind == ProjKind::Fireball {
+        return fireball_color().mix(&Color::WHITE, 0.12);
+    }
     match kind {
         Arrow => Color::srgb(1.0, 0.82, 0.42),
         Sniper => Color::srgb(0.56, 1.0, 0.58),
-        Magic => Color::srgb(0.82, 0.52, 1.0),
+        Magic => fireball_color(),
         Missile | Fortress | Cannon => Color::srgb(1.0, 0.46, 0.16),
         Ice | FrostNova => Color::srgb(0.52, 0.9, 1.0),
         Wind => Color::srgb(0.36, 1.0, 0.92),
@@ -665,9 +732,10 @@ fn projectile_tint(kind: TowerKind, proj: &Projectile, tower_color: Color) -> Co
 fn projectile_radius(kind: TowerKind, proj: &Projectile) -> f32 {
     use TowerKind::*;
     match (kind, proj.kind) {
+        (_, ProjKind::Fireball) => 7.6,
         (Missile, _) => 5.8,
         (_, ProjKind::Missile) => 5.2,
-        (Magic, _) => 5.0,
+        (Magic, _) => 6.4,
         (Sniper, _) => 2.8,
         (Arrow, _) => 3.2,
         (_, ProjKind::Curse) => 5.0,
@@ -681,10 +749,11 @@ fn projectile_radius(kind: TowerKind, proj: &Projectile) -> f32 {
 fn projectile_tail(kind: TowerKind, proj: &Projectile) -> (f32, f32, f32) {
     use TowerKind::*;
     match (kind, proj.kind) {
+        (_, ProjKind::Fireball) => (13.0, 13.0, 0.24),
         (Missile, _) | (_, ProjKind::Missile) => (34.0, 9.0, 0.34),
         (Sniper, _) => (42.0, 3.0, 0.42),
         (Arrow, _) => (25.0, 4.0, 0.30),
-        (Magic, _) => (18.0, 10.0, 0.24),
+        (Magic, _) => (13.0, 12.0, 0.22),
         (_, ProjKind::Curse) => (22.0, 9.0, 0.26),
         (_, ProjKind::Poison) => (20.0, 8.0, 0.28),
         (_, ProjKind::Slow) => (22.0, 8.0, 0.28),
@@ -761,6 +830,64 @@ fn spawn_layered_beam(
     );
 }
 
+fn spawn_lightning_arc(
+    commands: &mut Commands,
+    from: Vec2,
+    to: Vec2,
+    color: Color,
+    width: f32,
+    life: f32,
+    z: f32,
+) {
+    let delta = to - from;
+    let len = delta.length();
+    if len <= 1.0 {
+        return;
+    }
+    let dir = delta / len;
+    let normal = Vec2::new(-dir.y, dir.x);
+    let segments = ((len / 30.0).ceil() as i32).clamp(2, 7);
+    let mut prev = from;
+    for i in 1..=segments {
+        let t = i as f32 / segments as f32;
+        let end = i == segments;
+        let sign = if i % 2 == 0 { 1.0 } else { -1.0 };
+        let jitter = if end {
+            0.0
+        } else {
+            sign * (5.0 + width * 0.9) * (0.75 + 0.25 * (i as f32 % 3.0))
+        };
+        let next = from + delta * t + normal * jitter;
+        spawn_layered_beam(
+            commands,
+            prev,
+            next,
+            color.mix(&Color::WHITE, if i % 2 == 0 { 0.22 } else { 0.04 }),
+            width * if i % 2 == 0 { 0.92 } else { 1.08 },
+            life,
+            z,
+            true,
+        );
+        prev = next;
+    }
+    for pos in [from, to] {
+        commands.spawn((
+            Sprite {
+                color: color.mix(&Color::WHITE, 0.5).with_alpha(0.64),
+                custom_size: Some(Vec2::splat(width * 2.6)),
+                ..default()
+            },
+            Transform::from_translation(pos.extend(z + 0.1)),
+            Particle {
+                vel: Vec2::ZERO,
+                life: life * 0.75,
+                max_life: life * 0.75,
+            },
+            LevelEntity,
+        ));
+    }
+}
+
 fn spawn_projectile_trail(
     commands: &mut Commands,
     kind: TowerKind,
@@ -770,6 +897,39 @@ fn spawn_projectile_trail(
 ) {
     let tint = projectile_tint(kind, proj, proj.element.color());
     let (_, width, alpha) = projectile_tail(kind, proj);
+    if kind == TowerKind::Magic || proj.kind == ProjKind::Fireball {
+        let delta = to - from;
+        let dir = if delta.length_squared() > 0.01 {
+            delta.normalize()
+        } else {
+            Vec2::X
+        };
+        let normal = Vec2::new(-dir.y, dir.x);
+        for (back, side, size, life, fade) in [
+            (4.0, 0.0, width * 0.9, 0.16, 0.42),
+            (10.0, 3.2, width * 0.55, 0.22, 0.30),
+            (12.0, -3.0, width * 0.45, 0.24, 0.24),
+        ] {
+            let pos = to - dir * back + normal * side;
+            commands.spawn((
+                Sprite {
+                    color: tint
+                        .mix(&Color::srgb(1.0, 0.9, 0.35), 0.25)
+                        .with_alpha(fade),
+                    custom_size: Some(Vec2::splat(size.max(2.0))),
+                    ..default()
+                },
+                Transform::from_translation(pos.extend(7.45)),
+                Particle {
+                    vel: -dir * 18.0 + normal * side.signum() * 8.0,
+                    life,
+                    max_life: life,
+                },
+                LevelEntity,
+            ));
+        }
+        return;
+    }
     spawn_beam(
         commands,
         from,
@@ -821,6 +981,7 @@ fn spawn_projectile(
     let glow = tint;
     let hot = Color::WHITE.mix(&tint, 0.28);
     let missile_like = tower_kind == TowerKind::Missile || proj.kind == ProjKind::Missile;
+    let fireball_like = tower_kind == TowerKind::Magic || proj.kind == ProjKind::Fireball;
     commands
         .spawn((
             proj,
@@ -851,7 +1012,32 @@ fn spawn_projectile(
                 },
                 Transform::from_xyz(-tail_len * 0.28, 0.0, -0.2),
             ));
-            if missile_like {
+            if fireball_like {
+                p.spawn((
+                    Sprite {
+                        color: Color::srgb(1.0, 0.78, 0.22).with_alpha(0.72),
+                        custom_size: Some(Vec2::splat(radius * 2.4)),
+                        ..default()
+                    },
+                    Transform::from_xyz(0.0, 0.0, 0.12),
+                ));
+                p.spawn((
+                    Sprite {
+                        color: Color::srgb(1.0, 0.18, 0.03).with_alpha(0.5),
+                        custom_size: Some(Vec2::new(radius * 3.2, radius * 1.3)),
+                        ..default()
+                    },
+                    Transform::from_xyz(-radius * 1.55, 0.0, -0.08),
+                ));
+                p.spawn((
+                    Sprite {
+                        color: Color::WHITE.with_alpha(0.68),
+                        custom_size: Some(Vec2::splat(radius * 0.72)),
+                        ..default()
+                    },
+                    Transform::from_xyz(radius * 0.2, radius * 0.05, 0.18),
+                ));
+            } else if missile_like {
                 p.spawn((
                     Sprite {
                         color: Color::srgb(1.0, 0.24, 0.06).with_alpha(0.72),
@@ -983,7 +1169,11 @@ pub fn update_towers(
                     } else {
                         0.0
                     };
-                    let base_width = if tower.kind == TowerKind::Prism { 8.5 } else { 5.5 };
+                    let base_width = if tower.kind == TowerKind::Prism {
+                        8.5
+                    } else {
+                        5.5
+                    };
                     let width = base_width + charge_frac * 7.0; // thickens as it charges
                     spawn_layered_beam(
                         &mut commands,
@@ -1026,7 +1216,11 @@ pub fn update_towers(
             Behavior::Summon => {
                 if tower.cooldown_timer <= 0.0 {
                     let count = snap.summon_counts.get(&entity).copied().unwrap_or(0);
-                    if (count as i32) < tower.max_summons {
+                    let enemy_in_range = snap
+                        .enemies
+                        .iter()
+                        .any(|e| snap.can_target(&tower, e) && c.distance(e.pos) <= tower.range);
+                    if enemy_in_range && (count as i32) < tower.max_summons {
                         tower.cooldown_timer = tower.cooldown;
                         // The minion tier and its damage scale with the tower level
                         // (skeleton → charger → mimic-bruiser).
@@ -1041,6 +1235,7 @@ pub fn update_towers(
                             (tower.damage * dmg_mult).max(20.0),
                             tower.summon_speed * TILE_SIZE / 60.0 * (1000.0 / 16.0),
                             f32::INFINITY,
+                            TOWER_SUMMON_VISUAL_SCALE,
                             entity,
                         );
                         vfx.write(crate::vfx::VfxEvent::ElementPulse {
@@ -1069,22 +1264,16 @@ pub fn update_towers(
         if !matches!(tower.behavior, Behavior::Heal | Behavior::Detect) {
             let dir = Vec2::from_angle(tower.angle);
             if tower.hero && tower.range < 100.0 {
-                // Melee class (warrior/guardian/assassin): a slash arc at the target
-                // plus a forward lunge, instead of a muzzle flash.
-                let poison = matches!(tower.behavior, Behavior::Poison | Behavior::Curse);
-                vfx.write(crate::vfx::VfxEvent::Slash {
-                    pos: target.pos,
-                    angle: tower.angle,
-                    color: tower.element.color().mix(&Color::WHITE, 0.28),
-                    poison,
-                });
-                tower.recoil = dir * 6.0; // lunge toward the target
+                // Melee class (warrior/guardian/assassin): use the hero's own
+                // attack frames and a body lunge instead of a detached sword wave.
+                tower.hero_attack_timer = HERO_MELEE_ATTACK_TIME;
+                tower.recoil = dir * 10.0;
             } else {
                 let muzzle = c + dir * (TILE_SIZE * (0.34 + 0.22 * tower.footprint as f32));
                 vfx.write(crate::vfx::VfxEvent::Muzzle {
                     pos: muzzle,
                     dir,
-                    color: tower.element.color().mix(&Color::WHITE, 0.2),
+                    color: attack_muzzle_color(&tower),
                 });
                 tower.recoil = -dir * (3.0 + 1.4 * tower.footprint as f32);
             }
@@ -1112,7 +1301,11 @@ pub fn update_towers(
                     amount *= if target.boss { 2.6 } else { 1.8 };
                     vfx.write(crate::vfx::VfxEvent::Text {
                         pos: target.pos + Vec2::new(0.0, 26.0),
-                        text: crate::i18n::t(if target.boss { "背击 致命!" } else { "背击!" }),
+                        text: crate::i18n::t(if target.boss {
+                            "背击 致命!"
+                        } else {
+                            "背击!"
+                        }),
                         color: Color::srgb(1.0, 0.35, 0.85),
                         size: if target.boss { 18.0 } else { 14.0 },
                         life: 0.7,
@@ -1152,68 +1345,119 @@ pub fn update_towers(
             continue;
         }
 
+        if hero_special_attack(
+            entity,
+            &tower,
+            target,
+            &snap,
+            &mut dmg,
+            &mut status,
+            &mut commands,
+            &mut vfx,
+        ) {
+            continue;
+        }
+
         match tower.behavior {
             Behavior::Aoe => {
                 // A melee cleave hero (warrior) hits the group around the target with
-                // its slash arc — no ranged beam. Ranged AoE towers/mages keep the beam.
+                // its slash arc; the mage throws a visible fireball that explodes on
+                // impact; other ranged AoE towers keep their direct blast beam.
                 let melee_hero = tower.hero && tower.range < 100.0;
-                if !melee_hero {
-                    spawn_layered_beam(
+                if is_mage_fireball_attack(&tower) {
+                    spawn_projectile(
                         &mut commands,
                         c,
                         target.pos,
-                        tower.element.color().mix(&tower.color, 0.35),
-                        if tower.kind == TowerKind::Fortress {
-                            7.5
-                        } else {
-                            5.5
-                        },
-                        0.20,
-                        9.5,
-                        true,
-                    );
-                }
-                vfx.write(crate::vfx::VfxEvent::Explosion {
-                    pos: target.pos,
-                    radius: tower.aoe_radius,
-                    color: tower.element.color(),
-                });
-                for e in &snap.enemies {
-                    // Invisible enemies that no detector reveals are immune to splash
-                    // too — otherwise any AoE trivially bypasses stealth. Detection
-                    // towers (or a detected state) make them takeable again.
-                    if e.invisible && !snap.is_detected(e) {
-                        continue;
-                    }
-                    if e.pos.distance(target.pos) <= tower.aoe_radius {
-                        dmg.write(Damage {
+                        TowerKind::Magic,
+                        Projectile {
                             source_tower: Some(entity),
-                            target: e.entity,
-                            amount: tower.damage,
-                            magic: false,
+                            target: target.entity,
+                            speed: proj_px_s(7.2),
+                            damage: tower.damage,
+                            magic: true,
                             element: tower.element,
                             armor_pierce: tower.armor_pierce,
+                            kind: ProjKind::Fireball,
+                            aoe_radius: tower.aoe_radius,
+                            slow_duration: 0.0,
+                            freeze_duration: tower.freeze_duration,
+                            dot_damage: 0.0,
+                            poison_duration: 0.0,
+                            armor_reduce: 0.0,
+                            curse_duration: 0.0,
+                            knock_dist: 0.0,
+                            stun_duration: 0.0,
+                        },
+                        fireball_color(),
+                        &mut meshes,
+                        &mut materials,
+                    );
+                } else {
+                    if !melee_hero {
+                        spawn_layered_beam(
+                            &mut commands,
+                            c,
+                            target.pos,
+                            tower.element.color().mix(&tower.color, 0.35),
+                            if tower.kind == TowerKind::Fortress {
+                                7.5
+                            } else {
+                                5.5
+                            },
+                            0.20,
+                            9.5,
+                            true,
+                        );
+                        vfx.write(crate::vfx::VfxEvent::Explosion {
+                            pos: target.pos,
+                            radius: tower.aoe_radius,
+                            color: tower.element.color(),
                         });
-                        // AoE towers carrying extra attributes (notably the 神之塔)
-                        // also apply slow/poison to everything caught in the blast.
-                        if tower.slow_duration > 0.0 {
-                            status.write(Status {
-                                source_tower: Some(entity),
-                                target: e.entity,
-                                kind: StatusKind::Slow {
-                                    duration: tower.slow_duration,
-                                },
-                            });
+                    } else {
+                        vfx.write(crate::vfx::VfxEvent::MeleeCleave {
+                            pos: target.pos,
+                            radius: tower.aoe_radius,
+                            color: tower.element.color(),
+                        });
+                    }
+                    for e in &snap.enemies {
+                        // Invisible enemies that no detector reveals are immune to splash
+                        // too — otherwise any AoE trivially bypasses stealth. Detection
+                        // towers (or a detected state) make them takeable again.
+                        if e.invisible && !snap.is_detected(e) {
+                            continue;
                         }
-                        if tower.dot_damage > 0.0 && tower.poison_duration > 0.0 {
-                            status.write(Status {
+                        if e.pos.distance(target.pos) <= tower.aoe_radius {
+                            dmg.write(Damage {
                                 source_tower: Some(entity),
                                 target: e.entity,
-                                kind: StatusKind::Poison {
-                                    dmg: tower.dot_damage,
-                                    duration: tower.poison_duration,
-                                },
+                                amount: tower.damage,
+                                magic: false,
+                                element: tower.element,
+                                armor_pierce: tower.armor_pierce,
                             });
+                            // AoE towers carrying extra attributes (notably the 神之塔)
+                            // also apply slow/poison to everything caught in the blast.
+                            if tower.slow_duration > 0.0 {
+                                status.write(Status {
+                                    source_tower: Some(entity),
+                                    target: e.entity,
+                                    kind: StatusKind::Slow {
+                                        duration: tower.slow_duration,
+                                    },
+                                });
+                            }
+                            if tower.dot_damage > 0.0 && tower.poison_duration > 0.0 {
+                                status.write(Status {
+                                    source_tower: Some(entity),
+                                    target: e.entity,
+                                    kind: StatusKind::Poison {
+                                        dmg: tower.dot_damage,
+                                        duration: tower.poison_duration,
+                                    },
+                                });
+                            }
                         }
                     }
                 }
@@ -1361,6 +1605,7 @@ pub fn update_towers(
                     kind: ProjKind::Missile,
                     aoe_radius: tower.aoe_radius,
                     slow_duration: 0.0,
+                    freeze_duration: 0.0,
                     dot_damage: 0.0,
                     poison_duration: 0.0,
                     armor_reduce: 0.0,
@@ -1388,6 +1633,7 @@ pub fn update_towers(
                     kind: ProjKind::Knockback,
                     aoe_radius: 0.0,
                     slow_duration: 0.0,
+                    freeze_duration: 0.0,
                     dot_damage: 0.0,
                     poison_duration: 0.0,
                     armor_reduce: 0.0,
@@ -1415,6 +1661,7 @@ pub fn update_towers(
                     kind: ProjKind::Poison,
                     aoe_radius: 0.0,
                     slow_duration: 0.0,
+                    freeze_duration: 0.0,
                     dot_damage: tower.dot_damage,
                     poison_duration: tower.poison_duration,
                     armor_reduce: 0.0,
@@ -1442,6 +1689,7 @@ pub fn update_towers(
                     kind: ProjKind::Curse,
                     aoe_radius: 0.0,
                     slow_duration: 0.0,
+                    freeze_duration: 0.0,
                     dot_damage: 0.0,
                     poison_duration: 0.0,
                     armor_reduce: tower.armor_reduce,
@@ -1469,6 +1717,7 @@ pub fn update_towers(
                     kind: ProjKind::Slow,
                     aoe_radius: 0.0,
                     slow_duration: tower.slow_duration,
+                    freeze_duration: 0.0,
                     dot_damage: 0.0,
                     poison_duration: 0.0,
                     armor_reduce: 0.0,
@@ -1497,6 +1746,7 @@ pub fn update_towers(
                     kind: ProjKind::Normal,
                     aoe_radius: 0.0,
                     slow_duration: 0.0,
+                    freeze_duration: 0.0,
                     dot_damage: 0.0,
                     poison_duration: 0.0,
                     armor_reduce: 0.0,
@@ -1526,15 +1776,14 @@ fn chain_lightning(
     let mut current = first;
     let mut remaining = tower.chain_count;
     let tower_pos = tower.center();
-    spawn_layered_beam(
+    spawn_lightning_arc(
         commands,
         tower_pos,
         first.pos,
-        tower.element.color(),
+        tower.element.color().mix(&Color::WHITE, 0.18),
         4.5,
         0.18,
         10.5,
-        true,
     );
 
     dmg.write(Damage {
@@ -1561,15 +1810,14 @@ fn chain_lightning(
         }
         let Some(n) = next else { break };
         chained.push(n.entity);
-        spawn_layered_beam(
+        spawn_lightning_arc(
             commands,
             current.pos,
             n.pos,
-            tower.element.color().mix(&Color::WHITE, 0.14),
+            tower.element.color().mix(&Color::WHITE, 0.28),
             3.6,
             0.16,
             10.5,
-            true,
         );
         dmg.write(Damage {
             source_tower: Some(source_tower),
@@ -1581,6 +1829,238 @@ fn chain_lightning(
         });
         current = n;
         remaining -= 1;
+    }
+}
+
+fn hero_special_attack(
+    source_tower: Entity,
+    tower: &Tower,
+    target: EnemySnap,
+    snap: &Snapshot,
+    dmg: &mut MessageWriter<Damage>,
+    status: &mut MessageWriter<Status>,
+    commands: &mut Commands,
+    vfx: &mut MessageWriter<crate::vfx::VfxEvent>,
+) -> bool {
+    match hero_shot_style(tower) {
+        Some(HeroShotStyle::Warden) => {
+            hero_warden_shot(
+                source_tower,
+                tower,
+                target,
+                snap,
+                dmg,
+                status,
+                commands,
+                vfx,
+            );
+            true
+        }
+        Some(HeroShotStyle::Priest) => {
+            hero_priest_shot(source_tower, tower, target, snap, dmg, status, vfx);
+            true
+        }
+        Some(HeroShotStyle::Engineer) => {
+            hero_engineer_shot(
+                source_tower,
+                tower,
+                target,
+                snap,
+                dmg,
+                status,
+                commands,
+                vfx,
+            );
+            true
+        }
+        None => false,
+    }
+}
+
+fn hero_warden_shot(
+    source_tower: Entity,
+    tower: &Tower,
+    target: EnemySnap,
+    snap: &Snapshot,
+    dmg: &mut MessageWriter<Damage>,
+    status: &mut MessageWriter<Status>,
+    commands: &mut Commands,
+    vfx: &mut MessageWriter<crate::vfx::VfxEvent>,
+) {
+    let origin = tower.center();
+    let color = Color::srgb(0.45, 1.0, 0.72).mix(&tower.element.color(), 0.25);
+    spawn_layered_beam(commands, origin, target.pos, color, 3.8, 0.14, 10.8, true);
+    vfx.write(crate::vfx::VfxEvent::ElementPulse {
+        pos: target.pos,
+        color,
+        strong: false,
+    });
+
+    let range = tower.range * (1.0 + tower.aura_range);
+    let dir = (target.pos - origin).normalize_or_zero();
+    let width = TILE_SIZE * 0.42;
+    let mut hits: Vec<(f32, EnemySnap)> = snap
+        .enemies
+        .iter()
+        .filter(|e| {
+            snap.can_target(tower, e)
+                && origin.distance(e.pos) <= range + TILE_SIZE * 0.25
+                && (e.pos - origin).dot(dir) >= -4.0
+                && seg_dist(origin, target.pos, e.pos) <= width
+        })
+        .map(|e| (origin.distance(e.pos), *e))
+        .collect();
+    if !hits.iter().any(|(_, e)| e.entity == target.entity) {
+        hits.push((origin.distance(target.pos), target));
+    }
+    hits.sort_by(|a, b| a.0.total_cmp(&b.0));
+    hits.dedup_by_key(|(_, e)| e.entity);
+
+    for (_, e) in hits.into_iter().take(5) {
+        let main = e.entity == target.entity;
+        dmg.write(Damage {
+            source_tower: Some(source_tower),
+            target: e.entity,
+            amount: if main {
+                tower.damage
+            } else {
+                tower.damage * 0.58
+            },
+            magic: tower.magic,
+            element: tower.element,
+            armor_pierce: tower.armor_pierce,
+        });
+        status.write(Status {
+            source_tower: Some(source_tower),
+            target: e.entity,
+            kind: StatusKind::Slow {
+                duration: tower.slow_duration.max(0.9),
+            },
+        });
+    }
+}
+
+fn hero_priest_shot(
+    source_tower: Entity,
+    tower: &Tower,
+    target: EnemySnap,
+    snap: &Snapshot,
+    dmg: &mut MessageWriter<Damage>,
+    status: &mut MessageWriter<Status>,
+    vfx: &mut MessageWriter<crate::vfx::VfxEvent>,
+) {
+    let color = Color::srgb(1.0, 0.92, 0.56);
+    let radius = (TILE_SIZE * 0.98).max(58.0);
+    vfx.write(crate::vfx::VfxEvent::ElementPulse {
+        pos: target.pos,
+        color: color.mix(&Color::WHITE, 0.25),
+        strong: true,
+    });
+
+    for e in &snap.enemies {
+        if !snap.can_target(tower, e) || e.pos.distance(target.pos) > radius {
+            continue;
+        }
+        let main = e.entity == target.entity;
+        vfx.write(crate::vfx::VfxEvent::HolyStrike {
+            pos: e.pos,
+            strong: main,
+        });
+        dmg.write(Damage {
+            source_tower: Some(source_tower),
+            target: e.entity,
+            amount: if main {
+                tower.damage
+            } else {
+                tower.damage * 0.48
+            },
+            magic: true,
+            element: tower.element,
+            armor_pierce: tower.armor_pierce,
+        });
+        status.write(Status {
+            source_tower: Some(source_tower),
+            target: e.entity,
+            kind: StatusKind::Curse {
+                reduce: tower.armor_reduce.max(8.0),
+                duration: tower.curse_duration.max(1.8),
+            },
+        });
+    }
+}
+
+fn hero_engineer_shot(
+    source_tower: Entity,
+    tower: &Tower,
+    target: EnemySnap,
+    snap: &Snapshot,
+    dmg: &mut MessageWriter<Damage>,
+    status: &mut MessageWriter<Status>,
+    commands: &mut Commands,
+    vfx: &mut MessageWriter<crate::vfx::VfxEvent>,
+) {
+    let pulse = Color::srgb(0.42, 1.0, 0.92);
+    let accent = Color::srgb(1.0, 0.62, 0.24);
+    let mut hits = vec![target];
+    let mut current = target;
+    let max_link = TILE_SIZE * 2.15;
+    let range = tower.range * (1.0 + tower.aura_range);
+    for _ in 0..2 {
+        let mut next: Option<EnemySnap> = None;
+        let mut best = max_link;
+        for e in &snap.enemies {
+            if hits.iter().any(|hit| hit.entity == e.entity)
+                || !snap.can_target(tower, e)
+                || tower.center().distance(e.pos) > range + TILE_SIZE * 0.4
+            {
+                continue;
+            }
+            let d = current.pos.distance(e.pos);
+            if d <= best {
+                best = d;
+                next = Some(*e);
+            }
+        }
+        let Some(n) = next else { break };
+        hits.push(n);
+        current = n;
+    }
+
+    let mut from = tower.center();
+    for (i, e) in hits.into_iter().enumerate() {
+        let color = if i == 0 {
+            pulse
+        } else {
+            accent.mix(&pulse, 0.35)
+        };
+        spawn_lightning_arc(commands, from, e.pos, color, 3.2, 0.13, 10.7);
+        dmg.write(Damage {
+            source_tower: Some(source_tower),
+            target: e.entity,
+            amount: if i == 0 {
+                tower.damage
+            } else {
+                tower.damage * 0.52
+            },
+            magic: true,
+            element: tower.element,
+            armor_pierce: tower.armor_pierce,
+        });
+        status.write(Status {
+            source_tower: Some(source_tower),
+            target: e.entity,
+            kind: StatusKind::Slow {
+                duration: tower.slow_duration.max(0.42),
+            },
+        });
+        if i == 0 {
+            vfx.write(crate::vfx::VfxEvent::Explosion {
+                pos: e.pos,
+                radius: TILE_SIZE * 0.62,
+                color,
+            });
+        }
+        from = e.pos;
     }
 }
 
@@ -1612,7 +2092,7 @@ pub fn update_projectiles(
         let target_pos = match enemy_tf.get(p.target) {
             Ok(t) => t.translation.truncate(),
             Err(_) => {
-                if p.kind == ProjKind::Missile {
+                if matches!(p.kind, ProjKind::Missile | ProjKind::Fireball) {
                     // Find a new nearest enemy.
                     let mut best: Option<EnemySnap> = None;
                     let mut bd = f32::INFINITY;
@@ -1645,10 +2125,10 @@ pub fn update_projectiles(
         if dist > 0.0 {
             tf.rotation = Quat::from_rotation_z(delta.to_angle());
         }
-        let hit_radius = if p.kind == ProjKind::Missile {
-            12.0
-        } else {
-            10.0
+        let hit_radius = match p.kind {
+            ProjKind::Fireball => 14.0,
+            ProjKind::Missile => 12.0,
+            _ => 10.0,
         };
 
         if dist < hit_radius {
@@ -1681,6 +2161,38 @@ fn on_hit(
     vfx: &mut MessageWriter<crate::vfx::VfxEvent>,
 ) {
     match p.kind {
+        ProjKind::Fireball => {
+            let impact = target_pos;
+            vfx.write(crate::vfx::VfxEvent::Explosion {
+                pos: impact,
+                radius: p.aoe_radius,
+                color: fireball_color(),
+            });
+            for e in &snap.enemies {
+                if e.invisible && !snap.is_detected(e) {
+                    continue;
+                }
+                if e.pos.distance(impact) <= p.aoe_radius {
+                    dmg.write(Damage {
+                        source_tower: p.source_tower,
+                        target: e.entity,
+                        amount: p.damage,
+                        magic: p.magic,
+                        element: p.element,
+                        armor_pierce: p.armor_pierce,
+                    });
+                    if p.freeze_duration > 0.0 {
+                        status.write(Status {
+                            source_tower: p.source_tower,
+                            target: e.entity,
+                            kind: StatusKind::Freeze {
+                                duration: p.freeze_duration,
+                            },
+                        });
+                    }
+                }
+            }
+        }
         ProjKind::Missile => {
             vfx.write(crate::vfx::VfxEvent::Explosion {
                 pos,
@@ -1815,12 +2327,23 @@ fn summon_tint(kind: crate::data::EnemyKind) -> Color {
         Healer | Regenerating => Color::srgb(0.5, 1.0, 0.75),
         Flying | Fast | Charger => Color::srgb(0.55, 0.9, 1.0),
         Armored | Shielded | Tank => Color::srgb(0.7, 0.82, 1.0),
-        Silencer | Invisible => Color::srgb(0.72, 0.55, 1.0),
+        Silencer | Invisible | Ranged => Color::srgb(0.72, 0.55, 1.0),
+        Exploder => Color::srgb(1.0, 0.56, 0.28),
         Climber | Moss => Color::srgb(0.55, 0.95, 0.65),
         Boss => Color::srgb(0.95, 0.78, 1.0),
         Splitter | Swarmer => Color::srgb(0.6, 0.85, 1.0),
         Normal => Color::srgb(0.55, 0.8, 1.0),
     }
+}
+
+fn ally_visual_px(kind: crate::data::EnemyKind, visual_scale: f32) -> f32 {
+    let def = kind.def();
+    let base = if def.boss {
+        (def.size * 5.2).clamp(TILE_SIZE * 2.2, TILE_SIZE * 3.35)
+    } else {
+        (def.size * 10.0).clamp(TILE_SIZE * 1.9, TILE_SIZE * 3.0)
+    };
+    base * visual_scale
 }
 
 /// Spawn an allied unit (blue-tinted animated creature) that fights enemies.
@@ -1833,9 +2356,10 @@ pub fn spawn_ally(
     damage: f32,
     speed: f32,
     lifetime: f32,
+    visual_scale: f32,
     owner: Entity,
 ) {
-    let px = kind.def().size * 4.5;
+    let px = ally_visual_px(kind, visual_scale);
     let bar_w = (px * 0.62).max(16.0);
     let bar_y = px * 0.5 + 1.5;
     let (mut sprite, anim) = creatures.sprite(kind, px);
@@ -1848,6 +2372,7 @@ pub fn spawn_ally(
                 damage,
                 speed,
                 target: None,
+                facing: Vec2::X,
                 attack_timer: 0.0,
                 owner,
                 kind,
@@ -1919,15 +2444,52 @@ pub fn update_summons(
             s.attack_timer -= dt;
         }
         let pos = tf.translation.truncate();
+        if s.hp <= 0.0 || s.lifetime <= 0.0 {
+            vfx.write(crate::vfx::VfxEvent::Death {
+                pos,
+                color: summon_tint(s.kind),
+                big: false,
+            });
+            commands.entity(entity).despawn();
+            continue;
+        }
+
+        let Some((home_pos, home_range)) = snap.tower_zones.get(&s.owner).copied() else {
+            vfx.write(crate::vfx::VfxEvent::Death {
+                pos,
+                color: summon_tint(s.kind),
+                big: false,
+            });
+            commands.entity(entity).despawn();
+            continue;
+        };
+        let home_delta = home_pos - pos;
+        let home_dist = home_delta.length();
+        if home_dist > home_range {
+            s.target = None;
+            if home_dist > 1.0 {
+                s.facing = home_delta / home_dist;
+                let step = s.facing * (s.speed * dt).min(home_dist);
+                tf.translation.x += step.x;
+                tf.translation.y += step.y;
+            }
+            continue;
+        }
 
         let need_target = match s.target {
-            Some(t) => !snap.enemies.iter().any(|e| e.entity == t),
+            Some(t) => !snap
+                .enemies
+                .iter()
+                .any(|e| e.entity == t && home_pos.distance(e.pos) <= home_range),
             None => true,
         };
         if need_target {
             let mut best: Option<Entity> = None;
             let mut bd = f32::INFINITY;
             for e in &snap.enemies {
+                if home_pos.distance(e.pos) > home_range {
+                    continue;
+                }
                 let d = pos.distance(e.pos);
                 if d < bd {
                     bd = d;
@@ -1941,8 +2503,12 @@ pub fn update_summons(
             if let Some(te) = snap.enemies.iter().find(|e| e.entity == target) {
                 let delta = te.pos - pos;
                 let dist = delta.length();
+                if dist > 1.0 {
+                    s.facing = delta / dist;
+                }
                 if dist > TILE_SIZE * 0.6 {
-                    let step = delta / dist * s.speed * dt;
+                    let step_len = (s.speed * dt).min((dist - TILE_SIZE * 0.55).max(0.0));
+                    let step = s.facing * step_len;
                     tf.translation.x += step.x;
                     tf.translation.y += step.y;
                 } else if s.attack_timer <= 0.0 {
@@ -1955,17 +2521,20 @@ pub fn update_summons(
                         element: Element::Physical,
                         armor_pierce: 0.0,
                     });
+                    let dir = if dist > 1.0 { s.facing } else { Vec2::X };
+                    vfx.write(crate::vfx::VfxEvent::Slash {
+                        pos: pos + dir * (TILE_SIZE * 0.28),
+                        angle: dir.to_angle(),
+                        color: summon_tint(s.kind).mix(&Color::WHITE, 0.22),
+                        poison: false,
+                    });
                 }
             }
-        }
-
-        if s.hp <= 0.0 || s.lifetime <= 0.0 {
-            vfx.write(crate::vfx::VfxEvent::Death {
-                pos,
-                color: summon_tint(s.kind),
-                big: false,
-            });
-            commands.entity(entity).despawn();
+        } else if home_dist > TILE_SIZE * 0.35 {
+            s.facing = home_delta / home_dist.max(1.0);
+            let step = s.facing * (s.speed * dt).min(home_dist);
+            tf.translation.x += step.x;
+            tf.translation.y += step.y;
         }
     }
 }
@@ -2001,22 +2570,30 @@ pub fn enemy_vs_ally(
     for (mut enemy, etf) in &mut enemies {
         enemy.blocked = false;
         let pos = etf.translation.truncate();
-        let mut best: Option<Entity> = None;
+        let mut best: Option<(Entity, Vec2)> = None;
         let mut bd = engage;
         for (ae, apos) in &allies {
             let d = pos.distance(*apos);
             if d <= bd {
                 bd = d;
-                best = Some(*ae);
+                best = Some((*ae, *apos));
             }
         }
-        if let Some(ae) = best {
+        if let Some((ae, apos)) = best {
             enemy.blocked = true;
+            let delta = apos - pos;
+            if delta.length_squared() > 1.0 {
+                enemy.facing = delta.normalize();
+            }
             hits.push((ae, enemy.melee * dt));
         }
         if let Some((_, hpos)) = hero {
             if pos.distance(hpos) <= hero_engage {
                 enemy.blocked = true;
+                let delta = hpos - pos;
+                if delta.length_squared() > 1.0 {
+                    enemy.facing = delta.normalize();
+                }
                 hero_dmg += enemy.melee * dt;
             }
         }
@@ -2043,8 +2620,8 @@ pub fn enemy_vs_ally(
     }
 }
 
-/// Tower-raider enemies attack defensive towers directly. MOSS additionally has
-/// a one-shot boss skill that destroys the first tower it reaches.
+/// Tower-raider and ranged enemies threaten defensive towers directly. MOSS
+/// additionally has a one-shot boss skill that destroys the first tower it reaches.
 pub fn draw_tower_raider_threats(
     mut gizmos: Gizmos,
     enemies: Query<(&Enemy, &Transform)>,
@@ -2056,12 +2633,14 @@ pub fn draw_tower_raider_threats(
     }
 
     for (enemy, etf) in &enemies {
-        if (!enemy.tower_raider && !enemy.moss_destroy) || enemy.hp <= 0.0 {
+        if (!enemy.tower_raider && !enemy.moss_destroy && !enemy.ranged_tower) || enemy.hp <= 0.0 {
             continue;
         }
         let pos = etf.translation.truncate();
         let sense = if enemy.moss_destroy {
             MOSS_TOWER_SENSE
+        } else if enemy.ranged_tower {
+            enemy.ranged_range
         } else {
             TOWER_RAIDER_SENSE
         };
@@ -2079,16 +2658,22 @@ pub fn draw_tower_raider_threats(
         let urgency = (1.0 - (dist / sense).clamp(0.0, 1.0)).max(0.2);
         let color = if enemy.moss_destroy {
             Color::srgb(0.35, 1.0, 0.35)
+        } else if enemy.ranged_tower {
+            Color::srgb(0.92, 0.34, 1.0)
         } else {
             Color::srgb(1.0, 0.35, 0.18)
         };
         gizmos.line_2d(pos, target, color.with_alpha(0.25 + urgency * 0.45));
         gizmos.circle_2d(
             target,
-            TOWER_RAIDER_ENGAGE,
+            if enemy.ranged_tower {
+                TILE_SIZE * 0.65
+            } else {
+                TOWER_RAIDER_ENGAGE
+            },
             color.with_alpha(0.2 + urgency * 0.35),
         );
-        if dist <= TOWER_RAIDER_ENGAGE {
+        if dist <= TOWER_RAIDER_ENGAGE || enemy.ranged_tower {
             gizmos.circle_2d(target, TILE_SIZE * 0.55, color.with_alpha(0.75));
         }
     }
@@ -2615,8 +3200,7 @@ fn draw_angel_wings(gizmos: &mut Gizmos, center: Vec2, t: f32, tint: Color) {
             let lift = rise * (0.2 + 0.8 * f);
             // Feathers bend upward as they fan out (a mid control point fakes a curve).
             let tip = shoulder + Vec2::new(side * len, lift);
-            let mid =
-                shoulder + Vec2::new(side * len * 0.55, lift * 0.35 - TILE_SIZE * 0.05);
+            let mid = shoulder + Vec2::new(side * len * 0.55, lift * 0.35 - TILE_SIZE * 0.05);
             let a = 0.45 + 0.35 * f;
             gizmos.line_2d(shoulder, mid, tint.with_alpha(a * 0.5));
             gizmos.line_2d(mid, tip, tint.with_alpha(a));
@@ -2774,15 +3358,49 @@ pub fn enemy_vs_tower(
         return;
     }
 
-    let mut hits: HashMap<Entity, f32> = HashMap::new();
+    let mut hits: Vec<(
+        Entity,
+        f32,
+        Option<(Vec2, Vec2, Color, &'static str, Element)>,
+    )> = Vec::new();
     let mut crushes: Vec<(Entity, Vec2)> = Vec::new();
     let mut destroyed_towers = HashSet::new();
 
     for (mut enemy, etf) in &mut enemies {
+        let pos = etf.translation.truncate();
+        if enemy.ranged_timer > 0.0 {
+            enemy.ranged_timer -= dt;
+        }
+
+        if enemy.ranged_tower && enemy.ranged_damage > 0.0 && enemy.ranged_timer <= 0.0 {
+            let mut best: Option<(Entity, Vec2)> = None;
+            let mut bd = enemy.ranged_range.max(TILE_SIZE);
+            for (te, tpos) in &tower_infos {
+                let d = pos.distance(*tpos);
+                if d <= bd {
+                    bd = d;
+                    best = Some((*te, *tpos));
+                }
+            }
+            if let Some((target, tpos)) = best {
+                enemy.blocked = true;
+                let delta = tpos - pos;
+                if delta.length_squared() > 1.0 {
+                    enemy.facing = delta.normalize();
+                }
+                enemy.ranged_timer = enemy.ranged_cooldown.max(0.35);
+                let color = Color::srgb(0.92, 0.34, 1.0);
+                hits.push((
+                    target,
+                    enemy.ranged_damage,
+                    Some((pos, tpos, color, "远射", Element::Shadow)),
+                ));
+            }
+        }
+
         if !enemy.tower_raider && !enemy.moss_destroy {
             continue;
         }
-        let pos = etf.translation.truncate();
         let mut best: Option<(Entity, Vec2)> = None;
         let mut bd = TOWER_RAIDER_ENGAGE;
         for (te, tpos) in &tower_infos {
@@ -2795,6 +3413,10 @@ pub fn enemy_vs_tower(
         let Some((target, tpos)) = best else {
             continue;
         };
+        let delta = tpos - pos;
+        if delta.length_squared() > 1.0 {
+            enemy.facing = delta.normalize();
+        }
 
         if enemy.moss_destroy && !enemy.moss_destroyed {
             enemy.moss_destroyed = true;
@@ -2804,7 +3426,7 @@ pub fn enemy_vs_tower(
 
         if enemy.tower_dps > 0.0 {
             enemy.blocked = true;
-            *hits.entry(target).or_default() += enemy.tower_dps * dt;
+            hits.push((target, enemy.tower_dps * dt, None));
         }
     }
 
@@ -2824,7 +3446,7 @@ pub fn enemy_vs_tower(
         });
     }
 
-    for (target, raw) in hits {
+    for (target, raw, shot) in hits {
         if destroyed_towers.contains(&target) {
             continue;
         }
@@ -2841,20 +3463,33 @@ pub fn enemy_vs_tower(
             0.0
         };
         let pos = tower.center();
-        if tower.siege_vfx_timer <= 0.0 {
-            tower.siege_vfx_timer = if hp_frac <= 0.3 { 0.24 } else { 0.38 };
+        let ranged_hit = shot.is_some();
+        if let Some((from, to, color, _, _)) = shot {
+            spawn_layered_beam(&mut commands, from, to, color, 7.0, 0.24, 8.6, true);
+        }
+        if ranged_hit || tower.siege_vfx_timer <= 0.0 {
+            if !ranged_hit {
+                tower.siege_vfx_timer = if hp_frac <= 0.3 { 0.24 } else { 0.38 };
+            }
             let feedback_pos =
                 pos + Vec2::new(0.0, TILE_SIZE * (0.18 + tower.footprint as f32 * 0.12));
+            let (color, label, element) = shot
+                .map(|(_, _, color, label, element)| (color, label, element))
+                .unwrap_or((
+                    Color::srgb(1.0, 0.34, 0.16),
+                    "攻塔",
+                    crate::data::Element::Physical,
+                ));
             vfx.write(crate::vfx::VfxEvent::Hit {
                 pos: feedback_pos,
-                color: Color::srgb(1.0, 0.34, 0.16),
-                element: crate::data::Element::Physical,
+                color,
+                element,
             });
             vfx.write(crate::vfx::VfxEvent::TaggedNumber {
                 pos: feedback_pos,
                 amount: actual.max(1.0),
-                color: Color::srgb(1.0, 0.62, 0.24),
-                label: "攻塔",
+                color: color.mix(&Color::WHITE, 0.22),
+                label,
             });
         }
         if tower.hp > 0.0 && hp_frac <= 0.3 && !tower.low_hp_warned {
@@ -2944,6 +3579,7 @@ pub fn necromancer_raise(
                         dmg,
                         90.0,
                         14.0, // raised allies fade after 14s
+                        1.0,
                         entity,
                     );
                     ally_count += 1;
@@ -3100,8 +3736,7 @@ pub fn compute_synergy(mut towers: Query<(Entity, &mut Tower)>) {
         let set_bonus = equipment_set_bonus(&t.equipment);
         t.synergy = bonus;
         // Hero doctrine aura stacks additively with adjacency synergy.
-        t.damage =
-            (t.base_damage * (1.0 + bonus + t.aura_damage) * set_bonus.damage_mult).floor();
+        t.damage = (t.base_damage * (1.0 + bonus + t.aura_damage) * set_bonus.damage_mult).floor();
     }
 }
 

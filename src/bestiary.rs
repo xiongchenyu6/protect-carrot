@@ -1,7 +1,7 @@
 //! Monster bestiary: tracks how many of each monster species the player has slain.
 //! The screen UI lives in `ui.rs` (reuses its widgets); this is just the data.
 
-use crate::monster::{resistance_summary, species_skill, MonsterSpecies, MONSTER_SPECIES};
+use crate::monster::{MONSTER_SPECIES, MonsterSpecies, resistance_summary, species_skill};
 use bevy::prelude::*;
 use std::collections::HashMap;
 

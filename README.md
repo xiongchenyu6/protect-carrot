@@ -1,7 +1,7 @@
 # 保卫萝卜 · Bevy 移植版 (Protect the Carrot, in Bevy)
 
 A from-scratch reimplementation of the single-file browser game `保卫萝卜.html`
-in the [Bevy](https://bevyengine.org) game engine (Rust, **Bevy 0.18**), built as a
+in the [Bevy](https://bevyengine.org) game engine (Rust, **Bevy 0.19**), built as a
 **learning project** — single-player, with a **WebGPU/wasm** build for the browser.
 
 The original HTML game still lives in `保卫萝卜.html`; this Rust port is a parallel,
@@ -308,7 +308,7 @@ siege/silence systems, sprite coverage, and StoryOS/Comfy prompt coverage.
 
 ```
 保卫萝卜.html        # original single-file browser game (unchanged)
-Cargo.toml          # Bevy 0.18 + webgpu feature + pinned wasm-bindgen
+Cargo.toml          # Bevy 0.19 + webgpu feature + pinned wasm-bindgen
 flake.nix           # dev shell: Rust, wasm-bindgen-cli, trunk, lld, Bevy native libs
 build-web.sh        # wasm build + bindgen -> web/
 web/index.html      # loads the wasm module (WebGPU)

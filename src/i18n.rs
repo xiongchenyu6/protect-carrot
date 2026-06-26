@@ -8,8 +8,8 @@
 
 use bevy::prelude::*;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 /// Process-global current language, mirrored from the [`Language`] resource each
 /// frame by [`sync_current_lang`]. Lets [`t`] translate at any call site without
@@ -132,7 +132,10 @@ impl Language {
 pub fn tr(lang: Lang, zh: &str) -> String {
     match lang {
         Lang::Zh => zh.to_string(),
-        Lang::En => dict().get(zh).map(|s| s.to_string()).unwrap_or_else(|| zh.to_string()),
+        Lang::En => dict()
+            .get(zh)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| zh.to_string()),
     }
 }
 

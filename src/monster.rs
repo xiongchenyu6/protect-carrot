@@ -1,10 +1,10 @@
 //! Commercial-scale monster catalog.
 //!
 //! `EnemyKind` remains the compact behavior/art archetype used by systems. This
-//! catalog adds 100 runtime species on top: each species has its own name,
+//! catalog adds 101 runtime species on top: each species has its own name,
 //! unlock timing, stat tuning, elemental profile, and bestiary identity.
 
-use crate::data::{Element, ElementProfile, EnemyDef, EnemyKind, BOSS_WAVE_INTERVAL};
+use crate::data::{BOSS_WAVE_INTERVAL, Element, ElementProfile, EnemyDef, EnemyKind};
 use bevy::prelude::Color;
 
 /// A monster's quality tier (品级) for the bestiary, derived from its threat
@@ -72,6 +72,7 @@ pub enum BossSkill {
     StarforgedBulwark,
     MossCrush,
     DreamEclipse,
+    OldOneDominion,
 }
 
 impl BossSkill {
@@ -89,10 +90,11 @@ impl BossSkill {
             BossSkill::StarforgedBulwark => "starforged",
             BossSkill::MossCrush => "moss",
             BossSkill::DreamEclipse => "dream",
+            BossSkill::OldOneDominion => "dream",
         })
     }
 
-    pub const ALL: [BossSkill; 10] = [
+    pub const ALL: [BossSkill; 11] = [
         BossSkill::SerpentRush,
         BossSkill::AbyssalShield,
         BossSkill::YellowSilence,
@@ -103,6 +105,7 @@ impl BossSkill {
         BossSkill::StarforgedBulwark,
         BossSkill::MossCrush,
         BossSkill::DreamEclipse,
+        BossSkill::OldOneDominion,
     ];
 }
 
@@ -177,6 +180,7 @@ impl BossSkill {
             BossSkill::StarforgedBulwark => "星金壁垒",
             BossSkill::MossCrush => "菌毯塌陷",
             BossSkill::DreamEclipse => "梦蚀终眠",
+            BossSkill::OldOneDominion => "旧日支配",
         }
     }
 
@@ -193,6 +197,7 @@ impl BossSkill {
             BossSkill::StarforgedBulwark => "为周围怪物建立壁垒",
             BossSkill::MossCrush => "震裂并压制附近防御塔",
             BossSkill::DreamEclipse => "大范围静默并唤醒梦魇",
+            BossSkill::OldOneDominion => "世界首领技：大范围压制防御塔，庇护怪群并唤醒梦魇",
         }
     }
 
@@ -209,6 +214,7 @@ impl BossSkill {
             BossSkill::StarforgedBulwark => 7.5,
             BossSkill::MossCrush => 6.5,
             BossSkill::DreamEclipse => 8.0,
+            BossSkill::OldOneDominion => 9.5,
         }
     }
 }
@@ -235,6 +241,8 @@ pub fn species_skill(species: &MonsterSpecies) -> (&'static str, &'static str) {
         EnemyKind::Charger => ("冲锋破阵", "周期性突进，并会寻找附近防御塔撕咬"),
         EnemyKind::Climber => ("攻塔攀附", "离开路线攻击防御塔，威胁塔阵边缘"),
         EnemyKind::Silencer => ("静默场", "范围内防御塔开火被压制，需要拉开站位"),
+        EnemyKind::Ranged => ("远程投射", "沿路线前进时远距离攻击防御塔，需要提前拦截"),
+        EnemyKind::Exploder => ("自爆", "主动靠近防御塔或英雄后引爆；被击杀不会触发爆炸"),
         EnemyKind::Moss => ("吞塔", "首领级攻塔单位，会摧毁或重创防御塔"),
     }
 }
@@ -244,8 +252,8 @@ pub fn species_skill(species: &MonsterSpecies) -> (&'static str, &'static str) {
 /// skills is derived from its grade (see [`SkillTier::from_grade`]).
 pub struct SkillCodexEntry {
     pub icon: &'static str,
-    pub name: &'static str, // zh
-    pub desc: &'static str, // zh
+    pub name: &'static str,  // zh
+    pub desc: &'static str,  // zh
     pub tiers: &'static str, // zh — how 普通/中级/高级 differ
 }
 
@@ -311,6 +319,12 @@ pub fn skill_codex() -> &'static [SkillCodexEntry] {
             name: "冲锋",
             desc: "周期性突进提速，并寻找附近防御塔撕咬",
             tiers: "突进爆发 普通 ×2 · 中级 ×2.5 · 高级 ×3",
+        },
+        SkillCodexEntry {
+            icon: "💥",
+            name: "自爆",
+            desc: "活着靠近防御塔或英雄后主动引爆，造成范围伤害；被击杀不会触发",
+            tiers: "普通 ×1 · 中级 ×1.5 · 高级 ×2（爆炸伤害，范围略增）",
         },
         SkillCodexEntry {
             icon: "🌀",
@@ -412,6 +426,9 @@ impl MonsterSpecies {
         if def.charger {
             tags.push(skill("冲锋"));
         }
+        if def.explosive {
+            tags.push(skill("自爆"));
+        }
         if def.tower_raider {
             tags.push(skill("攻塔"));
         }
@@ -495,6 +512,7 @@ pub fn boss_skill(species_id: usize) -> BossSkill {
         97 => BossSkill::StarforgedBulwark,
         98 => BossSkill::MossCrush,
         99 => BossSkill::DreamEclipse,
+        100 => BossSkill::OldOneDominion,
         _ => BossSkill::None,
     }
 }
@@ -851,7 +869,7 @@ pub static MONSTER_SPECIES: &[MonsterSpecies] = &[
     sp!(
         20,
         "蓝焰颅灵",
-        Normal,
+        Ranged,
         7,
         6,
         1.12,
@@ -860,12 +878,12 @@ pub static MONSTER_SPECIES: &[MonsterSpecies] = &[
         0.0,
         3.0,
         FROST,
-        "颅火/冰霜"
+        "颅火/远射/冰霜"
     ),
     sp!(
         21,
-        "绿焰裂颅",
-        Splitter,
+        "绿焰爆颅",
+        Exploder,
         7,
         7,
         1.10,
@@ -874,7 +892,7 @@ pub static MONSTER_SPECIES: &[MonsterSpecies] = &[
         0.0,
         0.0,
         FIRE,
-        "颅火/分裂/剧毒"
+        "颅火/自爆/剧毒"
     ),
     sp!(
         22,
@@ -948,8 +966,8 @@ pub static MONSTER_SPECIES: &[MonsterSpecies] = &[
     ),
     sp!(
         27,
-        "赤胶拆塔体",
-        Climber,
+        "赤胶爆囊体",
+        Exploder,
         8,
         9,
         1.16,
@@ -958,7 +976,7 @@ pub static MONSTER_SPECIES: &[MonsterSpecies] = &[
         7.0,
         0.0,
         CHITIN,
-        "史莱姆/攻塔/火焰"
+        "史莱姆/自爆/火焰"
     ),
     sp!(
         28,
@@ -1523,7 +1541,7 @@ pub static MONSTER_SPECIES: &[MonsterSpecies] = &[
     sp!(
         68,
         "赤角温迪戈",
-        Normal,
+        Ranged,
         15,
         13,
         1.42,
@@ -1532,7 +1550,7 @@ pub static MONSTER_SPECIES: &[MonsterSpecies] = &[
         8.0,
         18.0,
         VOID,
-        "亡灵"
+        "亡灵/远射/虚空"
     ),
     sp!(
         69,
@@ -1663,7 +1681,7 @@ pub static MONSTER_SPECIES: &[MonsterSpecies] = &[
     sp!(
         78,
         "熔囊伏食兽",
-        Normal,
+        Exploder,
         16,
         14,
         1.50,
@@ -1672,7 +1690,7 @@ pub static MONSTER_SPECIES: &[MonsterSpecies] = &[
         8.0,
         18.0,
         FIRE,
-        "吞噬者/火焰"
+        "吞噬者/自爆/火焰"
     ),
     sp!(
         79,
@@ -1968,6 +1986,20 @@ pub static MONSTER_SPECIES: &[MonsterSpecies] = &[
         VOID,
         "终局首领/梦蚀"
     ),
+    sp!(
+        100,
+        "旧日支配者",
+        Moss,
+        19,
+        25,
+        2.45,
+        0.72,
+        3.20,
+        70.0,
+        56.0,
+        add_profile(VOID, ARCANE),
+        "世界首领/旧日/支配者/终局"
+    ),
 ];
 
 pub fn default_species_id(kind: EnemyKind) -> usize {
@@ -2004,6 +2036,13 @@ pub fn pick_boss(
     level_index: usize,
     rng: &mut crate::game::Rng,
 ) -> &'static MonsterSpecies {
+    if wave == total_waves && wave >= 20 && level_index >= 19 {
+        return MONSTER_SPECIES
+            .iter()
+            .find(|s| s.id == 100)
+            .unwrap_or(&MONSTER_SPECIES[100]);
+    }
+
     if wave == total_waves && wave >= 20 && level_index >= 18 {
         return MONSTER_SPECIES
             .iter()
@@ -2039,7 +2078,10 @@ pub fn resistance_summary(profile: ElementProfile) -> Vec<String> {
             if r > 0.0 {
                 out.push(crate::i18n::tf(
                     "{}抗{}%",
-                    &[&crate::i18n::t(element.name()), &((r * 100.0) as i32).to_string()],
+                    &[
+                        &crate::i18n::t(element.name()),
+                        &((r * 100.0) as i32).to_string(),
+                    ],
                 ));
             } else {
                 out.push(crate::i18n::tf(

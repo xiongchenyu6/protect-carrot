@@ -66,9 +66,10 @@ pub fn build_sprites(assets: &AssetServer) -> Sprites {
     }
     let mut species = HashMap::new();
     for s in MONSTER_SPECIES {
+        let sprite_id = if s.id > 99 { 99 } else { s.id };
         species.insert(
             s.id,
-            assets.load(format!("sprites/species/{:03}.webp", s.id)),
+            assets.load(format!("sprites/species/{:03}.webp", sprite_id)),
         );
     }
     let mut equipment = HashMap::new();

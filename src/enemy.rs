@@ -1,22 +1,22 @@
 //! Enemy spawning, path-following, status effects, death and carrot arrival.
 //! Ported from `spawnEnemy` / `getEnemyPoolForWave` / `updateEnemies`.
 
+use crate::Levels;
 use crate::board::Board;
 use crate::components::{Enemy, HpBarFg, LevelEntity, ShieldBarFg};
 use crate::creatures::Creatures;
 use crate::data::{Element, EnemyKind, MOSS_TOWER_SENSE, TILE_SIZE, TOWER_RAIDER_SENSE};
 use crate::equipment::{
-    equipment_set_bonus, return_equipment_to_inventory, roll_drop, EquipmentInventory, Rarity,
+    EquipmentInventory, Rarity, equipment_set_bonus, return_equipment_to_inventory, roll_drop,
 };
-use crate::game::{CurrentLevel, Rng, RunState, AUTO_WAVE_DELAY, KILL_COMBO_WINDOW};
+use crate::game::{AUTO_WAVE_DELAY, CurrentLevel, KILL_COMBO_WINDOW, Rng, RunState};
 use crate::monster::{
-    boss_skill, default_species_id, pick_boss, pick_elite_affix, pick_regular, species_by_id,
-    BossSkill, EliteAffix, MonsterSpecies, MONSTER_SPECIES,
+    BossSkill, EliteAffix, MONSTER_SPECIES, MonsterSpecies, boss_skill, default_species_id,
+    pick_boss, pick_elite_affix, pick_regular, species_by_id,
 };
 use crate::sprites::Sprites;
 use crate::states::GameState;
 use crate::ui::UiFont;
-use crate::Levels;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
@@ -24,6 +24,18 @@ const HEAL_AURA_RADIUS: f32 = 90.0;
 const BOSS_CAST_WINDUP: f32 = 0.75;
 const BOSS_ENRAGE_HP_FRACTION: f32 = 0.35;
 const BOSS_ENRAGE_SKILL_RATE: f32 = 1.55;
+
+fn enemy_visual_px(size: f32, boss: bool, elite: bool) -> f32 {
+    let base = if boss {
+        (size * 5.2).clamp(TILE_SIZE * 2.2, TILE_SIZE * 3.35)
+    } else {
+        // Creature sheets have transparent padding around the body. Size them by
+        // gameplay tile footprint, not by the raw visible pixels in the sheet.
+        (size * 10.0).clamp(TILE_SIZE * 1.9, TILE_SIZE * 3.0)
+    };
+    base * if elite { 1.22 } else { 1.0 }
+}
+
 #[derive(Component)]
 pub struct PendingBossCast {
     pub(crate) skill: BossSkill,
@@ -35,13 +47,19 @@ pub struct PendingBossCast {
 fn special_trait_badge(
     def: &crate::data::EnemyDef,
     tower_raider: bool,
+    ranged_tower: bool,
+    explosive: bool,
     silence_aura: f32,
     heal_aura: f32,
     shield: f32,
     splits: i32,
 ) -> Option<(&'static str, Color)> {
-    if tower_raider {
+    if explosive {
+        Some(("自爆", Color::srgb(1.0, 0.42, 0.12)))
+    } else if tower_raider {
         Some(("攻城", Color::srgb(1.0, 0.58, 0.22)))
+    } else if ranged_tower {
+        Some(("远射", Color::srgb(0.92, 0.44, 1.0)))
     } else if silence_aura > 0.0 {
         Some(("静默", Color::srgb(0.82, 0.45, 1.0)))
     } else if heal_aura > 0.0 {
@@ -74,6 +92,7 @@ fn spawn_one(
     wave: i32,
     level_index: usize,
     sprites: &Sprites,
+    creatures: &Creatures,
     font: &UiFont,
     diff: crate::game::Difficulty,
     elite_affix: EliteAffix,
@@ -210,6 +229,39 @@ fn spawn_one(
     let regen = regen * skill_mult;
     let heal_aura = heal_aura * skill_mult;
     let tower_dps = tower_dps * skill_mult;
+    let ranged_tower = def.ranged_tower;
+    let ranged_range = if ranged_tower {
+        def.ranged_range * (0.9 + skill_mult * 0.10)
+    } else {
+        0.0
+    };
+    let ranged_damage = if ranged_tower {
+        def.ranged_damage * skill_mult * (1.0 + (wave - 1).max(0) as f32 * 0.04).min(1.85)
+    } else {
+        0.0
+    };
+    let ranged_cooldown = if ranged_tower {
+        (def.ranged_cooldown / (0.88 + skill_mult * 0.12)).max(0.55)
+    } else {
+        def.ranged_cooldown
+    };
+    let explosive = def.explosive;
+    let explode_damage = if explosive {
+        def.explode_damage * skill_mult * (1.0 + (wave - 1).max(0) as f32 * 0.035).min(1.75)
+    } else {
+        0.0
+    };
+    let explode_radius = if explosive {
+        def.explode_radius * (0.92 + skill_mult * 0.08)
+    } else {
+        0.0
+    };
+    let explode_sense = if explosive {
+        def.explode_sense * (0.9 + skill_mult * 0.10)
+    } else {
+        0.0
+    };
+    let explode_trigger = if explosive { def.explode_trigger } else { 0.0 };
     let silence_aura = silence_aura * skill_mult;
     let shield = (shield * skill_mult).floor();
     // 硬化：护甲与魔抗按级别提升（普通不变，中级 ×1.5，高级 ×2）。
@@ -226,7 +278,14 @@ fn spawn_one(
     // update_enemies 里按 skill_mult 放大（见下）。
     let stealth = if def.invisible { 1.0 / skill_mult } else { 1.0 };
     let (start, start_path_index) = start_at.unwrap_or((board.spawn_pos(), 0));
-    let px = def.size * 4.5 * if is_elite { 1.45 } else { 1.0 };
+    let initial_facing = board
+        .path_world
+        .get(start_path_index + 1)
+        .map(|next| *next - start)
+        .filter(|delta| delta.length_squared() > 1.0)
+        .map(|delta| delta.normalize())
+        .unwrap_or(Vec2::X);
+    let px = enemy_visual_px(def.size, def.boss, is_elite);
     let bar_w = (px * 0.5).max(18.0);
     let bar_y = px * 0.5 + 2.0;
     let hp_color = if def.boss {
@@ -236,14 +295,20 @@ fn spawn_one(
     } else {
         Color::srgb(0.25, 0.9, 0.35)
     };
-    let image = sprites
-        .species
-        .get(&species.id)
-        .or_else(|| sprites.enemies.get(&kind))
-        .expect("monster species or enemy archetype sprite must be loaded")
-        .clone();
-    let mut sprite = Sprite::from_image(image);
-    sprite.custom_size = Some(Vec2::splat(px));
+    let (mut sprite, creature_anim) = if def.boss {
+        let image = sprites
+            .species
+            .get(&species.id)
+            .or_else(|| sprites.enemies.get(&kind))
+            .expect("monster species or enemy archetype sprite must be loaded")
+            .clone();
+        let mut sprite = Sprite::from_image(image);
+        sprite.custom_size = Some(Vec2::splat(px));
+        (sprite, None)
+    } else {
+        let (sprite, anim) = creatures.sprite(kind, px);
+        (sprite, Some(anim))
+    };
     if is_elite {
         sprite.color = elite_affix_color(elite_affix);
     }
@@ -254,161 +319,180 @@ fn spawn_one(
             _ => 1.0,
         };
 
-    commands
-        .spawn((
-            Enemy {
-                kind,
-                species_id: species.id,
-                hp,
-                max_hp: hp,
-                base_speed,
-                reward,
-                path_index: start_path_index,
-                armor,
-                magic_resist,
-                element_resist: species.resist_profile(),
-                flying: def.flying,
-                invisible: def.invisible,
-                skill_mult,
-                stealth,
-                regen,
-                boss: def.boss,
-                size: def.size,
-                slow_timer: 0.0,
-                stun_timer: 0.0,
-                frozen: false,
-                poison_timer: 0.0,
-                poison_damage: 0.0,
-                fire_timer: 0.0,
-                fire_damage: 0.0,
-                fire_element: Element::Fire,
-                poison_source_tower: None,
-                fire_source_tower: None,
-                curse_timer: 0.0,
-                armor_reduce: 0.0,
-                shield,
-                max_shield: shield,
-                splits,
-                heal_aura,
-                charger: def.charger,
-                charge_timer: 0.0,
-                hit_flash: 0.0,
-                last_hit_tower: None,
-                blocked: false,
-                melee: (if def.boss {
-                    40.0
-                } else {
-                    6.0 + def.hp_mod * 6.0
-                }) * melee_mult
-                    * endless_melee,
-                elite: is_elite,
-                elite_affix,
-                boss_skill_timer: if def.boss {
-                    boss_skill(species.id).cooldown() * 0.45
-                } else {
-                    0.0
-                },
-                enraged: false,
-                phase_timer: 0.0,
-                tower_raider,
-                tower_dps,
-                silence_aura,
-                moss_destroy: def.moss_destroy,
-                moss_destroyed: false,
-                incubate: def.incubate,
-                incubate_timer: 0.0,
-                incubate_stacks: 0,
-                facing: Vec2::ZERO,
+    let mut spawned = commands.spawn((
+        Enemy {
+            kind,
+            species_id: species.id,
+            hp,
+            max_hp: hp,
+            base_speed,
+            reward,
+            path_index: start_path_index,
+            armor,
+            magic_resist,
+            element_resist: species.resist_profile(),
+            flying: def.flying,
+            invisible: def.invisible,
+            skill_mult,
+            stealth,
+            regen,
+            boss: def.boss,
+            size: def.size,
+            slow_timer: 0.0,
+            stun_timer: 0.0,
+            frozen: false,
+            poison_timer: 0.0,
+            poison_damage: 0.0,
+            fire_timer: 0.0,
+            fire_damage: 0.0,
+            fire_element: Element::Fire,
+            poison_source_tower: None,
+            fire_source_tower: None,
+            curse_timer: 0.0,
+            armor_reduce: 0.0,
+            shield,
+            max_shield: shield,
+            splits,
+            heal_aura,
+            charger: def.charger,
+            charge_timer: 0.0,
+            hit_flash: 0.0,
+            last_hit_tower: None,
+            blocked: false,
+            melee: (if def.boss {
+                40.0
+            } else {
+                6.0 + def.hp_mod * 6.0
+            }) * melee_mult
+                * endless_melee,
+            elite: is_elite,
+            elite_affix,
+            boss_skill_timer: if def.boss {
+                boss_skill(species.id).cooldown() * 0.45
+            } else {
+                0.0
             },
-            sprite,
-            Transform::from_translation(start.extend(5.0)),
-            LevelEntity,
-        ))
-        .with_children(|p| {
-            // HP bar background (dark) + foreground (green, anchored left so it
-            // shrinks toward the left as `update_hp_bars` scales its x).
+            enraged: false,
+            phase_timer: 0.0,
+            tower_raider,
+            tower_dps,
+            silence_aura,
+            ranged_tower,
+            ranged_range,
+            ranged_damage,
+            ranged_cooldown,
+            ranged_timer: ranged_cooldown * 0.45,
+            explosive,
+            explode_damage,
+            explode_radius,
+            explode_sense,
+            explode_trigger,
+            moss_destroy: def.moss_destroy,
+            moss_destroyed: false,
+            incubate: def.incubate,
+            incubate_timer: 0.0,
+            incubate_stacks: 0,
+            facing: initial_facing,
+        },
+        sprite,
+        Transform::from_translation(start.extend(5.0)),
+        LevelEntity,
+    ));
+    if let Some(anim) = creature_anim {
+        spawned.insert(anim);
+    }
+    spawned.with_children(|p| {
+        // HP bar background (dark) + foreground (green, anchored left so it
+        // shrinks toward the left as `update_hp_bars` scales its x).
+        p.spawn((
+            Sprite {
+                color: Color::srgb(0.08, 0.08, 0.08),
+                custom_size: Some(Vec2::new(bar_w, 4.0)),
+                ..default()
+            },
+            Transform::from_xyz(0.0, bar_y, 0.1),
+        ));
+        p.spawn((
+            Sprite {
+                color: hp_color,
+                custom_size: Some(Vec2::new(bar_w, 4.0)),
+                ..default()
+            },
+            Anchor::CENTER_LEFT,
+            Transform::from_xyz(-bar_w / 2.0, bar_y, 0.2),
+            HpBarFg,
+        ));
+        p.spawn((
+            Sprite {
+                color: Color::srgb(0.35, 0.75, 1.0),
+                custom_size: Some(Vec2::new(bar_w, 3.0)),
+                ..default()
+            },
+            Anchor::CENTER_LEFT,
+            Transform::from_xyz(-bar_w / 2.0, bar_y + 4.0, 0.3),
+            ShieldBarFg,
+        ));
+        if def.boss {
+            let skill = boss_skill(species.id);
+            let text = if skill == BossSkill::None {
+                crate::i18n::tf("首领·{}", &[&crate::i18n::t(species.name)])
+            } else {
+                crate::i18n::tf(
+                    "首领·{}\n{}",
+                    &[&crate::i18n::t(species.name), &crate::i18n::t(skill.name())],
+                )
+            };
             p.spawn((
-                Sprite {
-                    color: Color::srgb(0.08, 0.08, 0.08),
-                    custom_size: Some(Vec2::new(bar_w, 4.0)),
+                Text2d::new(text),
+                TextFont {
+                    font: FontSource::Handle(font.0.clone()),
+                    font_size: FontSize::Px(11.0),
                     ..default()
                 },
-                Transform::from_xyz(0.0, bar_y, 0.1),
+                TextColor(boss_skill_color(skill)),
+                Transform::from_xyz(0.0, bar_y + 14.0, 0.7),
             ));
+        } else if is_elite {
             p.spawn((
-                Sprite {
-                    color: hp_color,
-                    custom_size: Some(Vec2::new(bar_w, 4.0)),
+                Text2d::new(crate::i18n::t(elite_affix.name())),
+                TextFont {
+                    font: FontSource::Handle(font.0.clone()),
+                    font_size: FontSize::Px(12.0),
                     ..default()
                 },
-                Anchor::CENTER_LEFT,
-                Transform::from_xyz(-bar_w / 2.0, bar_y, 0.2),
-                HpBarFg,
+                TextColor(elite_affix_color(elite_affix)),
+                Transform::from_xyz(0.0, bar_y + 12.0, 0.6),
             ));
+        } else if let Some((label, color)) = special_trait_badge(
+            def,
+            tower_raider,
+            ranged_tower,
+            explosive,
+            silence_aura,
+            heal_aura,
+            shield,
+            splits,
+        ) {
             p.spawn((
                 Sprite {
-                    color: Color::srgb(0.35, 0.75, 1.0),
-                    custom_size: Some(Vec2::new(bar_w, 3.0)),
+                    color: Color::srgba(0.02, 0.02, 0.04, 0.78),
+                    custom_size: Some(Vec2::new(30.0, 12.0)),
                     ..default()
                 },
-                Anchor::CENTER_LEFT,
-                Transform::from_xyz(-bar_w / 2.0, bar_y + 4.0, 0.3),
-                ShieldBarFg,
+                Transform::from_xyz(0.0, bar_y + 12.0, 0.55),
             ));
-            if def.boss {
-                let skill = boss_skill(species.id);
-                let text = if skill == BossSkill::None {
-                    crate::i18n::tf("首领·{}", &[&crate::i18n::t(species.name)])
-                } else {
-                    crate::i18n::tf(
-                        "首领·{}\n{}",
-                        &[&crate::i18n::t(species.name), &crate::i18n::t(skill.name())],
-                    )
-                };
-                p.spawn((
-                    Text2d::new(text),
-                    TextFont {
-                        font: FontSource::Handle(font.0.clone()),
-                        font_size: FontSize::Px(11.0),
-                        ..default()
-                    },
-                    TextColor(boss_skill_color(skill)),
-                    Transform::from_xyz(0.0, bar_y + 14.0, 0.7),
-                ));
-            } else if is_elite {
-                p.spawn((
-                    Text2d::new(crate::i18n::t(elite_affix.name())),
-                    TextFont {
-                        font: FontSource::Handle(font.0.clone()),
-                        font_size: FontSize::Px(12.0),
-                        ..default()
-                    },
-                    TextColor(elite_affix_color(elite_affix)),
-                    Transform::from_xyz(0.0, bar_y + 12.0, 0.6),
-                ));
-            } else if let Some((label, color)) =
-                special_trait_badge(def, tower_raider, silence_aura, heal_aura, shield, splits)
-            {
-                p.spawn((
-                    Sprite {
-                        color: Color::srgba(0.02, 0.02, 0.04, 0.78),
-                        custom_size: Some(Vec2::new(30.0, 12.0)),
-                        ..default()
-                    },
-                    Transform::from_xyz(0.0, bar_y + 12.0, 0.55),
-                ));
-                p.spawn((
-                    Text2d::new(crate::i18n::t(label)),
-                    TextFont {
-                        font: FontSource::Handle(font.0.clone()),
-                        font_size: FontSize::Px(10.0),
-                        ..default()
-                    },
-                    TextColor(color),
-                    Transform::from_xyz(0.0, bar_y + 11.0, 0.65),
-                ));
-            }
-        });
+            p.spawn((
+                Text2d::new(crate::i18n::t(label)),
+                TextFont {
+                    font: FontSource::Handle(font.0.clone()),
+                    font_size: FontSize::Px(10.0),
+                    ..default()
+                },
+                TextColor(color),
+                Transform::from_xyz(0.0, bar_y + 11.0, 0.65),
+            ));
+        }
+    });
 }
 
 /// Keep each enemy's HP and shield bars scaled to their current fractions.
@@ -513,6 +597,7 @@ pub fn spawn_enemies(
     mut rng: ResMut<Rng>,
     enemies: Query<(), With<Enemy>>,
     sprites: Res<Sprites>,
+    creatures: Res<Creatures>,
     font: Res<UiFont>,
     diff: Res<crate::game::GameDifficulty>,
     mut next: ResMut<NextState<GameState>>,
@@ -571,6 +656,7 @@ pub fn spawn_enemies(
             run.wave,
             current.0,
             &sprites,
+            &creatures,
             &font,
             diff.0,
             elite_affix,
@@ -593,8 +679,12 @@ pub fn spawn_enemies(
                 boss_skill_color(boss_skill(species.id))
             } else if is_elite {
                 elite_affix_color(elite_affix)
+            } else if species.kind.def().explosive {
+                Color::srgb(1.0, 0.42, 0.12)
             } else if species.kind.def().silence_aura > 0.0 {
                 Color::srgb(0.82, 0.45, 1.0)
+            } else if species.kind.def().ranged_tower {
+                Color::srgb(0.92, 0.44, 1.0)
             } else if species.kind.def().tower_raider || species.kind.def().moss_destroy {
                 Color::srgb(0.95, 0.62, 0.18)
             } else {
@@ -605,7 +695,10 @@ pub fn spawn_enemies(
             } else if is_elite {
                 crate::i18n::tf(
                     "新威胁 {}·{}",
-                    &[&crate::i18n::t(elite_affix.name()), &crate::i18n::t(species.name)],
+                    &[
+                        &crate::i18n::t(elite_affix.name()),
+                        &crate::i18n::t(species.name),
+                    ],
                 )
             } else {
                 crate::i18n::tf("新威胁 {}", &[&crate::i18n::t(species.name)])
@@ -701,7 +794,10 @@ pub fn spawn_enemies(
                     2.4,
                 );
             } else {
-                run.show(crate::i18n::tf("波次完成！利息 +{}", &[&interest.to_string()]));
+                run.show(crate::i18n::tf(
+                    "波次完成！利息 +{}",
+                    &[&interest.to_string()],
+                ));
             }
             run.wave_perfect = false;
         }
@@ -746,7 +842,7 @@ pub fn animate_enemy_sprites(
 ) {
     let elapsed = time.elapsed_secs() * run.game_speed.max(0.25);
     for (enemy, mut sprite) in &mut q {
-        let base = enemy.size * 4.5 * if enemy.elite { 1.45 } else { 1.0 };
+        let base = enemy_visual_px(enemy.size, enemy.boss, enemy.elite);
         let status_slow = if enemy.frozen || enemy.stun_timer > 0.0 {
             0.25
         } else if enemy.blocked {
@@ -834,6 +930,7 @@ fn boss_skill_color(skill: BossSkill) -> Color {
         BossSkill::StarforgedBulwark => Color::srgb(0.95, 0.82, 0.3),
         BossSkill::MossCrush => Color::srgb(0.18, 0.78, 0.35),
         BossSkill::DreamEclipse => Color::srgb(0.7, 0.15, 0.95),
+        BossSkill::OldOneDominion => Color::srgb(0.95, 0.08, 0.62),
     }
 }
 
@@ -850,6 +947,7 @@ fn boss_skill_radius(skill: BossSkill) -> f32 {
         BossSkill::StarforgedBulwark => 175.0,
         BossSkill::MossCrush => 190.0,
         BossSkill::DreamEclipse => 250.0,
+        BossSkill::OldOneDominion => 320.0,
     }
 }
 
@@ -870,6 +968,7 @@ fn boss_skill_threatens_towers(skill: BossSkill) -> bool {
             | BossSkill::FurnaceBurn
             | BossSkill::MossCrush
             | BossSkill::DreamEclipse
+            | BossSkill::OldOneDominion
     )
 }
 
@@ -912,6 +1011,22 @@ fn rush_forward(enemy: &mut Enemy, tf: &mut Transform, board: &Board, distance: 
     }
 }
 
+fn project_to_path_segment(path: &[Vec2], path_index: usize, pos: Vec2) -> Vec2 {
+    let Some(&from) = path.get(path_index) else {
+        return pos;
+    };
+    let Some(&to) = path.get(path_index + 1) else {
+        return from;
+    };
+    let seg = to - from;
+    let len_sq = seg.length_squared();
+    if len_sq <= 0.01 {
+        return from;
+    }
+    let t = ((pos - from).dot(seg) / len_sq).clamp(0.0, 1.0);
+    from + seg * t
+}
+
 fn damage_towers_in_radius(
     commands: &mut Commands,
     run: &mut RunState,
@@ -924,6 +1039,7 @@ fn damage_towers_in_radius(
     cooldown_delay: f32,
     destroyed_msg: &'static str,
     color: Color,
+    source_label: &'static str,
 ) -> usize {
     let mut touched = 0;
     let mut destroyed = Vec::new();
@@ -962,7 +1078,7 @@ fn damage_towers_in_radius(
             pos,
             amount: actual,
             color,
-            label: "首领",
+            label: source_label,
         });
         let hp_frac = if tower.max_hp > 0.0 {
             (tower.hp / tower.max_hp).clamp(0.0, 1.0)
@@ -973,8 +1089,11 @@ fn damage_towers_in_radius(
             tower.low_hp_warned = true;
             run.show_for(
                 crate::i18n::tf(
-                    "{}防御塔被首领重创，按 R 修理！",
-                    &[&crate::i18n::t(tower.kind.def().name)],
+                    "{}防御塔被{}重创，按 R 修理！",
+                    &[
+                        &crate::i18n::t(tower.kind.def().name),
+                        &crate::i18n::t(source_label),
+                    ],
                 ),
                 2.6,
             );
@@ -1008,6 +1127,49 @@ fn damage_towers_in_radius(
         });
     }
     touched
+}
+
+fn trigger_self_destruct(
+    commands: &mut Commands,
+    run: &mut RunState,
+    inv: &mut EquipmentInventory,
+    towers: &mut Query<(Entity, &mut crate::tower::Tower)>,
+    vfx: &mut MessageWriter<crate::vfx::VfxEvent>,
+    entity: Entity,
+    origin: Vec2,
+    radius: f32,
+    damage: f32,
+) {
+    let color = Color::srgb(1.0, 0.42, 0.12);
+    vfx.write(crate::vfx::VfxEvent::Text {
+        pos: origin + Vec2::new(0.0, TILE_SIZE * 0.55),
+        text: crate::i18n::t("自爆!"),
+        color,
+        size: 18.0,
+        life: 0.85,
+    });
+    let touched = damage_towers_in_radius(
+        commands,
+        run,
+        inv,
+        towers,
+        vfx,
+        origin,
+        radius,
+        damage,
+        0.9,
+        "自爆炸毁了一座防御塔！",
+        color,
+        "自爆",
+    );
+    if touched == 0 {
+        vfx.write(crate::vfx::VfxEvent::Explosion {
+            pos: origin,
+            radius,
+            color,
+        });
+    }
+    commands.entity(entity).despawn();
 }
 
 /// Timed species-specific boss casts. MOSS keeps its first-tower destruction in
@@ -1114,6 +1276,7 @@ pub fn boss_specials(
                 | BossSkill::BroodHeal
                 | BossSkill::MossCrush
                 | BossSkill::DreamEclipse
+                | BossSkill::OldOneDominion
                 | BossSkill::None => {}
             }
 
@@ -1185,6 +1348,7 @@ pub fn boss_specials(
                     0.6,
                     "蛇父撞碎了一座防御塔！",
                     color,
+                    "首领",
                 );
             }
             BossSkill::AbyssalShield => {
@@ -1216,6 +1380,7 @@ pub fn boss_specials(
                     2.4,
                     "黄印让防御塔沉默崩塌！",
                     color,
+                    "首领",
                 );
             }
             BossSkill::StormSurge => {
@@ -1231,6 +1396,7 @@ pub fn boss_specials(
                     1.2,
                     "雷暴撕裂了一座防御塔！",
                     color,
+                    "首领",
                 );
             }
             BossSkill::FurnaceBurn => {
@@ -1246,6 +1412,7 @@ pub fn boss_specials(
                     0.9,
                     "赤星焚毁了一座防御塔！",
                     color,
+                    "首领",
                 );
             }
             BossSkill::BroodHeal => {
@@ -1314,6 +1481,7 @@ pub fn boss_specials(
                     1.7,
                     "MOSS的菌毯压垮了一座防御塔！",
                     color,
+                    "首领",
                 );
             }
             BossSkill::DreamEclipse => {
@@ -1329,6 +1497,7 @@ pub fn boss_specials(
                     3.0,
                     "梦蚀吞没了一座防御塔！",
                     color,
+                    "首领",
                 );
                 for (_, mut ally, tf, _) in &mut enemies {
                     if ally.hp <= 0.0
@@ -1350,6 +1519,54 @@ pub fn boss_specials(
                     );
                 }
             }
+            BossSkill::OldOneDominion => {
+                damage_towers_in_radius(
+                    &mut commands,
+                    &mut run,
+                    &mut inv,
+                    &mut towers,
+                    &mut vfx,
+                    cast.pos,
+                    cast.radius,
+                    68.0,
+                    3.8,
+                    "旧日支配者撕碎了一座防御塔！",
+                    color,
+                    "首领",
+                );
+                for (_, mut ally, tf, _) in &mut enemies {
+                    if ally.hp <= 0.0
+                        || tf.translation.truncate().distance(cast.pos) > cast.radius * 1.05
+                    {
+                        continue;
+                    }
+                    ally.armor_reduce = 0.0;
+                    ally.curse_timer = 0.0;
+                    let max_hp = ally.max_hp;
+                    ally.hp = (ally.hp + max_hp * 0.08).min(max_hp);
+                    grant_shield(&mut ally, max_hp * 0.20, max_hp * 0.85);
+                }
+                let child_hp = (54.0 + run.wave as f32 * 8.0).min(260.0);
+                for offset in [
+                    Vec2::new(-32.0, -12.0),
+                    Vec2::new(32.0, -12.0),
+                    Vec2::new(-18.0, 22.0),
+                    Vec2::new(18.0, 22.0),
+                ] {
+                    spawn_child(
+                        &mut commands,
+                        &creatures,
+                        cast.pos + offset,
+                        cast.path_index,
+                        child_hp,
+                    );
+                }
+                vfx.write(crate::vfx::VfxEvent::Explosion {
+                    pos: cast.pos,
+                    radius: cast.radius * 1.08,
+                    color,
+                });
+            }
             BossSkill::None => {}
         }
     }
@@ -1366,7 +1583,7 @@ pub fn update_enemies(
     mut inv: ResMut<EquipmentInventory>,
     mut bestiary: ResMut<crate::bestiary::Bestiary>,
     mut hero_loadout: ResMut<crate::hero::HeroLoadout>,
-    mut towers: Query<&mut crate::tower::Tower>,
+    mut towers: Query<(Entity, &mut crate::tower::Tower)>,
     mut q: Query<(Entity, &mut Enemy, &mut Transform)>,
     mut next: ResMut<NextState<GameState>>,
     mut vfx: MessageWriter<crate::vfx::VfxEvent>,
@@ -1383,11 +1600,11 @@ pub fn update_enemies(
     }
     let path = &board.path_world;
     let last = path.len().saturating_sub(1);
-    let tower_positions: Vec<Vec2> = towers.iter().map(|t| t.center()).collect();
-    // Aggro (仇恨): enemies within this range of the hero break off the path and
-    // chase it instead, then brawl once adjacent (see `enemy_vs_ally`).
-    let hero_aggro_pos: Option<Vec2> = towers.iter().find(|t| t.hero).map(|t| t.center());
-    const HERO_AGGRO_RANGE: f32 = TILE_SIZE * 2.6;
+    let tower_positions: Vec<Vec2> = towers
+        .iter()
+        .filter(|(_, t)| t.hp > 0.0)
+        .map(|(_, t)| t.center())
+        .collect();
 
     for (entity, mut e, mut tf) in &mut q {
         // Damage-over-time (with sparse colored sparks so the drain is visible).
@@ -1401,7 +1618,7 @@ pub fn update_enemies(
             if dealt > 0.0 {
                 e.last_hit_tower = e.poison_source_tower;
                 if let Some(source_tower) = e.poison_source_tower {
-                    if let Ok(mut tower) = towers.get_mut(source_tower) {
+                    if let Ok((_, mut tower)) = towers.get_mut(source_tower) {
                         tower.damage_done += dealt;
                     }
                 }
@@ -1423,7 +1640,7 @@ pub fn update_enemies(
             if dealt > 0.0 {
                 e.last_hit_tower = e.fire_source_tower;
                 if let Some(source_tower) = e.fire_source_tower {
-                    if let Ok(mut tower) = towers.get_mut(source_tower) {
+                    if let Ok((_, mut tower)) = towers.get_mut(source_tower) {
                         tower.damage_done += dealt;
                     }
                 }
@@ -1475,8 +1692,36 @@ pub fn update_enemies(
                 speed *= 1.0 + e.skill_mult;
             }
         }
+        let pos = tf.translation.truncate();
+        let explosive_target = if e.explosive && !e.frozen && e.hp > 0.0 {
+            let nearest = tower_positions
+                .iter()
+                .filter_map(|tpos| {
+                    let dist = pos.distance(*tpos);
+                    (dist <= e.explode_sense).then_some((*tpos, dist))
+                })
+                .min_by(|a, b| a.1.total_cmp(&b.1));
+            if let Some((_, dist)) = nearest {
+                if dist <= e.explode_trigger {
+                    trigger_self_destruct(
+                        &mut commands,
+                        &mut run,
+                        &mut inv,
+                        &mut towers,
+                        &mut vfx,
+                        entity,
+                        pos,
+                        e.explode_radius,
+                        e.explode_damage,
+                    );
+                    continue;
+                }
+            }
+            nearest.map(|(tpos, _)| tpos)
+        } else {
+            None
+        };
         if !e.frozen && !e.blocked && e.path_index < last {
-            let pos = tf.translation.truncate();
             // Flying units ignore the winding ground path and beeline straight to
             // the carrot (the final path point) — the shortest possible route.
             let target = if e.flying {
@@ -1503,10 +1748,12 @@ pub fn update_enemies(
             } else {
                 None
             };
-            // Hero aggro takes top priority, then tower-raiding, then the path.
-            let aggro = hero_aggro_pos.filter(|hp| pos.distance(*hp) <= HERO_AGGRO_RANGE);
-            let goal = aggro.or(raid_target).unwrap_or(target);
-            let off_path = aggro.is_some() || raid_target.is_some();
+            // Normal ground enemies stay on the route. They only fight the hero or
+            // summons when those units physically block the path (`enemy_vs_ally`).
+            // Dedicated tower-raiders/MOSS and active self-detonators are the only
+            // enemies allowed to leave it.
+            let goal = explosive_target.or(raid_target).unwrap_or(target);
+            let off_path = explosive_target.is_some() || raid_target.is_some();
             let delta = goal - pos;
             let dist = delta.length();
             if !off_path && dist < 5.0 {
@@ -1515,10 +1762,18 @@ pub fn update_enemies(
                 if e.flying {
                     e.path_index = last;
                 } else {
+                    tf.translation.x = target.x;
+                    tf.translation.y = target.y;
                     e.path_index += 1;
                 }
             } else {
-                let mult = if off_path { 0.9 } else { 1.0 };
+                let mult = if explosive_target.is_some() {
+                    1.08
+                } else if off_path {
+                    0.9
+                } else {
+                    1.0
+                };
                 let step_len = (speed * mult * dt).min(dist);
                 if dist > 0.5 {
                     let unit = delta / dist;
@@ -1526,6 +1781,12 @@ pub fn update_enemies(
                     let step = unit * step_len;
                     tf.translation.x += step.x;
                     tf.translation.y += step.y;
+                    if !off_path && !e.flying {
+                        let locked =
+                            project_to_path_segment(path, e.path_index, tf.translation.truncate());
+                        tf.translation.x = locked.x;
+                        tf.translation.y = locked.y;
+                    }
                 }
             }
         }
@@ -1575,7 +1836,7 @@ pub fn update_enemies(
             run.gold += e.reward + bounty;
             run.kills += 1;
             if let Some(source_tower) = e.last_hit_tower {
-                if let Ok(mut tower) = towers.get_mut(source_tower) {
+                if let Ok((_, mut tower)) = towers.get_mut(source_tower) {
                     tower.kills += 1;
                     if tower.hero {
                         let xp = if e.boss {
@@ -1778,6 +2039,16 @@ fn spawn_splinter(commands: &mut Commands, creatures: &Creatures, parent: &Enemy
             tower_raider: false,
             tower_dps: 0.0,
             silence_aura: 0.0,
+            ranged_tower: false,
+            ranged_range: 0.0,
+            ranged_damage: 0.0,
+            ranged_cooldown: 1.5,
+            ranged_timer: 0.0,
+            explosive: false,
+            explode_damage: 0.0,
+            explode_radius: 0.0,
+            explode_sense: 0.0,
+            explode_trigger: 0.0,
             moss_destroy: false,
             moss_destroyed: false,
             incubate: false,
@@ -1853,6 +2124,16 @@ fn spawn_child(
             tower_raider: false,
             tower_dps: 0.0,
             silence_aura: 0.0,
+            ranged_tower: false,
+            ranged_range: 0.0,
+            ranged_damage: 0.0,
+            ranged_cooldown: 1.5,
+            ranged_timer: 0.0,
+            explosive: false,
+            explode_damage: 0.0,
+            explode_radius: 0.0,
+            explode_sense: 0.0,
+            explode_trigger: 0.0,
             moss_destroy: false,
             moss_destroyed: false,
             incubate: false,
@@ -1884,6 +2165,7 @@ pub fn incubation(
     current: Res<CurrentLevel>,
     mut rng: ResMut<Rng>,
     sprites: Res<Sprites>,
+    creatures: Res<Creatures>,
     font: Res<UiFont>,
     diff: Res<crate::game::GameDifficulty>,
     mut enemies: Query<(Entity, &mut Enemy, &mut Transform, &mut Sprite)>,
@@ -1923,6 +2205,7 @@ pub fn incubation(
                 run.wave,
                 current.0,
                 &sprites,
+                &creatures,
                 &font,
                 diff.0,
                 EliteAffix::None,

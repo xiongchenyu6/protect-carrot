@@ -2,7 +2,7 @@
 //! socketed into towers (up to 3 pieces) and can change stats, durability,
 //! armor-piercing, and elemental damage.
 
-use crate::data::{hex, Element};
+use crate::data::{Element, hex};
 use bevy::prelude::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -573,7 +573,10 @@ pub fn recommend_text(d: &EquipmentDef) -> String {
     } else if d.armor_pierce >= 4.0 {
         crate::i18n::t("推荐：对重甲怪的主力塔（加农 / 火炮）")
     } else if let Some(el) = d.element {
-        crate::i18n::tf("推荐：{}系塔，强化其元素打击", &[&crate::i18n::t(el.name())])
+        crate::i18n::tf(
+            "推荐：{}系塔，强化其元素打击",
+            &[&crate::i18n::t(el.name())],
+        )
     } else {
         crate::i18n::t("推荐：通用，装在主输出塔上最划算")
     };
@@ -583,7 +586,9 @@ pub fn recommend_text(d: &EquipmentDef) -> String {
             &[&crate::i18n::t(el.name()), &crate::i18n::t(el.name())],
         ));
     } else {
-        tip.push_str(&crate::i18n::t("\n联动：凑齐 3 件 / 多件高阶遗物触发套装加成"));
+        tip.push_str(&crate::i18n::t(
+            "\n联动：凑齐 3 件 / 多件高阶遗物触发套装加成",
+        ));
     }
     tip
 }

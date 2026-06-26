@@ -9,6 +9,7 @@
 
 use crate::components::Enemy;
 use crate::data::EnemyKind;
+use crate::tower::Summon;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
@@ -37,7 +38,7 @@ pub struct CreatureAnim {
 }
 
 /// (enemy kind, sheet stem, square frame px, locomotion frames, attack frames).
-fn mapping() -> [(EnemyKind, &'static str, u32, usize, usize); 16] {
+fn mapping() -> [(EnemyKind, &'static str, u32, usize, usize); 18] {
     use EnemyKind::*;
     [
         (Normal, "goblin", 150, 8, 8),
@@ -55,8 +56,19 @@ fn mapping() -> [(EnemyKind, &'static str, u32, usize, usize); 16] {
         (Charger, "fireworm", 90, 9, 16),
         (Climber, "fireworm", 90, 9, 16),
         (Silencer, "bat", 87, 11, 11),
+        (Ranged, "wizard", 140, 8, 13),
+        (Exploder, "fireworm", 90, 9, 16),
         (Moss, "wizard", 140, 8, 13),
     ]
+}
+
+/// Horizontal direction the unflipped source sheet faces.
+fn source_face_x(kind: EnemyKind) -> f32 {
+    use EnemyKind::*;
+    match kind {
+        Charger | Climber | Exploder => -1.0,
+        _ => 1.0,
+    }
 }
 
 pub fn load_creatures(
@@ -122,20 +134,38 @@ impl Creatures {
 }
 
 /// Advance creature frames; swap between locomotion and attack sheets based on whether
-/// the enemy is currently engaged (`blocked`). Summons have a `CreatureAnim` but no
-/// `Enemy`, so they always animate their locomotion sheet.
+/// the creature is currently striking. Enemies use `Enemy::blocked`; allied summons
+/// use their melee attack timer.
 pub fn animate_creatures(
     time: Res<Time>,
     creatures: Res<Creatures>,
-    mut q: Query<(Option<&Enemy>, &mut CreatureAnim, &mut Sprite)>,
+    mut q: Query<(
+        Option<&Enemy>,
+        Option<&Summon>,
+        &mut CreatureAnim,
+        &mut Sprite,
+    )>,
 ) {
-    for (enemy, mut a, mut sprite) in &mut q {
-        let attacking = enemy.is_some_and(|e| e.blocked && e.hp > 0.0);
+    for (enemy, summon, mut a, mut sprite) in &mut q {
+        let attacking = enemy.is_some_and(|e| e.blocked && e.hp > 0.0)
+            || summon.is_some_and(|s| s.attack_timer > 0.0 && s.hp > 0.0);
+        let facing = enemy
+            .map(|e| e.facing)
+            .or_else(|| summon.map(|s| s.facing))
+            .unwrap_or(Vec2::ZERO);
+        if facing.x.abs() > 0.05 {
+            let desired_face_x = if facing.x < 0.0 { -1.0 } else { 1.0 };
+            sprite.flip_x = desired_face_x != source_face_x(a.kind);
+        }
         if attacking != a.attacking {
             a.attacking = attacking;
             let cfg = &creatures.0[&a.kind];
             let (img, lay, frames) = if attacking {
-                (cfg.atk_image.clone(), cfg.atk_layout.clone(), cfg.atk_frames)
+                (
+                    cfg.atk_image.clone(),
+                    cfg.atk_layout.clone(),
+                    cfg.atk_frames,
+                )
             } else {
                 (cfg.image.clone(), cfg.layout.clone(), cfg.frames)
             };

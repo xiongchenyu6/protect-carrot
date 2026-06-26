@@ -5,7 +5,7 @@
 //! regular [`Tower`] (so it reuses attack/render/HP/damage) carrying the `hero`
 //! flag, a free-floating `hero_pos`, and an optional `move_target`.
 
-use crate::data::{Behavior, Element, TowerKind, BOARD_H};
+use crate::data::{BOARD_H, Behavior, Element, TowerKind};
 use crate::tower::Tower;
 use bevy::prelude::*;
 
@@ -130,10 +130,10 @@ impl Class {
             Class::Ranger => "【赏金猎手】击杀额外金币，发育打钱最快",
             Class::Guardian => "【统御军阵】光环为周围塔加攻、自身扛线",
             Class::Stormcaller => "【风暴领域】身边形成减速力场，群体控场核心",
-            Class::Warden => "【戍卫结界】大幅提升周围塔射程的远程辅助",
+            Class::Warden => "【戍卫结界】穿透哨箭减速敌线，并大幅提升周围塔射程",
             Class::Assassin => "【背击刺杀】绕后背击爆发，专精操作打BOSS",
-            Class::Priest => "【圣疗领域】持续治疗萝卜与周围塔的守护者",
-            Class::Engineer => "【超频力场】最强塔联动，全面拉高周围塔攻速",
+            Class::Priest => "【圣疗领域】圣印范围削弱敌人，持续治疗萝卜与周围塔",
+            Class::Engineer => "【超频力场】电磁脉冲弹跳迟滞敌人，全面拉高周围塔攻速",
         }
     }
 
@@ -143,15 +143,15 @@ impl Class {
     /// auto-activates as the ultimate once the hero hits level 30.
     pub fn ult_slot(self) -> usize {
         match self {
-            Class::Warrior => 3,    // was 血性反击
-            Class::Mage => 4,       // was 元素亲和
-            Class::Ranger => 3,     // was 连珠追猎
-            Class::Guardian => 3,   // was 壁垒修复 (slot was unused in stats anyway)
+            Class::Warrior => 3,     // was 血性反击
+            Class::Mage => 4,        // was 元素亲和
+            Class::Ranger => 3,      // was 连珠追猎
+            Class::Guardian => 3,    // was 壁垒修复 (slot was unused in stats anyway)
             Class::Stormcaller => 4, // was 充能矩阵
-            Class::Warden => 4,     // was 补给信标 (slot was unused in stats anyway)
-            Class::Assassin => 4,   // was 破甲诅咒
-            Class::Priest => 1,     // was 祷言祝福
-            Class::Engineer => 1,   // was 过载线圈 → 神之塔
+            Class::Warden => 4,      // was 补给信标 (slot was unused in stats anyway)
+            Class::Assassin => 4,    // was 破甲诅咒
+            Class::Priest => 1,      // was 祷言祝福
+            Class::Engineer => 1,    // was 过载线圈 → 神之塔
         }
     }
 
@@ -211,8 +211,8 @@ impl Class {
             Class::Stormcaller => "辅助 · 群体减速",
             Class::Warden => "辅助 · 射程增幅 · 反隐形",
             Class::Assassin => "近战 · 背击打BOSS",
-            Class::Priest => "辅助 · 召唤治疗",
-            Class::Engineer => "辅助 · 攻速超频",
+            Class::Priest => "远程 · 圣印削弱 · 召唤治疗",
+            Class::Engineer => "远程 · 电磁脉冲 · 攻速超频",
         }
     }
 
@@ -635,7 +635,7 @@ impl Class {
                 cooldown: 0.64,
                 hp: 460.0,
                 behavior: Behavior::Single,
-                element: Element::Physical,
+                element: Element::Storm,
                 aoe_radius: 0.0,
             },
         }

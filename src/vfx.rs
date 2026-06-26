@@ -57,6 +57,13 @@ pub enum VfxEvent {
         color: Color,
         poison: bool,
     },
+    /// Local melee cleave ring for warrior-style area hits. This deliberately does
+    /// not shake the camera; the normal per-enemy hit events provide impact.
+    MeleeCleave {
+        pos: Vec2,
+        radius: f32,
+        color: Color,
+    },
     /// Quiet green restoration sparks.
     Heal { pos: Vec2 },
     /// Floating damage number.
@@ -74,6 +81,8 @@ pub enum VfxEvent {
         color: Color,
         strong: bool,
     },
+    /// Priest hit feedback: a gold-white holy strike attached to the enemy body.
+    HolyStrike { pos: Vec2, strong: bool },
     /// Floating label for discoveries and other non-damage feedback.
     Text {
         pos: Vec2,
@@ -250,6 +259,75 @@ fn element_hit_flourish(commands: &mut Commands, rng: &mut Rng, pos: Vec2, eleme
         }
         // Physical / Arcane: the generic impact already reads well.
         _ => {}
+    }
+}
+
+fn spawn_holy_strike(
+    commands: &mut Commands,
+    rng: &mut Rng,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<ColorMaterial>,
+    pos: Vec2,
+    strong: bool,
+) {
+    let gold = Color::srgb(1.0, 0.88, 0.36);
+    let white = Color::srgb(1.0, 0.98, 0.82);
+    let radius = if strong { 28.0 } else { 20.0 };
+    let life = if strong { 0.34 } else { 0.24 };
+
+    // A vertical light column pins the impact to the monster body instead of
+    // reading as another projectile fired from the priest.
+    commands.spawn((
+        Sprite {
+            color: white.with_alpha(if strong { 0.95 } else { 0.72 }),
+            custom_size: Some(Vec2::new(if strong { 10.0 } else { 7.0 }, radius * 2.8)),
+            ..default()
+        },
+        Transform::from_translation((pos + Vec2::new(0.0, radius * 0.35)).extend(18.2)),
+        Particle {
+            vel: Vec2::ZERO,
+            life,
+            max_life: life,
+        },
+        LevelEntity,
+    ));
+    commands.spawn((
+        Sprite {
+            color: gold.with_alpha(if strong { 0.9 } else { 0.62 }),
+            custom_size: Some(Vec2::new(radius * 1.9, if strong { 7.0 } else { 5.0 })),
+            ..default()
+        },
+        Transform::from_translation(pos.extend(18.3)),
+        Particle {
+            vel: Vec2::ZERO,
+            life: life * 0.82,
+            max_life: life * 0.82,
+        },
+        LevelEntity,
+    ));
+    spawn_ring(
+        commands,
+        meshes,
+        materials,
+        pos,
+        radius,
+        gold.mix(&Color::WHITE, 0.35),
+        if strong { 0.68 } else { 0.42 },
+        life,
+        18.0,
+    );
+    let sparks = if strong { 9 } else { 5 };
+    for _ in 0..sparks {
+        let ang = -std::f32::consts::FRAC_PI_2 + (rng.frac() - 0.5) * 1.1;
+        let vel = Vec2::from_angle(ang) * (70.0 + rng.frac() * 90.0);
+        spark_vel(
+            commands,
+            pos + Vec2::new((rng.frac() - 0.5) * 14.0, 10.0),
+            gold.mix(&Color::WHITE, rng.frac() * 0.55),
+            vel,
+            if strong { 4.2 } else { 3.2 },
+            life + rng.frac() * 0.16,
+        );
     }
 }
 
@@ -442,16 +520,16 @@ pub fn spawn_vfx(
                 };
                 // The blade sweeps through an arc (劈砍): start raised, chop through
                 // the target. `animate_sword_swing` drives the rotation/scale/fade.
-                let arc = 2.1; // ~120° sweep
-                let life = 0.24;
+                let arc = 2.35; // ~135° sweep
+                let life = 0.30;
                 commands.spawn((
                     Sprite {
                         image: img,
                         color: color.with_alpha(0.95),
-                        custom_size: Some(Vec2::splat(crate::data::TILE_SIZE * 1.85)),
+                        custom_size: Some(Vec2::splat(crate::data::TILE_SIZE * 2.35)),
                         ..default()
                     },
-                    Transform::from_translation(pos.extend(8.0))
+                    Transform::from_translation(pos.extend(16.0))
                         .with_rotation(Quat::from_rotation_z(*angle + arc * 0.5)),
                     SwordSwing {
                         life,
@@ -473,7 +551,7 @@ pub fn spawn_vfx(
                     0.22,
                 );
                 // A few sparks fly off along the swing direction.
-                for _ in 0..4 {
+                for _ in 0..7 {
                     let jitter = (rng.frac() - 0.5) * 0.6;
                     spark_vel(
                         &mut commands,
@@ -482,6 +560,42 @@ pub fn spawn_vfx(
                         Vec2::from_angle(*angle + jitter) * (90.0 + rng.frac() * 90.0),
                         3.0,
                         0.26,
+                    );
+                }
+            }
+            VfxEvent::MeleeCleave { pos, radius, color } => {
+                spawn_ring(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    *pos,
+                    *radius,
+                    color.mix(&Color::WHITE, 0.18),
+                    0.46,
+                    0.20,
+                    12.5,
+                );
+                spawn_ring(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    *pos,
+                    *radius * 0.62,
+                    *color,
+                    0.30,
+                    0.16,
+                    12.7,
+                );
+                for _ in 0..10 {
+                    spark(
+                        &mut commands,
+                        &mut rng,
+                        *pos,
+                        *color,
+                        70.0,
+                        190.0,
+                        3.4,
+                        0.25,
                     );
                 }
             }
@@ -552,6 +666,16 @@ pub fn spawn_vfx(
                         if *strong { 0.38 } else { 0.24 },
                     );
                 }
+            }
+            VfxEvent::HolyStrike { pos, strong } => {
+                spawn_holy_strike(
+                    &mut commands,
+                    &mut rng,
+                    &mut meshes,
+                    &mut materials,
+                    *pos,
+                    *strong,
+                );
             }
             VfxEvent::Text {
                 pos,
@@ -626,7 +750,10 @@ pub fn spawn_vfx(
                     &mut rng,
                     &font,
                     *pos + Vec2::new(0.0, 32.0),
-                    crate::i18n::tf("封印受损 {}/{}", &[&lives.to_string(), &max_lives.to_string()]),
+                    crate::i18n::tf(
+                        "封印受损 {}/{}",
+                        &[&lives.to_string(), &max_lives.to_string()],
+                    ),
                     color,
                     if danger { 20.0 } else { 17.0 },
                     if danger { 1.10 } else { 0.90 },
@@ -937,7 +1064,10 @@ pub fn spawn_vfx(
                     &mut rng,
                     &font,
                     *pos + Vec2::new(0.0, 34.0),
-                    crate::i18n::tf("完美防守 第{}波  +{}金", &[&wave.to_string(), &gold.to_string()]),
+                    crate::i18n::tf(
+                        "完美防守 第{}波  +{}金",
+                        &[&wave.to_string(), &gold.to_string()],
+                    ),
                     color,
                     19.0,
                     1.2,
@@ -1061,7 +1191,7 @@ pub fn spawn_vfx(
             }
             VfxEvent::Explosion { pos, radius, color } => {
                 sfx.write(SfxEvent(Sound::Explosion));
-                shake.add((*radius / 420.0).clamp(0.12, 0.46));
+                shake.add((*radius / 520.0).clamp(0.05, 0.34));
                 // Expanding ring (its own material so we can fade alpha).
                 spawn_ring(
                     &mut commands,
@@ -1154,7 +1284,11 @@ pub fn spawn_vfx(
                             rotation: rot,
                             ..default()
                         },
-                        Particle { vel: dir * spd, life, max_life: life },
+                        Particle {
+                            vel: dir * spd,
+                            life,
+                            max_life: life,
+                        },
                         LevelEntity,
                     ));
                     for t in 1..3 {
@@ -1167,16 +1301,64 @@ pub fn spawn_vfx(
                             0.35,
                         );
                     }
-                    spawn_ring(&mut commands, &mut meshes, &mut materials, impact, 24.0, Color::srgb(1.0, 0.42, 0.12), 0.5, 0.5, 18.0);
+                    spawn_ring(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        impact,
+                        24.0,
+                        Color::srgb(1.0, 0.42, 0.12),
+                        0.5,
+                        0.5,
+                        18.0,
+                    );
                     for _ in 0..3 {
-                        spark(&mut commands, &mut rng, impact, Color::srgb(1.0, 0.55, 0.18), 50.0, 170.0, 4.0, 0.4);
+                        spark(
+                            &mut commands,
+                            &mut rng,
+                            impact,
+                            Color::srgb(1.0, 0.55, 0.18),
+                            50.0,
+                            170.0,
+                            4.0,
+                            0.4,
+                        );
                     }
                 }
                 // Big central blast on the actual damage zone.
-                spawn_ring(&mut commands, &mut meshes, &mut materials, *center, *radius + 6.0, Color::srgb(1.0, 0.35, 0.08), 0.65, 0.6, 18.3);
-                spawn_ring(&mut commands, &mut meshes, &mut materials, *center, *radius * 0.55, Color::srgb(1.0, 0.85, 0.4), 0.4, 0.45, 18.4);
+                spawn_ring(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    *center,
+                    *radius + 6.0,
+                    Color::srgb(1.0, 0.35, 0.08),
+                    0.65,
+                    0.6,
+                    18.3,
+                );
+                spawn_ring(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    *center,
+                    *radius * 0.55,
+                    Color::srgb(1.0, 0.85, 0.4),
+                    0.4,
+                    0.45,
+                    18.4,
+                );
                 for _ in 0..16 {
-                    spark(&mut commands, &mut rng, *center, Color::srgb(1.0, 0.55, 0.15), 90.0, 280.0, 5.5, 0.55);
+                    spark(
+                        &mut commands,
+                        &mut rng,
+                        *center,
+                        Color::srgb(1.0, 0.55, 0.15),
+                        90.0,
+                        280.0,
+                        5.5,
+                        0.55,
+                    );
                 }
             }
             VfxEvent::GoldExplosion { center } => {
@@ -1195,25 +1377,75 @@ pub fn spawn_vfx(
                             ..default()
                         },
                         Transform::from_translation(center.extend(16.0)),
-                        Particle { vel, life, max_life: life },
+                        Particle {
+                            vel,
+                            life,
+                            max_life: life,
+                        },
                         LevelEntity,
                     ));
                 }
-                spawn_ring(&mut commands, &mut meshes, &mut materials, *center, 64.0, gold, 0.55, 0.5, 18.0);
+                spawn_ring(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    *center,
+                    64.0,
+                    gold,
+                    0.55,
+                    0.5,
+                    18.0,
+                );
                 for _ in 0..18 {
-                    spark(&mut commands, &mut rng, *center, gold, 70.0, 260.0, 4.5, 0.5);
+                    spark(
+                        &mut commands,
+                        &mut rng,
+                        *center,
+                        gold,
+                        70.0,
+                        260.0,
+                        4.5,
+                        0.5,
+                    );
                 }
             }
             VfxEvent::FrostNova { center } => {
                 use crate::data::{BOARD_H, BOARD_W};
                 shake.add(0.2);
                 let diag = (BOARD_W * BOARD_W + BOARD_H * BOARD_H).sqrt();
-                spawn_ring(&mut commands, &mut meshes, &mut materials, *center, diag * 0.5, Color::srgb(0.45, 0.82, 1.0), 0.4, 0.75, 18.0);
-                spawn_ring(&mut commands, &mut meshes, &mut materials, *center, 70.0, Color::srgb(0.8, 0.95, 1.0), 0.45, 0.5, 18.1);
+                spawn_ring(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    *center,
+                    diag * 0.5,
+                    Color::srgb(0.45, 0.82, 1.0),
+                    0.4,
+                    0.75,
+                    18.0,
+                );
+                spawn_ring(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    *center,
+                    70.0,
+                    Color::srgb(0.8, 0.95, 1.0),
+                    0.45,
+                    0.5,
+                    18.1,
+                );
                 for _ in 0..28 {
                     let ang = rng.frac() * std::f32::consts::TAU;
                     let vel = Vec2::from_angle(ang) * (120.0 + rng.frac() * 280.0);
-                    spark_vel(&mut commands, *center, Color::srgb(0.72, 0.92, 1.0), vel, 6.0, 0.6);
+                    spark_vel(
+                        &mut commands,
+                        *center,
+                        Color::srgb(0.72, 0.92, 1.0),
+                        vel,
+                        6.0,
+                        0.6,
+                    );
                 }
             }
         }

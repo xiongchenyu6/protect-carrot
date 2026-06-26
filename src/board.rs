@@ -2,7 +2,7 @@
 //! waypoints) and which grid cells are buildable. Ported from the original
 //! `generatePathAndBuildable`.
 
-use crate::data::{cell_center, Level, COLS, ROWS};
+use crate::data::{COLS, Level, ROWS, cell_center};
 use bevy::prelude::*;
 use std::collections::HashSet;
 

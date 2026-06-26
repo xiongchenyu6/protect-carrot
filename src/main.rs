@@ -16,8 +16,8 @@ use bevy::prelude::*;
 use bevy::window::{MonitorSelection, WindowMode};
 
 use protect_carrot::{
-    audio, bestiary, build, creatures, data, enemy, equipment, game, hero, i18n, meta, quality,
-    sprites, states, tower, tutorial, ui, vfx, Levels,
+    Levels, audio, bestiary, build, creatures, data, enemy, equipment, game, hero, i18n, meta,
+    quality, sprites, states, tower, tutorial, ui, vfx,
 };
 
 // Web-only: a retrying HTTP asset reader, installed before AssetPlugin so a
@@ -26,17 +26,17 @@ use protect_carrot::{
 mod asset_io;
 
 use build::Selection;
-use data::{hex, levels, BOARD_H, BOARD_W};
+use data::{BOARD_H, BOARD_W, hex, levels};
 use game::{
-    keyboard_controls, load_level, not_paused, tick_auto_wave, tick_message, CurrentLevel, Paused,
-    Rng, RunState,
+    CurrentLevel, Paused, Rng, RunState, keyboard_controls, load_level, not_paused, tick_auto_wave,
+    tick_message,
 };
 use sprites::build_sprites;
 use states::GameState;
 use tower::{BuffTower, Damage, HealCarrot, Snapshot, Status};
 use ui::{
-    despawn_with, hud_buttons, menu_buttons, overlay_buttons, spawn_gameover, spawn_hud,
-    spawn_menu, spawn_victory, update_hud, Progress, UiFont,
+    Progress, UiFont, despawn_with, hud_buttons, menu_buttons, overlay_buttons, spawn_gameover,
+    spawn_hud, spawn_menu, spawn_victory, update_hud,
 };
 
 /// Virtual design size (board 800 + HUD panel 240, height 600). The camera and
@@ -54,7 +54,6 @@ const PANEL_W: f32 = 256.0;
 /// a constant world width — so reserving it in the projection keeps the board fully
 /// in the free center and never under the strip. See `fit_camera_mode`.
 const LEFT_RESERVE: f32 = 80.0;
-
 
 // Tell the HTML loading screen the game is actually ready (first frames rendered +
 // menu sprites loaded), so it doesn't fade out into a blank screen.
@@ -108,12 +107,13 @@ fn main() {
     // ours retries transient failures with backoff instead.
     #[cfg(target_arch = "wasm32")]
     {
-        use bevy::asset::io::{AssetSourceBuilder, AssetSourceId, ErasedAssetReader};
         use bevy::asset::AssetApp;
+        use bevy::asset::io::{AssetSourceBuilder, AssetSourceId, ErasedAssetReader};
         app.register_asset_source(
             AssetSourceId::Default,
             AssetSourceBuilder::new(|| {
-                Box::new(asset_io::RobustHttpAssetReader::new("assets")) as Box<dyn ErasedAssetReader>
+                Box::new(asset_io::RobustHttpAssetReader::new("assets"))
+                    as Box<dyn ErasedAssetReader>
             }),
         );
     }
@@ -363,6 +363,7 @@ fn main() {
             build::hero_afterimage,
             build::animate_hero_walk,
             build::rotate_towers,
+            build::update_hero_race_badges,
             build::tint_silenced_towers,
             build::update_tower_hp_bars,
         )
@@ -576,15 +577,15 @@ fn setup(mut commands: Commands) {
 /// Scale `bevy_ui` to match the camera's scaling so the HUD grows with the board.
 /// The camera (AutoMin) scales the world by `window_height / VIRTUAL_H` on wide
 /// windows; matching `UiScale` keeps the HUD panel aligned with the board.
-fn fit_ui_scale(
-    windows: Query<&Window>,
-    mode: Res<ui::TouchMode>,
-    mut ui_scale: ResMut<UiScale>,
-) {
+fn fit_ui_scale(windows: Query<&Window>, mode: Res<ui::TouchMode>, mut ui_scale: ResMut<UiScale>) {
     if let Ok(win) = windows.single() {
         // In touch mode the virtual area also reserves the left strip, so UI + world
         // shrink together and stay aligned with the reserved regions.
-        let vw = if mode.0 { VIRTUAL_W + LEFT_RESERVE } else { VIRTUAL_W };
+        let vw = if mode.0 {
+            VIRTUAL_W + LEFT_RESERVE
+        } else {
+            VIRTUAL_W
+        };
         let s = (win.width() / vw).min(win.height() / VIRTUAL_H);
         if s.is_finite() && s > 0.0 {
             ui_scale.0 = s;

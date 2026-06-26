@@ -1,14 +1,14 @@
 //! Per-run state (gold/lives/wave), level loading, and wave control.
 
+use crate::Levels;
 use crate::board::Board;
 use crate::components::{Carrot, CarrotSealBar, LevelEntity};
 use crate::data::{
-    cell_center, BOARD_H, BOARD_W, BOSS_WAVE_INTERVAL, COLS, LEVEL_LORE, LEVEL_THEMES, ROWS,
-    TILE_SIZE,
+    BOARD_H, BOARD_W, BOSS_WAVE_INTERVAL, COLS, LEVEL_LORE, LEVEL_THEMES, ROWS, TILE_SIZE,
+    cell_center,
 };
-use crate::equipment::{unequip_all_to_inventory, EquipmentInventory};
+use crate::equipment::{EquipmentInventory, unequip_all_to_inventory};
 use crate::monster::{boss_skill, is_boss_wave, next_boss_wave, pick_boss};
-use crate::Levels;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 use std::collections::{HashSet, VecDeque};
@@ -335,7 +335,10 @@ pub fn load_level(
         run.base_count = level.enemies.count;
         // Cthulhu-flavored level lore, shown a little longer than a normal message.
         let lore = LEVEL_LORE.get(current.0).copied().unwrap_or("");
-        run.message = crate::i18n::tf("{}\n{}", &[&crate::i18n::t(level.name), &crate::i18n::t(lore)]);
+        run.message = crate::i18n::tf(
+            "{}\n{}",
+            &[&crate::i18n::t(level.name), &crate::i18n::t(lore)],
+        );
         run.message_timer = 8.0;
     }
 
@@ -640,7 +643,11 @@ pub fn start_wave(run: &mut RunState, level_index: usize, rng: &mut Rng) {
             run.show_for(
                 crate::i18n::tf(
                     "{}首领来袭：{}\n技能：{}",
-                    &[&prefix, &crate::i18n::t(boss.name), &crate::i18n::t(skill.name())],
+                    &[
+                        &prefix,
+                        &crate::i18n::t(boss.name),
+                        &crate::i18n::t(skill.name()),
+                    ],
                 ),
                 4.0,
             );

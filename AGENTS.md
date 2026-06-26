@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-This is a Rust/Bevy 0.18.1 tower-defense game, "保卫萝卜" / "Protect the Carrot",
+This is a Rust/Bevy 0.19 tower-defense game, "保卫萝卜" / "Protect the Carrot",
 ported from the legacy single-file browser game in `保卫萝卜.html`.
 
 Treat the Rust/Bevy implementation under `src/` as the active project. The legacy

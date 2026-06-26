@@ -28,15 +28,15 @@ use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 
 use protect_carrot::{
-    audio, bestiary, build, components, data, enemy, equipment as equipment_inv, game, hero, i18n,
-    meta, states, tower, ui, vfx, Levels,
+    Levels, audio, bestiary, build, components, data, enemy, equipment as equipment_inv, game,
+    hero, i18n, meta, states, tower, ui, vfx,
 };
 
 use build::spawn_tower;
-use data::{cell_center, levels, Behavior, TowerKind, UpgradeMul};
+use data::{Behavior, TowerKind, UpgradeMul, cell_center, levels};
 use game::{
-    load_level, tick_auto_wave, tick_message, CurrentLevel, GameDifficulty, GameMode, Paused, Rng,
-    RunState,
+    CurrentLevel, GameDifficulty, GameMode, Paused, Rng, RunState, load_level, tick_auto_wave,
+    tick_message,
 };
 use protect_carrot::board::Board;
 use tower::{Damage, Tower};
@@ -205,8 +205,12 @@ fn greedy_player(
                 .min()
                 .unwrap_or(99)
         };
-        let mut cs: Vec<(i32, i32)> =
-            board.buildable.iter().copied().filter(|p| dist(p) <= 3).collect();
+        let mut cs: Vec<(i32, i32)> = board
+            .buildable
+            .iter()
+            .copied()
+            .filter(|p| dist(p) <= 3)
+            .collect();
         cs.sort_by(|a, b| dist(a).cmp(&dist(b)).then(a.cmp(b)));
         *cells = cs;
     }
@@ -244,7 +248,9 @@ fn greedy_player(
         e.invisible && {
             let p = tf.translation.truncate();
             // 隐形分级：探测塔有效射程按 stealth 折扣（与游戏内 is_detected 一致）。
-            !detectors.iter().any(|(c, r)| c.distance(p) <= *r * e.stealth)
+            !detectors
+                .iter()
+                .any(|(c, r)| c.distance(p) <= *r * e.stealth)
         }
     });
     if invis_uncovered {
@@ -258,7 +264,11 @@ fn greedy_player(
                     continue;
                 }
                 let cen = cell_pos(col, row, dk);
-                let n = board.path_world.iter().filter(|p| cen.distance(**p) <= r).count();
+                let n = board
+                    .path_world
+                    .iter()
+                    .filter(|p| cen.distance(**p) <= r)
+                    .count();
                 if best.map(|(_, b)| n > b).unwrap_or(true) {
                     best = Some(((col, row), n));
                 }
@@ -276,8 +286,11 @@ fn greedy_player(
 
     // Kinds by value/gold, best first (cached).
     if order.is_empty() {
-        let mut o: Vec<TowerKind> =
-            TowerKind::ALL.iter().copied().filter(|k| k.def().behavior != Behavior::Detect).collect();
+        let mut o: Vec<TowerKind> = TowerKind::ALL
+            .iter()
+            .copied()
+            .filter(|k| k.def().behavior != Behavior::Detect)
+            .collect();
         o.sort_by(|a, b| tower_value(*b).partial_cmp(&tower_value(*a)).unwrap());
         *order = o;
     }
@@ -298,7 +311,11 @@ fn greedy_player(
                 continue;
             }
             let cen = cell_pos(col, row, kind);
-            let n = board.path_world.iter().filter(|p| cen.distance(**p) <= r).count();
+            let n = board
+                .path_world
+                .iter()
+                .filter(|p| cen.distance(**p) <= r)
+                .count();
             if n > bestcov {
                 bestcov = n;
                 bestcell = Some((col, row));
@@ -460,7 +477,11 @@ fn run_sim(level: usize, seed: u64, mode: RunMode, econ: Option<(i32, f32)>) -> 
     );
     app.add_systems(
         Update,
-        (game::update_carrot_seal, tower::compute_synergy, count_enemies),
+        (
+            game::update_carrot_seal,
+            tower::compute_synergy,
+            count_enemies,
+        ),
     );
     if greedy {
         app.add_systems(Update, greedy_player);
@@ -474,7 +495,9 @@ fn run_sim(level: usize, seed: u64, mode: RunMode, econ: Option<(i32, f32)>) -> 
         lv.0[level].gold = gold;
         lv.0[level].enemies.reward = reward;
     }
-    app.world_mut().run_system_once(load_level).expect("load_level");
+    app.world_mut()
+        .run_system_once(load_level)
+        .expect("load_level");
     // Keep game_speed = 1 for accurate physics: higher speeds coarsen the per-frame
     // dt, making projectiles overshoot and towers weaker (distorts difficulty). The
     // headless sim already runs ~8–10× faster than real-time at 1×.
@@ -624,7 +647,10 @@ fn print_share(title: &str, level: usize, level_name: &str, seed: u64, r: &SimRe
 fn main() {
     let mut args = std::env::args().skip(1);
     let level: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(3);
-    let seed: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(0x1234_5678);
+    let seed: u64 = args
+        .next()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0x1234_5678);
     let mode = args.next().unwrap_or_else(|| "mixed".into());
     let level_name = i18n::t(levels()[level].name);
 
@@ -683,10 +709,17 @@ fn main() {
                     win_at_hi * 100.0,
                     tgt * 100.0
                 );
-                eprintln!("  level {} optimized → gold {} reward {:.0}", lvl + 1, gold, rew);
+                eprintln!(
+                    "  level {} optimized → gold {} reward {:.0}",
+                    lvl + 1,
+                    gold,
+                    rew
+                );
             }
             println!("{}", "=".repeat(64));
-            println!("(recommended gold/reward to bake into levels(); win% = greedy at that economy.)\n");
+            println!(
+                "(recommended gold/reward to bake into levels(); win% = greedy at that economy.)\n"
+            );
         }
         "iso" => {
             eprintln!(
@@ -729,7 +762,9 @@ fn main() {
                 );
             }
             println!("{}", "=".repeat(74));
-            println!("(standalone power: a board of ONLY that kind. DEFEAT/low-wave = too weak alone.)\n");
+            println!(
+                "(standalone power: a board of ONLY that kind. DEFEAT/low-wave = too weak alone.)\n"
+            );
         }
         "winrate" => {
             let n = 20u64;
@@ -740,7 +775,9 @@ fn main() {
             let (wins, aw, al, tw, usage) = greedy_winrate(level, seed, n, None);
             let mut us: Vec<(TowerKind, u64)> = usage.into_iter().filter(|(_, c)| *c > 0).collect();
             us.sort_by(|a, b| b.1.cmp(&a.1));
-            println!("\n============== GREEDY WIN-RATE (level {level}: {level_name}) ==============");
+            println!(
+                "\n============== GREEDY WIN-RATE (level {level}: {level_name}) =============="
+            );
             println!(
                 "win-rate {}/{} = {:.0}%   avg waves {:.1}/{}   avg lives {:.1}",
                 wins,

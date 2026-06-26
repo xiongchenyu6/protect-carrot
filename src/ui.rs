@@ -2,35 +2,35 @@
 //! and the win/lose overlays. UI here is screen-space `Node` trees; clicks drive
 //! the same `Selection`/`RunState` the keyboard shortcuts do.
 
-use crate::bestiary::{brief, Bestiary};
-use crate::build::{repair_tower, upgrade_tower, upgrade_unlock_note, Selection};
+use crate::Levels;
+use crate::audio::AudioSettings;
+use crate::bestiary::{Bestiary, brief};
+use crate::build::{Selection, repair_tower, upgrade_tower, upgrade_unlock_note};
 use crate::components::Enemy;
 use crate::data::{
-    Behavior, Category, Element, Level, TowerDef, TowerKind, BOARD_W, BOSS_WAVE_INTERVAL, COLS,
-    LEVEL_LORE, LEVEL_THEMES, PROLOGUE, ROWS, TILE_SIZE,
+    BOARD_W, BOSS_WAVE_INTERVAL, Behavior, COLS, Category, Element, LEVEL_LORE, LEVEL_THEMES,
+    Level, PROLOGUE, ROWS, TILE_SIZE, TowerDef, TowerKind,
 };
 use crate::enemy::PendingBossCast;
 use crate::equipment::{
-    drop_source_hint, equipment_set_bonus, equipment_set_bonus_summary, refine_equipment,
-    return_equipment_to_inventory, roll_clear_rewards, unequip_all_to_inventory,
-    unequip_slot_to_inventory, Equipment, EquipmentInventory, EquipmentVisual,
+    Equipment, EquipmentInventory, EquipmentVisual, drop_source_hint, equipment_set_bonus,
+    equipment_set_bonus_summary, refine_equipment, return_equipment_to_inventory,
+    roll_clear_rewards, unequip_all_to_inventory, unequip_slot_to_inventory,
 };
 use crate::game::{
-    start_wave, toggle_auto_wave, CurrentLevel, Difficulty, GameDifficulty, GameMode, Rng, RunMode,
-    RunState, KILL_COMBO_WINDOW,
+    CurrentLevel, Difficulty, GameDifficulty, GameMode, KILL_COMBO_WINDOW, Rng, RunMode, RunState,
+    start_wave, toggle_auto_wave,
 };
 use crate::hero::{Class, HeroLoadout, Race};
-use crate::meta::{talent_cost, Abilities, Ability, Talents};
+use crate::i18n::{Language, tr};
+use crate::meta::{Abilities, Ability, Talents, talent_cost};
 use crate::monster::{
-    boss_skill, elite_affix_pool, is_boss_wave, species_by_id, BossSkill, MONSTER_SPECIES,
+    BossSkill, MONSTER_SPECIES, boss_skill, elite_affix_pool, is_boss_wave, species_by_id,
 };
-use crate::audio::AudioSettings;
-use crate::i18n::{tr, Language};
 use crate::quality::GraphicsQuality;
 use crate::sprites::Sprites;
 use crate::states::GameState;
 use crate::tower::{BuffTower, Damage, Status, StatusKind};
-use crate::Levels;
 use bevy::audio::{PlaybackMode, Volume};
 use bevy::prelude::*;
 use bevy::window::{MonitorSelection, WindowMode};
@@ -813,14 +813,23 @@ fn campaign_boss_line(level_index: usize, level: &Level) -> String {
             if skill == crate::monster::BossSkill::None {
                 crate::i18n::t(boss.name)
             } else {
-                crate::i18n::tf("{}·{}", &[&crate::i18n::t(boss.name), &crate::i18n::t(skill.name())])
+                crate::i18n::tf(
+                    "{}·{}",
+                    &[&crate::i18n::t(boss.name), &crate::i18n::t(skill.name())],
+                )
             }
         })
         .collect::<Vec<_>>();
     if bosses.len() > names.len() {
-        names.push(crate::i18n::tf("另{}名", &[&(bosses.len() - names.len()).to_string()]));
+        names.push(crate::i18n::tf(
+            "另{}名",
+            &[&(bosses.len() - names.len()).to_string()],
+        ));
     }
-    crate::i18n::tf("首领波：{}\n首领威胁：{}", &[&wave_text, &names.join(" / ")])
+    crate::i18n::tf(
+        "首领波：{}\n首领威胁：{}",
+        &[&wave_text, &names.join(" / ")],
+    )
 }
 
 fn campaign_recommendation(level_index: usize, level: &Level) -> String {
@@ -860,22 +869,37 @@ fn campaign_level_stats(level: &Level) -> String {
 fn equipment_stat_line(d: &crate::equipment::EquipmentDef) -> String {
     let mut parts = Vec::new();
     if (d.damage_mult - 1.0).abs() > 0.001 {
-        parts.push(crate::i18n::tf("伤害×{}", &[&format!("{:.2}", d.damage_mult)]));
+        parts.push(crate::i18n::tf(
+            "伤害×{}",
+            &[&format!("{:.2}", d.damage_mult)],
+        ));
     }
     if (d.range_mult - 1.0).abs() > 0.001 {
-        parts.push(crate::i18n::tf("射程×{}", &[&format!("{:.2}", d.range_mult)]));
+        parts.push(crate::i18n::tf(
+            "射程×{}",
+            &[&format!("{:.2}", d.range_mult)],
+        ));
     }
     if (d.cooldown_mult - 1.0).abs() > 0.001 {
-        parts.push(crate::i18n::tf("冷却×{}", &[&format!("{:.2}", d.cooldown_mult)]));
+        parts.push(crate::i18n::tf(
+            "冷却×{}",
+            &[&format!("{:.2}", d.cooldown_mult)],
+        ));
     }
     if d.armor_pierce > 0.0 {
-        parts.push(crate::i18n::tf("穿甲+{}", &[&format!("{:.0}", d.armor_pierce)]));
+        parts.push(crate::i18n::tf(
+            "穿甲+{}",
+            &[&format!("{:.0}", d.armor_pierce)],
+        ));
     }
     if (d.hp_mult - 1.0).abs() > 0.001 {
         parts.push(crate::i18n::tf("HP×{}", &[&format!("{:.2}", d.hp_mult)]));
     }
     if d.armor_add > 0.0 {
-        parts.push(crate::i18n::tf("护甲+{}", &[&format!("{:.0}", d.armor_add)]));
+        parts.push(crate::i18n::tf(
+            "护甲+{}",
+            &[&format!("{:.0}", d.armor_add)],
+        ));
     }
     if let Some(element) = d.element {
         parts.push(crate::i18n::tf("转{}", &[&crate::i18n::t(element.name())]));
@@ -931,13 +955,17 @@ fn tower_stat_line(d: &TowerDef) -> String {
 fn tower_behavior_line(d: &TowerDef) -> String {
     match d.behavior {
         Behavior::Single => crate::i18n::t("职责：单体点杀"),
-        Behavior::Aoe => crate::i18n::tf("职责：范围爆炸  半径{}", &[&format!("{:.0}", d.aoe_radius)]),
+        Behavior::Aoe => {
+            crate::i18n::tf("职责：范围爆炸  半径{}", &[&format!("{:.0}", d.aoe_radius)])
+        }
         Behavior::Chain => crate::i18n::tf(
             "职责：连锁弹射  {}跳/{}距",
             &[&d.chain_count.to_string(), &format!("{:.0}", d.chain_range)],
         ),
         Behavior::Laser => crate::i18n::t("职责：持续穿透光束"),
-        Behavior::Homing => crate::i18n::tf("职责：追踪爆破  半径{}", &[&format!("{:.0}", d.aoe_radius)]),
+        Behavior::Homing => {
+            crate::i18n::tf("职责：追踪爆破  半径{}", &[&format!("{:.0}", d.aoe_radius)])
+        }
         Behavior::Slow => crate::i18n::tf(
             "职责：减速  {}%/{}s",
             &[
@@ -952,7 +980,10 @@ fn tower_behavior_line(d: &TowerDef) -> String {
                 &format!("{:.1}", d.stun_duration / 1000.0),
             ],
         ),
-        Behavior::Freeze => crate::i18n::tf("职责：范围冰冻  {}s", &[&format!("{:.1}", d.freeze_duration / 1000.0)]),
+        Behavior::Freeze => crate::i18n::tf(
+            "职责：范围冰冻  {}s",
+            &[&format!("{:.1}", d.freeze_duration / 1000.0)],
+        ),
         Behavior::Curse => crate::i18n::tf(
             "职责：破甲破抗  -{}/{}s",
             &[
@@ -979,7 +1010,9 @@ fn tower_behavior_line(d: &TowerDef) -> String {
                 &format!("{:.1}", d.fire_duration / 1000.0),
             ],
         ),
-        Behavior::Summon => crate::i18n::tf("职责：召唤阻挡  上限{}", &[&d.max_summons.to_string()]),
+        Behavior::Summon => {
+            crate::i18n::tf("职责：召唤阻挡  上限{}", &[&d.max_summons.to_string()])
+        }
         Behavior::Necromancer => crate::i18n::t("职责：复活范围内阵亡怪物为友军"),
     }
 }
@@ -999,8 +1032,16 @@ fn tower_counter_line(element: Element) -> String {
         .collect();
     resist.sort_by(|a, b| b.1.total_cmp(&a.1));
 
-    let weak_names: Vec<String> = weak.iter().take(2).map(|(name, _)| crate::i18n::t(name)).collect();
-    let resist_names: Vec<String> = resist.iter().take(2).map(|(name, _)| crate::i18n::t(name)).collect();
+    let weak_names: Vec<String> = weak
+        .iter()
+        .take(2)
+        .map(|(name, _)| crate::i18n::t(name))
+        .collect();
+    let resist_names: Vec<String> = resist
+        .iter()
+        .take(2)
+        .map(|(name, _)| crate::i18n::t(name))
+        .collect();
     let weak_text = if weak_names.is_empty() {
         crate::i18n::t("克制：少见明显易伤")
     } else {
@@ -1026,9 +1067,12 @@ pub fn despawn_with<T: Component>(mut commands: Commands, q: Query<Entity, With<
 /// model for language: ja". All our text is Chinese, which line-breaks per glyph
 /// anyway, so force `AnyCharacter` on every text the moment it spawns — this both
 /// fixes wrapping and bypasses the missing word segmenter.
-pub fn cjk_linebreak(mut texts: Query<&mut TextLayout, Added<TextLayout>>) {
+pub fn cjk_linebreak(mut texts: Query<&mut TextLayout>) {
     for mut tl in &mut texts {
-        if tl.linebreak != LineBreak::AnyCharacter {
+        if matches!(
+            tl.linebreak,
+            LineBreak::WordBoundary | LineBreak::WordOrCharacter
+        ) {
             tl.linebreak = LineBreak::AnyCharacter;
         }
     }
@@ -1070,7 +1114,12 @@ fn stat_icon(
                 ..default()
             },
         ));
-        c.spawn((Text::new(text), text_font(f, 15.0), TextColor(color), marker));
+        c.spawn((
+            Text::new(text),
+            text_font(f, 15.0),
+            TextColor(color),
+            marker,
+        ));
     });
 }
 
@@ -1250,6 +1299,64 @@ fn icon_button(
                     ..default()
                 },
             ));
+        });
+}
+
+fn hero_portrait_with_race(
+    parent: &mut ChildSpawnerCommands,
+    hero_icon: Handle<Image>,
+    race_icon: Handle<Image>,
+    size: f32,
+) {
+    parent
+        .spawn(Node {
+            width: Val::Px(size),
+            height: Val::Px(size),
+            position_type: PositionType::Relative,
+            flex_shrink: 0.0,
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..default()
+        })
+        .with_children(|slot| {
+            slot.spawn((
+                ImageNode {
+                    image: hero_icon,
+                    ..default()
+                },
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    ..default()
+                },
+            ));
+            slot.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    right: Val::Px(-2.0),
+                    bottom: Val::Px(-2.0),
+                    width: Val::Px(size * 0.38),
+                    height: Val::Px(size * 0.38),
+                    padding: UiRect::all(Val::Px(2.0)),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.02, 0.03, 0.035, 0.86)),
+            ))
+            .with_children(|badge| {
+                badge.spawn((
+                    ImageNode {
+                        image: race_icon,
+                        ..default()
+                    },
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(100.0),
+                        ..default()
+                    },
+                ));
+            });
         });
 }
 
@@ -1475,7 +1582,10 @@ pub fn spawn_hud(
 
             // --- abilities (icons; tap/hover for details). Hidden on touch since
             // the bottom bar carries them. ---
-            p.spawn((section_icon_node(sprites.ui["sec_skill"].clone()), TouchHiddenRow));
+            p.spawn((
+                section_icon_node(sprites.ui["sec_skill"].clone()),
+                TouchHiddenRow,
+            ));
             p.spawn((row_node(), TouchHiddenRow)).with_children(|row| {
                 icon_button(
                     row,
@@ -1592,18 +1702,12 @@ pub fn spawn_hud(
                     BackgroundColor(UI_CARD_SOFT),
                 ))
                 .with_children(|card| {
-                    card.spawn((
-                        ImageNode {
-                            image: sprites.heroes[&hero.class].clone(),
-                            ..default()
-                        },
-                        Node {
-                            width: Val::Px(58.0),
-                            height: Val::Px(58.0),
-                            flex_shrink: 0.0,
-                            ..default()
-                        },
-                    ));
+                    hero_portrait_with_race(
+                        card,
+                        sprites.heroes[&hero.class].clone(),
+                        sprites.races[&hero.race].clone(),
+                        58.0,
+                    );
                     card.spawn(Node {
                         flex_direction: FlexDirection::Column,
                         row_gap: Val::Px(2.0),
@@ -1744,9 +1848,27 @@ pub fn spawn_hud(
                                 Color::srgb(0.42, 0.30, 0.10),
                                 UpgradeBtnText,
                             );
-                            dock_button(actions, f, &crate::i18n::t("修理"), UiAction::Repair, BTN_BG);
-                            dock_button(actions, f, &crate::i18n::t("目标"), UiAction::CycleTargetPriority, BTN_BG);
-                            dock_button(actions, f, &crate::i18n::t("卸装"), UiAction::Unequip, BTN_BG);
+                            dock_button(
+                                actions,
+                                f,
+                                &crate::i18n::t("修理"),
+                                UiAction::Repair,
+                                BTN_BG,
+                            );
+                            dock_button(
+                                actions,
+                                f,
+                                &crate::i18n::t("目标"),
+                                UiAction::CycleTargetPriority,
+                                BTN_BG,
+                            );
+                            dock_button(
+                                actions,
+                                f,
+                                &crate::i18n::t("卸装"),
+                                UiAction::Unequip,
+                                BTN_BG,
+                            );
                             dock_button(
                                 actions,
                                 f,
@@ -1754,8 +1876,20 @@ pub fn spawn_hud(
                                 UiAction::Sell,
                                 Color::srgb(0.35, 0.12, 0.12),
                             );
-                            dock_button(actions, f, &crate::i18n::t("重生"), UiAction::SummonHero, BTN_BG);
-                            dock_button(actions, f, &crate::i18n::t("重置"), UiAction::ResetHeroTalents, BTN_BG);
+                            dock_button(
+                                actions,
+                                f,
+                                &crate::i18n::t("重生"),
+                                UiAction::SummonHero,
+                                BTN_BG,
+                            );
+                            dock_button(
+                                actions,
+                                f,
+                                &crate::i18n::t("重置"),
+                                UiAction::ResetHeroTalents,
+                                BTN_BG,
+                            );
                         });
                     });
                 });
@@ -1977,9 +2111,24 @@ pub fn spawn_hud(
                 UiAction::StartWave,
                 Color::srgb(0.18, 0.5, 0.2),
             );
-            side_icon_button(bar, sprites.ui["ctrl_auto"].clone(), UiAction::ToggleAutoWave, BTN_BG);
-            side_icon_button(bar, sprites.ui["ctrl_pause"].clone(), UiAction::TogglePause, BTN_BG);
-            side_icon_button(bar, sprites.ui["ctrl_speed"].clone(), UiAction::CycleSpeed, BTN_BG);
+            side_icon_button(
+                bar,
+                sprites.ui["ctrl_auto"].clone(),
+                UiAction::ToggleAutoWave,
+                BTN_BG,
+            );
+            side_icon_button(
+                bar,
+                sprites.ui["ctrl_pause"].clone(),
+                UiAction::TogglePause,
+                BTN_BG,
+            );
+            side_icon_button(
+                bar,
+                sprites.ui["ctrl_speed"].clone(),
+                UiAction::CycleSpeed,
+                BTN_BG,
+            );
             // Abilities + hero skill as icons (tap shows the tooltip; cooldown greys bg).
             for ab in [Ability::Meteor, Ability::Freeze, Ability::GoldRush] {
                 side_icon_button(
@@ -2190,17 +2339,12 @@ pub fn spawn_hud(
             HudRoot,
         ))
         .with_children(|b| {
-            b.spawn((
-                ImageNode {
-                    image: sprites.heroes[&hero.class].clone(),
-                    ..default()
-                },
-                Node {
-                    width: Val::Px(32.0),
-                    height: Val::Px(32.0),
-                    ..default()
-                },
-            ));
+            hero_portrait_with_race(
+                b,
+                sprites.heroes[&hero.class].clone(),
+                sprites.races[&hero.race].clone(),
+                32.0,
+            );
         });
 
     commands
@@ -2223,7 +2367,11 @@ pub fn spawn_hud(
             HudRoot,
         ))
         .with_children(|g| {
-            g.spawn((Text::new(crate::i18n::t("设置")), text_font(f, 14.0), TextColor(Color::WHITE)));
+            g.spawn((
+                Text::new(crate::i18n::t("设置")),
+                text_font(f, 14.0),
+                TextColor(Color::WHITE),
+            ));
         });
 
     commands
@@ -2257,8 +2405,20 @@ pub fn spawn_hud(
                 QualityLabel,
             ));
             s.spawn(row_node()).with_children(|row| {
-                button(row, f, &crate::i18n::t("切换画质"), UiAction::CycleQuality, BTN_BG);
-                button(row, f, &crate::i18n::t("全屏"), UiAction::Fullscreen, BTN_BG);
+                button(
+                    row,
+                    f,
+                    &crate::i18n::t("切换画质"),
+                    UiAction::CycleQuality,
+                    BTN_BG,
+                );
+                button(
+                    row,
+                    f,
+                    &crate::i18n::t("全屏"),
+                    UiAction::Fullscreen,
+                    BTN_BG,
+                );
             });
             s.spawn((
                 Text::new(crate::i18n::t("难度")),
@@ -2283,11 +2443,29 @@ pub fn spawn_hud(
                 TextColor(Color::srgb(0.8, 0.85, 0.9)),
             ));
             s.spawn(row_node()).with_children(|row| {
-                button(row, f, &crate::i18n::t("重新开始"), UiAction::Restart, Color::srgb(0.30, 0.22, 0.10));
-                button(row, f, &crate::i18n::t("返回主页"), UiAction::ToMenu, Color::srgb(0.30, 0.12, 0.12));
+                button(
+                    row,
+                    f,
+                    &crate::i18n::t("重新开始"),
+                    UiAction::Restart,
+                    Color::srgb(0.30, 0.22, 0.10),
+                );
+                button(
+                    row,
+                    f,
+                    &crate::i18n::t("返回主页"),
+                    UiAction::ToMenu,
+                    Color::srgb(0.30, 0.12, 0.12),
+                );
             });
             s.spawn(row_node()).with_children(|row| {
-                button(row, f, &crate::i18n::t("关闭"), UiAction::ToggleSettings, BTN_BG);
+                button(
+                    row,
+                    f,
+                    &crate::i18n::t("关闭"),
+                    UiAction::ToggleSettings,
+                    BTN_BG,
+                );
             });
         });
 }
@@ -2435,7 +2613,11 @@ pub fn update_panel_visibility(
     if !panels.is_changed() {
         return;
     }
-    let want = if panels.dock_open { Display::Flex } else { Display::None };
+    let want = if panels.dock_open {
+        Display::Flex
+    } else {
+        Display::None
+    };
     for mut node in &mut dock {
         node.display = want;
     }
@@ -2501,6 +2683,9 @@ fn wave_threat_score(
     if def.tower_raider {
         score += 16;
     }
+    if def.explosive {
+        score += 15;
+    }
     if def.silence_aura > 0.0 {
         score += 14;
     }
@@ -2551,7 +2736,10 @@ fn recommended_elements(species: &[&crate::monster::MonsterSpecies]) -> String {
             if *avg <= -0.08 {
                 crate::i18n::tf(
                     "{}弱{}%",
-                    &[&crate::i18n::t(element.name()), &((-avg * 100.0).round() as i32).to_string()],
+                    &[
+                        &crate::i18n::t(element.name()),
+                        &((-avg * 100.0).round() as i32).to_string(),
+                    ],
                 )
             } else {
                 crate::i18n::t(element.name())
@@ -2641,17 +2829,17 @@ fn wave_intel_text(run: &RunState, level_index: usize) -> String {
             } else {
                 crate::i18n::tf(
                     "抗性：{}",
-                    &[&resist
-                        .into_iter()
-                        .take(3)
-                        .collect::<Vec<_>>()
-                        .join("、")],
+                    &[&resist.into_iter().take(3).collect::<Vec<_>>().join("、")],
                 )
             };
             return crate::i18n::tf(
                 "侦察：{}第{}波首领 {}\n技能：{} - {}\n特性：{}\n{}\n{}\n本局遭遇：{}种",
                 &[
-                    &if run.is_endless() { crate::i18n::t("无尽") } else { String::new() },
+                    &if run.is_endless() {
+                        crate::i18n::t("无尽")
+                    } else {
+                        String::new()
+                    },
                     &wave.to_string(),
                     &crate::i18n::t(boss.name),
                     &crate::i18n::t(skill.name()),
@@ -2693,7 +2881,11 @@ fn wave_intel_text(run: &RunState, level_index: usize) -> String {
     crate::i18n::tf(
         "侦察：{}第{}波 {}\n特性：{}\n{}\n{}\n本局遭遇：{}种",
         &[
-            &if run.is_endless() { crate::i18n::t("无尽") } else { String::new() },
+            &if run.is_endless() {
+                crate::i18n::t("无尽")
+            } else {
+                String::new()
+            },
             &wave.to_string(),
             &names,
             &traits,
@@ -2743,7 +2935,10 @@ fn active_boss_info(bosses: &Query<(&Enemy, Option<&PendingBossCast>)>) -> Optio
         (
             crate::i18n::tf(
                 "施法中 {} {}%",
-                &[&crate::i18n::t(cast.skill.name()), &format!("{:.0}", progress * 100.0)],
+                &[
+                    &crate::i18n::t(cast.skill.name()),
+                    &format!("{:.0}", progress * 100.0),
+                ],
             ),
             progress,
             true,
@@ -2757,7 +2952,11 @@ fn active_boss_info(bosses: &Query<(&Enemy, Option<&PendingBossCast>)>) -> Optio
             crate::i18n::tf(
                 "{}技能：{} 还需{}s",
                 &[
-                    &if boss.enraged { crate::i18n::t("狂怒·") } else { String::new() },
+                    &if boss.enraged {
+                        crate::i18n::t("狂怒·")
+                    } else {
+                        String::new()
+                    },
                     &crate::i18n::t(skill.name()),
                     &format!("{:.0}", remain),
                 ],
@@ -2788,7 +2987,11 @@ fn active_boss_status(bosses: &Query<(&Enemy, Option<&PendingBossCast>)>) -> Opt
         "首领：{}{} [{}] HP{}%{}\n{}",
         &[
             &crate::i18n::t(info.name),
-            &if info.enraged { crate::i18n::t(" · 狂怒") } else { String::new() },
+            &if info.enraged {
+                crate::i18n::t(" · 狂怒")
+            } else {
+                String::new()
+            },
             &ascii_bar(info.hp_frac, 12),
             &format!("{:.0}", info.hp_frac * 100.0),
             &shield,
@@ -2816,7 +3019,11 @@ fn boss_bar_text(info: &BossHudInfo) -> String {
         "{}{} · HP {}%{} · {}",
         &[
             &crate::i18n::t(info.name),
-            &if info.enraged { crate::i18n::t(" · 狂怒") } else { String::new() },
+            &if info.enraged {
+                crate::i18n::t(" · 狂怒")
+            } else {
+                String::new()
+            },
             &format!("{:.0}", info.hp_frac * 100.0),
             &shield,
             &info.skill_state,
@@ -2950,8 +3157,16 @@ fn element_matchup_text(element: crate::data::Element) -> String {
         .collect();
     resist.sort_by(|a, b| b.1.total_cmp(&a.1));
 
-    let weak_names: Vec<String> = weak.iter().take(3).map(|(name, _)| crate::i18n::t(name)).collect();
-    let resist_names: Vec<String> = resist.iter().take(3).map(|(name, _)| crate::i18n::t(name)).collect();
+    let weak_names: Vec<String> = weak
+        .iter()
+        .take(3)
+        .map(|(name, _)| crate::i18n::t(name))
+        .collect();
+    let resist_names: Vec<String> = resist
+        .iter()
+        .take(3)
+        .map(|(name, _)| crate::i18n::t(name))
+        .collect();
     let weak_text = if weak_names.is_empty() {
         crate::i18n::t("暂无明显易伤目标")
     } else {
@@ -3016,14 +3231,20 @@ pub fn update_hud(
             String::new()
         };
         let auto_hint = if run.auto_wave && run.can_start_next_wave() {
-            crate::i18n::tf(" · 自动{}s", &[&format!("{:.0}", run.auto_wave_timer.max(0.0).ceil())])
+            crate::i18n::tf(
+                " · 自动{}s",
+                &[&format!("{:.0}", run.auto_wave_timer.max(0.0).ceil())],
+            )
         } else if run.auto_wave {
             crate::i18n::t(" · 自动")
         } else {
             String::new()
         };
         let wave_str = if run.is_endless() {
-            crate::i18n::tf("第{}波{}{}", &[&run.wave.to_string(), &boss_hint, &auto_hint])
+            crate::i18n::tf(
+                "第{}波{}{}",
+                &[&run.wave.to_string(), &boss_hint, &auto_hint],
+            )
         } else {
             format!("{}/{}{}{}", run.wave, run.total_waves, boss_hint, auto_hint)
         };
@@ -3047,7 +3268,10 @@ pub fn update_hud(
                 let skill = if hero.skill_cd > 0 {
                     crate::i18n::tf(
                         "{} 冷却{}波",
-                        &[&crate::i18n::t(hero.class.skill_name()), &hero.skill_cd.to_string()],
+                        &[
+                            &crate::i18n::t(hero.class.skill_name()),
+                            &hero.skill_cd.to_string(),
+                        ],
                     )
                 } else {
                     crate::i18n::tf("{} 就绪", &[&crate::i18n::t(hero.class.skill_name())])
@@ -3089,7 +3313,10 @@ pub fn update_hud(
                         &tw.repair_cost().to_string(),
                         &if tw.level >= 3 { 0 } else { tw.upgrade_cost() }.to_string(),
                         &if tw.synergy > 0.0 {
-                            crate::i18n::tf("  协同+{}%", &[&((tw.synergy * 100.0) as i32).to_string()])
+                            crate::i18n::tf(
+                                "  协同+{}%",
+                                &[&((tw.synergy * 100.0) as i32).to_string()],
+                            )
                         } else {
                             String::new()
                         },
@@ -3124,7 +3351,11 @@ pub fn update_unit_stats(
     for (stat, mut text) in &mut stats {
         text.0 = match tw {
             Some(tw) => {
-                let aps = if tw.cooldown > 0.0 { 1.0 / tw.cooldown } else { 0.0 };
+                let aps = if tw.cooldown > 0.0 {
+                    1.0 / tw.cooldown
+                } else {
+                    0.0
+                };
                 let armor = tw.armor + equipment_set_bonus(&tw.equipment).armor_add;
                 match stat {
                     UnitStat::Damage => format!("{}", tw.damage as i32),
@@ -3144,7 +3375,10 @@ pub fn update_hero_info(hero: Res<HeroLoadout>, mut info: Query<&mut Text, With<
         let skill = if hero.skill_cd > 0 {
             crate::i18n::tf(
                 "{} 冷却{}波",
-                &[&crate::i18n::t(hero.class.skill_name()), &hero.skill_cd.to_string()],
+                &[
+                    &crate::i18n::t(hero.class.skill_name()),
+                    &hero.skill_cd.to_string(),
+                ],
             )
         } else {
             crate::i18n::tf("{} 就绪", &[&crate::i18n::t(hero.class.skill_name())])
@@ -3153,7 +3387,10 @@ pub fn update_hero_info(hero: Res<HeroLoadout>, mut info: Query<&mut Text, With<
         let ult = if hero.level >= crate::hero::HeroLoadout::MAX_LEVEL {
             crate::i18n::tf("  终极·{}✓", &[&crate::i18n::t(hero.class.ultimate_name())])
         } else {
-            crate::i18n::tf("  终极·{}(30级)", &[&crate::i18n::t(hero.class.ultimate_name())])
+            crate::i18n::tf(
+                "  终极·{}(30级)",
+                &[&crate::i18n::t(hero.class.ultimate_name())],
+            )
         };
         t.0 = crate::i18n::tf(
             "英雄 {}·{} Lv{}  XP {}/{}  点数 {}\n天赋【{}】{}{}\n技能：{}  本职业已投 {}",
@@ -3291,7 +3528,7 @@ pub fn hud_buttons(
                 // Touch: costly/irreversible actions (talents, equip, refine, sell)
                 // need a confirming second tap so a stray tap never spends gold or
                 // sells a tower. The first tap also pins the tooltip.
-                if confirm_state.0 .0 {
+                if confirm_state.0.0 {
                     if let Some(id) = confirm_id(action) {
                         if confirm_state.1.pending != Some(id) {
                             confirm_state.1.pending = Some(id);
@@ -3319,7 +3556,10 @@ pub fn hud_buttons(
                     }
                     UiAction::CycleQuality => {
                         quality.cycle();
-                        run.show(crate::i18n::tf("画质：{}", &[&crate::i18n::t(quality.level.name())]));
+                        run.show(crate::i18n::tf(
+                            "画质：{}",
+                            &[&crate::i18n::t(quality.level.name())],
+                        ));
                     }
                     UiAction::TogglePause => paused.0 = !paused.0,
                     UiAction::CycleSpeed => {
@@ -3334,7 +3574,9 @@ pub fn hud_buttons(
                         if let Some(e) = sel.selected {
                             if let Ok((_, mut t)) = towers.get_mut(e) {
                                 if t.hero {
-                                    run.show(crate::i18n::t("英雄通过经验升级；请使用英雄天赋点强化"));
+                                    run.show(crate::i18n::t(
+                                        "英雄通过经验升级；请使用英雄天赋点强化",
+                                    ));
                                     continue;
                                 }
                                 let cost = t.upgrade_cost();
@@ -3390,7 +3632,10 @@ pub fn hud_buttons(
                                     crate::hero::apply_loadout_to_tower(&confirm_state.2, &mut t);
                                 }
                                 if returned > 0 {
-                                    run.show(crate::i18n::tf("卸下装备 {} 件", &[&returned.to_string()]));
+                                    run.show(crate::i18n::tf(
+                                        "卸下装备 {} 件",
+                                        &[&returned.to_string()],
+                                    ));
                                 } else {
                                     run.show(crate::i18n::t("没有可卸下装备"));
                                 }
@@ -3413,7 +3658,10 @@ pub fn hud_buttons(
                                             &mut t,
                                         );
                                     }
-                                    run.show(crate::i18n::tf("卸下 {}", &[&crate::i18n::t(item.def().name)]));
+                                    run.show(crate::i18n::tf(
+                                        "卸下 {}",
+                                        &[&crate::i18n::t(item.def().name)],
+                                    ));
                                 } else {
                                     run.show(crate::i18n::t("该装备槽为空"));
                                 }
@@ -3428,7 +3676,9 @@ pub fn hud_buttons(
                         if let Some(e) = sel.selected {
                             if let Ok((ent, t)) = towers.get(e) {
                                 if t.hero {
-                                    run.show(crate::i18n::t("英雄不能出售；阵亡后会自动进入重生冷却"));
+                                    run.show(crate::i18n::t(
+                                        "英雄不能出售；阵亡后会自动进入重生冷却",
+                                    ));
                                     continue;
                                 }
                                 let refund = t.refund();
@@ -3443,7 +3693,10 @@ pub fn hud_buttons(
                                 sel.selected = None;
                                 sfx.write(crate::audio::SfxEvent(Sound::Sell));
                                 if returned > 0 {
-                                    run.show(crate::i18n::tf("出售 +{}，返还装备 {} 件", &[&refund.to_string(), &returned.to_string()]));
+                                    run.show(crate::i18n::tf(
+                                        "出售 +{}，返还装备 {} 件",
+                                        &[&refund.to_string(), &returned.to_string()],
+                                    ));
                                 }
                             }
                         }
@@ -3512,9 +3765,15 @@ pub fn hud_buttons(
                                     run.show(crate::i18n::t("装备槽已满"));
                                 } else if inv.take(*item) {
                                     crate::equipment::equip_into(&mut t, *item);
-                                    run.show(crate::i18n::tf("装配 {}！", &[&crate::i18n::t(def.name)]));
+                                    run.show(crate::i18n::tf(
+                                        "装配 {}！",
+                                        &[&crate::i18n::t(def.name)],
+                                    ));
                                 } else {
-                                    run.show(crate::i18n::tf("没有{}", &[&crate::i18n::t(def.name)]));
+                                    run.show(crate::i18n::tf(
+                                        "没有{}",
+                                        &[&crate::i18n::t(def.name)],
+                                    ));
                                 }
                             } else {
                                 run.show(crate::i18n::t("先选中一座塔"));
@@ -3609,14 +3868,20 @@ fn tooltip_text(
                 "陨石",
                 crate::i18n::tf(
                     "花费{}金 · 冷却{}回合\n轰炸血量最高的敌人及周围",
-                    &[&Abilities::METEOR_COST.to_string(), &Abilities::METEOR_MAX.to_string()],
+                    &[
+                        &Abilities::METEOR_COST.to_string(),
+                        &Abilities::METEOR_MAX.to_string(),
+                    ],
                 ),
             ),
             Ability::Freeze => (
                 "冰封",
                 crate::i18n::tf(
                     "花费{}金 · 冷却{}回合\n全场敌人冻结 2.5 秒",
-                    &[&Abilities::FREEZE_COST.to_string(), &Abilities::FREEZE_MAX.to_string()],
+                    &[
+                        &Abilities::FREEZE_COST.to_string(),
+                        &Abilities::FREEZE_MAX.to_string(),
+                    ],
                 ),
             ),
             Ability::GoldRush => (
@@ -3632,7 +3897,10 @@ fn tooltip_text(
         } else {
             crate::i18n::t("\n[就绪] 可释放")
         };
-        return Some(crate::i18n::tf("{} · {}{}", &[&crate::i18n::t(name), &base, &status]));
+        return Some(crate::i18n::tf(
+            "{} · {}{}",
+            &[&crate::i18n::t(name), &base, &status],
+        ));
     }
     Some(match a {
         UiAction::Build(kind) => {
@@ -3672,10 +3940,12 @@ fn tooltip_text(
             let d = item.def();
             let element = d
                 .element
-                .map(|e| crate::i18n::tf(
-                    "\n属性转化：{}\n{}",
-                    &[&crate::i18n::t(e.name()), &element_matchup_text(e)],
-                ))
+                .map(|e| {
+                    crate::i18n::tf(
+                        "\n属性转化：{}\n{}",
+                        &[&crate::i18n::t(e.name()), &element_matchup_text(e)],
+                    )
+                })
                 .unwrap_or_default();
             crate::i18n::tf(
                 "{} · {}\n{}\n{}\n伤害×{} 射程×{} 冷却×{}\n穿甲+{} HP×{} 护甲+{}{}\n{}\n{}\n每塔最多 3 件，需有库存",
@@ -3701,34 +3971,37 @@ fn tooltip_text(
         UiAction::CycleTargetPriority => {
             crate::i18n::t("切换选中防御塔的目标优先级（T键）：近身/前锋/强者/残血/威胁")
         }
-        UiAction::Unequip => crate::i18n::t("卸下选中防御塔的全部装备（Z键）：装备返还库存并移除加成"),
+        UiAction::Unequip => {
+            crate::i18n::t("卸下选中防御塔的全部装备（Z键）：装备返还库存并移除加成")
+        }
         UiAction::UnequipSlot(_) => crate::i18n::t("卸下该槽位装备：返还库存并重新计算属性与共鸣"),
         UiAction::Sell => crate::i18n::t("出售选中的防御塔（X键），返还部分金币和已装配装备"),
         UiAction::StartWave => crate::i18n::t("开始下一波敌人（空格键）"),
         UiAction::ToggleAutoWave => crate::i18n::t("自动下一波（A键）：波间保留短暂准备倒计时"),
-        UiAction::CycleQuality => {
-            crate::i18n::t("切换画质：流畅(无抗锯齿)/标准(2×)/精细(4×)。分辨率自适应，手机卡顿就调低画质")
-        }
+        UiAction::CycleQuality => crate::i18n::t(
+            "切换画质：流畅(无抗锯齿)/标准(2×)/精细(4×)。分辨率自适应，手机卡顿就调低画质",
+        ),
         UiAction::TogglePause => crate::i18n::t("暂停 / 继续（P键）"),
         UiAction::CycleSpeed => crate::i18n::t("切换游戏速度 1× / 2× / 3×（F键）"),
         UiAction::Fullscreen => crate::i18n::t("切换全屏显示"),
         UiAction::OpenBestiary => crate::i18n::t("打开怪物图鉴"),
-        UiAction::SummonHero => {
-            crate::i18n::tf(
-                "英雄开局自动登场（免费）。此键可在阵亡后立即重生。\n{}·{} Lv{}：{}\n左键选中英雄，右键命令它移动（触屏点地面移动）",
-                &[
-                    &crate::i18n::t(hero.race.name()),
-                    &crate::i18n::t(hero.class.name()),
-                    &hero.level.to_string(),
-                    &crate::i18n::t(hero.class.blurb()),
-                ],
-            )
-        }
+        UiAction::SummonHero => crate::i18n::tf(
+            "英雄开局自动登场（免费）。此键可在阵亡后立即重生。\n{}·{} Lv{}：{}\n左键选中英雄，右键命令它移动（触屏点地面移动）",
+            &[
+                &crate::i18n::t(hero.race.name()),
+                &crate::i18n::t(hero.class.name()),
+                &hero.level.to_string(),
+                &crate::i18n::t(hero.class.blurb()),
+            ],
+        ),
         UiAction::HeroSkill => {
             let cd = if hero.skill_cd > 0 {
                 crate::i18n::tf("冷却中，还需 {} 波", &[&hero.skill_cd.to_string()])
             } else {
-                crate::i18n::tf("就绪，释放后冷却 {} 波", &[&hero.skill_cooldown_max().to_string()])
+                crate::i18n::tf(
+                    "就绪，释放后冷却 {} 波",
+                    &[&hero.skill_cooldown_max().to_string()],
+                )
             };
             crate::i18n::tf(
                 "{} · {}\n{}\n{}",
@@ -3755,7 +4028,10 @@ fn tooltip_text(
         }
         UiAction::ResetHeroTalents => crate::i18n::tf(
             "重置{}天赋\n返还当前职业已投入的 {} 点，不影响英雄等级和其他职业",
-            &[&crate::i18n::t(hero.class.name()), &hero.spent_in_current_class().to_string()],
+            &[
+                &crate::i18n::t(hero.class.name()),
+                &hero.spent_in_current_class().to_string(),
+            ],
         ),
         UiAction::SetDifficulty(d) => match d {
             Difficulty::Easy => crate::i18n::t("难度：简单（出怪少、金币多）"),
@@ -3796,7 +4072,9 @@ fn tooltip_text(
                 None => crate::i18n::t("查看关卡简报、选择英雄职业与种族后出击"),
             }
         }
-        UiAction::PlayEndless => crate::i18n::t("无尽模式：无限波次，每 5 波一个首领，刷装备的核心模式"),
+        UiAction::PlayEndless => {
+            crate::i18n::t("无尽模式：无限波次，每 5 波一个首领，刷装备的核心模式")
+        }
         UiAction::BeginMission => crate::i18n::t("出击！进入这一关开始战斗"),
         UiAction::Restart => crate::i18n::t("重新开始本关（金币/防御塔/进度重置）"),
         UiAction::NextLevel => crate::i18n::t("进入下一关"),
@@ -3805,7 +4083,9 @@ fn tooltip_text(
         UiAction::OpenTowerArchive => crate::i18n::t("打开防御塔档案：查看全部塔的属性与机制"),
         UiAction::OpenMilestones => crate::i18n::t("查看封印成就与解锁进度"),
         UiAction::OpenCampaignDossier => crate::i18n::t("查看战役档案：剧情与首领情报"),
-        UiAction::OpenHeroCodex => crate::i18n::t("打开英雄图鉴：浏览职业×种族，查看天赋/技能/终极并选择出战英雄"),
+        UiAction::OpenHeroCodex => {
+            crate::i18n::t("打开英雄图鉴：浏览职业×种族，查看天赋/技能/终极并选择出战英雄")
+        }
         UiAction::RefineEquipment(_) => crate::i18n::t("精炼：消耗重复装备，合成更高品质"),
         UiAction::ToggleDock => crate::i18n::t("打开 / 收起英雄面板（属性 · 装备 · 天赋）"),
         UiAction::ToggleSettings => {
@@ -4205,8 +4485,24 @@ pub fn spawn_story_scene(
                 briefing_panel_fade(Color::srgba(0.015, 0.020, 0.024, 1.0), 0.62, 0.25),
             ))
             .with_children(|panel| {
-                briefing_text(panel, f, crate::i18n::t(kicker), 13.0, UI_ACCENT_TEAL, 1.0, 0.35);
-                briefing_text(panel, f, crate::i18n::t(title), 34.0, UI_ACCENT_GOLD, 1.0, 0.55);
+                briefing_text(
+                    panel,
+                    f,
+                    crate::i18n::t(kicker),
+                    13.0,
+                    UI_ACCENT_TEAL,
+                    1.0,
+                    0.35,
+                );
+                briefing_text(
+                    panel,
+                    f,
+                    crate::i18n::t(title),
+                    34.0,
+                    UI_ACCENT_GOLD,
+                    1.0,
+                    0.55,
+                );
             });
 
             // --- visual-novel dialogue popups: left (Guardian) / right (Warlord) /
@@ -4233,8 +4529,17 @@ pub fn spawn_story_scene(
                 DlgBox(Speaker::Guardian),
             ))
             .with_children(|b| {
-                b.spawn((Text::new(crate::i18n::t("守护者·艾琳")), text_font(f, 15.0), TextColor(left)));
-                b.spawn((Text::new(""), text_font(f, 16.0), TextColor(Color::WHITE), DlgText(Speaker::Guardian)));
+                b.spawn((
+                    Text::new(crate::i18n::t("守护者·艾琳")),
+                    text_font(f, 15.0),
+                    TextColor(left),
+                ));
+                b.spawn((
+                    Text::new(""),
+                    text_font(f, 16.0),
+                    TextColor(Color::WHITE),
+                    DlgText(Speaker::Guardian),
+                ));
             });
             // Warlord popup (right).
             root.spawn((
@@ -4255,8 +4560,17 @@ pub fn spawn_story_scene(
                 DlgBox(Speaker::Warlord),
             ))
             .with_children(|b| {
-                b.spawn((Text::new(crate::i18n::t("虚空统帅")), text_font(f, 15.0), TextColor(right)));
-                b.spawn((Text::new(""), text_font(f, 16.0), TextColor(Color::WHITE), DlgText(Speaker::Warlord)));
+                b.spawn((
+                    Text::new(crate::i18n::t("虚空统帅")),
+                    text_font(f, 15.0),
+                    TextColor(right),
+                ));
+                b.spawn((
+                    Text::new(""),
+                    text_font(f, 16.0),
+                    TextColor(Color::WHITE),
+                    DlgText(Speaker::Warlord),
+                ));
             });
             // Narrator box (center bottom).
             root.spawn((
@@ -4276,7 +4590,12 @@ pub fn spawn_story_scene(
                 DlgBox(Speaker::Narrator),
             ))
             .with_children(|b| {
-                b.spawn((Text::new(""), text_font(f, 16.0), TextColor(nar), DlgText(Speaker::Narrator)));
+                b.spawn((
+                    Text::new(""),
+                    text_font(f, 16.0),
+                    TextColor(nar),
+                    DlgText(Speaker::Narrator),
+                ));
             });
             // Tap-to-continue hint (always visible).
             root.spawn((
@@ -4336,7 +4655,11 @@ pub fn spawn_story_scene(
                         StoryChoice(i),
                     ))
                     .with_children(|b| {
-                        b.spawn((Text::new(crate::i18n::t(label)), text_font(f, 16.0), TextColor(UI_TEXT)));
+                        b.spawn((
+                            Text::new(crate::i18n::t(label)),
+                            text_font(f, 16.0),
+                            TextColor(UI_TEXT),
+                        ));
                     });
                 }
             });
@@ -4353,7 +4676,13 @@ pub fn spawn_story_scene(
             (Narrator, crate::i18n::t(line_b)),
             (Warlord, crate::i18n::t(warlord_line)),
             (Guardian, crate::i18n::t(guardian_line)),
-            (Narrator, crate::i18n::tf("{}：{}", &[&crate::i18n::t(level.name), &crate::i18n::t(line_c)])),
+            (
+                Narrator,
+                crate::i18n::tf(
+                    "{}：{}",
+                    &[&crate::i18n::t(level.name), &crate::i18n::t(line_c)],
+                ),
+            ),
         ],
         idx: 0,
         revealed: 0.0,
@@ -4363,8 +4692,14 @@ pub fn spawn_story_scene(
         // Before 艾琳's line (idx 3) the player chooses her reply.
         choice_at: 3,
         choices: vec![
-            (crate::i18n::t("死守萝卜"), crate::i18n::t("只要我还站着，核心就不会熄。")),
-            (crate::i18n::t("诱敌深入"), crate::i18n::t("让它们进来——塔阵的每一寸都是坟墓。")),
+            (
+                crate::i18n::t("死守萝卜"),
+                crate::i18n::t("只要我还站着，核心就不会熄。"),
+            ),
+            (
+                crate::i18n::t("诱敌深入"),
+                crate::i18n::t("让它们进来——塔阵的每一寸都是坟墓。"),
+            ),
         ],
     });
 }
@@ -4617,7 +4952,11 @@ fn combo_anim_path(hero: &HeroLoadout) -> String {
         Race::Elf => "elf",
         Race::Orc => "orc",
     };
-    format!("story/combo_anim/{}_{}.webp", hero.class.sprite_name(), race)
+    format!(
+        "story/combo_anim/{}_{}.webp",
+        hero.class.sprite_name(),
+        race
+    )
 }
 
 pub fn spawn_hero_intro(
@@ -4774,6 +5113,7 @@ fn spawn_tooltip_box(commands: &mut Commands, f: &Handle<Font>, root: impl Bundl
 pub fn spawn_level_briefing(
     mut commands: Commands,
     fonts: Res<UiFont>,
+    sprites: Res<Sprites>,
     levels: Res<Levels>,
     current: Res<CurrentLevel>,
     mode: Res<GameMode>,
@@ -4793,10 +5133,18 @@ pub fn spawn_level_briefing(
     let title = if endless {
         crate::i18n::tf("无尽模式 · {}", &[&crate::i18n::t(level.name)])
     } else {
-        crate::i18n::tf("{}. {}", &[&format!("{:02}", current.0 + 1), &crate::i18n::t(level.name)])
+        crate::i18n::tf(
+            "{}. {}",
+            &[
+                &format!("{:02}", current.0 + 1),
+                &crate::i18n::t(level.name),
+            ],
+        )
     };
     let lore = if endless {
-        crate::i18n::t("终章封印被反复冲刷，敌潮不再遵守战役节奏。每一轮部署都只是为下一次崩坏争取时间。")
+        crate::i18n::t(
+            "终章封印被反复冲刷，敌潮不再遵守战役节奏。每一轮部署都只是为下一次崩坏争取时间。",
+        )
     } else {
         crate::i18n::t(LEVEL_LORE.get(current.0).copied().unwrap_or("档案缺失。"))
     };
@@ -4879,7 +5227,15 @@ pub fn spawn_level_briefing(
                 ScrollPosition::default(),
             ))
             .with_children(|left| {
-                briefing_text(left, f, crate::i18n::t("作战简报"), 14.0, UI_ACCENT_TEAL, 1.0, 0.10);
+                briefing_text(
+                    left,
+                    f,
+                    crate::i18n::t("作战简报"),
+                    14.0,
+                    UI_ACCENT_TEAL,
+                    1.0,
+                    0.10,
+                );
                 briefing_text(left, f, title, 28.0, UI_ACCENT_GOLD, 1.0, 0.25);
                 briefing_text(left, f, lore, 13.0, UI_TEXT, 0.92, 0.55);
 
@@ -4893,7 +5249,15 @@ pub fn spawn_level_briefing(
                     briefing_panel_fade(UI_CARD, 0.9, 0.9),
                 ))
                 .with_children(|panel| {
-                    briefing_text(panel, f, crate::i18n::t("部署参数"), 12.0, UI_ACCENT_GOLD, 1.0, 1.0);
+                    briefing_text(
+                        panel,
+                        f,
+                        crate::i18n::t("部署参数"),
+                        12.0,
+                        UI_ACCENT_GOLD,
+                        1.0,
+                        1.0,
+                    );
                     briefing_text(panel, f, objective, 11.0, UI_TEXT, 0.95, 1.12);
                 });
 
@@ -4990,7 +5354,13 @@ pub fn spawn_level_briefing(
                         } else {
                             BTN_BG
                         };
-                        dock_button(row, f, &crate::i18n::t(class.name()), UiAction::SelectHeroClass(class), col);
+                        icon_button(
+                            row,
+                            sprites.heroes[&class].clone(),
+                            UiAction::SelectHeroClass(class),
+                            col,
+                            (),
+                        );
                     }
                 });
                 left.spawn(Node {
@@ -5005,7 +5375,13 @@ pub fn spawn_level_briefing(
                         } else {
                             BTN_BG
                         };
-                        dock_button(row, f, &crate::i18n::t(race.name()), UiAction::SelectHeroRace(race), col);
+                        icon_button(
+                            row,
+                            sprites.races[&race].clone(),
+                            UiAction::SelectHeroRace(race),
+                            col,
+                            (),
+                        );
                     }
                 });
 
@@ -5023,7 +5399,13 @@ pub fn spawn_level_briefing(
                         UiAction::BeginMission,
                         Color::srgb(0.23, 0.50, 0.30),
                     );
-                    button(row, f, &crate::i18n::t("返回战情室"), UiAction::ToMenu, BTN_BG);
+                    button(
+                        row,
+                        f,
+                        &crate::i18n::t("返回战情室"),
+                        UiAction::ToMenu,
+                        BTN_BG,
+                    );
                 });
             });
 
@@ -5048,7 +5430,15 @@ pub fn spawn_level_briefing(
                         ..default()
                     })
                     .with_children(|head| {
-                        briefing_text(head, f, crate::i18n::t("战场投影"), 22.0, UI_TEXT, 1.0, 0.35);
+                        briefing_text(
+                            head,
+                            f,
+                            crate::i18n::t("战场投影"),
+                            22.0,
+                            UI_TEXT,
+                            1.0,
+                            0.35,
+                        );
                         briefing_text(
                             head,
                             f,
@@ -5202,7 +5592,15 @@ pub fn spawn_level_briefing(
                             briefing_panel_fade(UI_CARD_SOFT, 0.88, 1.95),
                         ))
                         .with_children(|card| {
-                            briefing_text(card, f, crate::i18n::t("塔防窗口"), 12.0, UI_ACCENT_GOLD, 1.0, 2.05);
+                            briefing_text(
+                                card,
+                                f,
+                                crate::i18n::t("塔防窗口"),
+                                12.0,
+                                UI_ACCENT_GOLD,
+                                1.0,
+                                2.05,
+                            );
                             briefing_text(
                                 card,
                                 f,
@@ -5227,12 +5625,22 @@ pub fn spawn_level_briefing(
                             briefing_panel_fade(UI_CARD_SOFT, 0.88, 2.15),
                         ))
                         .with_children(|card| {
-                            briefing_text(card, f, crate::i18n::t("作战节奏"), 12.0, UI_ACCENT_TEAL, 1.0, 2.25);
+                            briefing_text(
+                                card,
+                                f,
+                                crate::i18n::t("作战节奏"),
+                                12.0,
+                                UI_ACCENT_TEAL,
+                                1.0,
+                                2.25,
+                            );
                             briefing_text(
                                 card,
                                 f,
                                 if endless {
-                                    crate::i18n::t("优先成型经济与装备共鸣，5波节奏检查反隐和攻城防护")
+                                    crate::i18n::t(
+                                        "优先成型经济与装备共鸣，5波节奏检查反隐和攻城防护",
+                                    )
                                 } else {
                                     crate::i18n::tf(
                                         "第 {} 波前建立主输出，第 {} 波前补控制",
@@ -5471,7 +5879,13 @@ pub fn spawn_menu(
                     VolumeLabel,
                 ));
                 s.spawn(row_node()).with_children(|row| {
-                    button(row, f, &format!("{} +/-", tr("音量")), UiAction::CycleVolume, BTN_BG);
+                    button(
+                        row,
+                        f,
+                        &format!("{} +/-", tr("音量")),
+                        UiAction::CycleVolume,
+                        BTN_BG,
+                    );
                 });
                 // 语言
                 s.spawn((
@@ -5525,8 +5939,11 @@ pub fn spawn_menu(
                 left.spawn((
                     Node {
                         flex_direction: FlexDirection::Column,
+                        height: Val::Px(178.0),
+                        flex_shrink: 0.0,
                         padding: UiRect::all(Val::Px(10.0)),
-                        row_gap: Val::Px(5.0),
+                        row_gap: Val::Px(7.0),
+                        overflow: Overflow::clip(),
                         ..default()
                     },
                     BackgroundColor(UI_CARD),
@@ -5575,8 +5992,9 @@ pub fn spawn_menu(
                     for chunk in prog.chunks(3) {
                         panel
                             .spawn(Node {
+                                width: Val::Percent(100.0),
                                 flex_direction: FlexDirection::Row,
-                                column_gap: Val::Px(10.0),
+                                column_gap: Val::Px(6.0),
                                 ..default()
                             })
                             .with_children(|row| {
@@ -5584,9 +6002,15 @@ pub fn spawn_menu(
                                     row.spawn((
                                         Button,
                                         Node {
+                                            flex_grow: 1.0,
+                                            flex_basis: Val::Px(0.0),
+                                            min_width: Val::Px(0.0),
+                                            height: Val::Px(38.0),
                                             flex_direction: FlexDirection::Row,
                                             align_items: AlignItems::Center,
-                                            column_gap: Val::Px(3.0),
+                                            column_gap: Val::Px(4.0),
+                                            padding: UiRect::axes(Val::Px(2.0), Val::Px(1.0)),
+                                            overflow: Overflow::clip(),
                                             ..default()
                                         },
                                         UiAction::Info(*tip),
@@ -5602,8 +6026,9 @@ pub fn spawn_menu(
                                         ));
                                         c.spawn((
                                             Text::new(val),
-                                            text_font(f, 15.0),
+                                            text_font(f, 13.0),
                                             TextColor(UI_TEXT),
+                                            TextLayout::no_wrap(),
                                         ));
                                     });
                                 }
@@ -5613,6 +6038,11 @@ pub fn spawn_menu(
                         Text::new(next_front.clone()),
                         text_font(f, 11.0),
                         TextColor(UI_TEXT_DIM),
+                        Node {
+                            width: Val::Percent(100.0),
+                            overflow: Overflow::clip(),
+                            ..default()
+                        },
                     ));
                 });
 
@@ -5638,7 +6068,6 @@ pub fn spawn_menu(
                         );
                     }
                 });
-
             });
 
             p.spawn((
@@ -5758,9 +6187,7 @@ pub fn spawn_menu(
                                             ));
                                         } else {
                                             chip.spawn((
-                                                ImageNode::new(
-                                                    sprites.ui["ic_lock"].clone(),
-                                                ),
+                                                ImageNode::new(sprites.ui["ic_lock"].clone()),
                                                 Node {
                                                     width: Val::Px(12.0),
                                                     height: Val::Px(12.0),
@@ -5813,12 +6240,36 @@ pub fn spawn_menu(
                         // Icon nav (hover/tap shows the name via tooltip). 英雄图鉴 lives
                         // here alongside the other codices instead of on the left column.
                         for (key, action, bg) in [
-                            ("nav_hero", UiAction::OpenHeroCodex, Color::srgb(0.30, 0.26, 0.14)),
-                            ("nav_bestiary", UiAction::OpenBestiary, Color::srgb(0.26, 0.22, 0.34)),
-                            ("nav_towers", UiAction::OpenTowerArchive, Color::srgb(0.18, 0.34, 0.34)),
-                            ("nav_armory", UiAction::OpenArmory, Color::srgb(0.35, 0.29, 0.16)),
-                            ("nav_milestones", UiAction::OpenMilestones, Color::srgb(0.34, 0.22, 0.36)),
-                            ("nav_dossier", UiAction::OpenCampaignDossier, Color::srgb(0.22, 0.28, 0.40)),
+                            (
+                                "nav_hero",
+                                UiAction::OpenHeroCodex,
+                                Color::srgb(0.30, 0.26, 0.14),
+                            ),
+                            (
+                                "nav_bestiary",
+                                UiAction::OpenBestiary,
+                                Color::srgb(0.26, 0.22, 0.34),
+                            ),
+                            (
+                                "nav_towers",
+                                UiAction::OpenTowerArchive,
+                                Color::srgb(0.18, 0.34, 0.34),
+                            ),
+                            (
+                                "nav_armory",
+                                UiAction::OpenArmory,
+                                Color::srgb(0.35, 0.29, 0.16),
+                            ),
+                            (
+                                "nav_milestones",
+                                UiAction::OpenMilestones,
+                                Color::srgb(0.34, 0.22, 0.36),
+                            ),
+                            (
+                                "nav_dossier",
+                                UiAction::OpenCampaignDossier,
+                                Color::srgb(0.22, 0.28, 0.40),
+                            ),
                         ] {
                             icon_button(row, sprites.ui[key].clone(), action, bg, ());
                         }
@@ -6008,11 +6459,21 @@ pub fn hero_buttons(
                 loadout.respawn_waves = 0;
                 let pos = crate::hero::hero_spawn_pos();
                 let tower = crate::hero::make_hero_tower(&loadout, pos);
-                crate::build::spawn_hero(&mut commands, tower, &sprites, &walks, loadout.class);
+                crate::build::spawn_hero(
+                    &mut commands,
+                    tower,
+                    &sprites,
+                    &walks,
+                    loadout.class,
+                    loadout.race,
+                );
                 loadout.alive = true;
                 run.show(crate::i18n::tf(
                     "英雄降临：{}·{}（点击英雄选中，再点地面移动）",
-                    &[&crate::i18n::t(loadout.race.name()), &crate::i18n::t(loadout.class.name())],
+                    &[
+                        &crate::i18n::t(loadout.race.name()),
+                        &crate::i18n::t(loadout.class.name()),
+                    ],
                 ));
                 sfx.write(crate::audio::SfxEvent(crate::audio::Sound::Raise));
                 vfx.write(crate::vfx::VfxEvent::Burst {
@@ -6062,7 +6523,10 @@ pub fn hero_buttons(
             }
             UiAction::HeroSkill => {
                 if loadout.skill_cd > 0 {
-                    run.show(crate::i18n::tf("英雄技能冷却中，还需 {} 波", &[&loadout.skill_cd.to_string()]));
+                    run.show(crate::i18n::tf(
+                        "英雄技能冷却中，还需 {} 波",
+                        &[&loadout.skill_cd.to_string()],
+                    ));
                     continue;
                 }
                 let hero_source =
@@ -6175,7 +6639,10 @@ fn cast_hero_skill(
             });
             run.show(crate::i18n::tf(
                 "{}命中 {} 个敌人",
-                &[&crate::i18n::t(loadout.class.skill_name()), &hits.to_string()],
+                &[
+                    &crate::i18n::t(loadout.class.skill_name()),
+                    &hits.to_string(),
+                ],
             ));
             true
         }
@@ -6217,7 +6684,10 @@ fn cast_hero_skill(
             });
             run.show(crate::i18n::tf(
                 "{}席卷 {} 个敌人",
-                &[&crate::i18n::t(loadout.class.skill_name()), &hits.to_string()],
+                &[
+                    &crate::i18n::t(loadout.class.skill_name()),
+                    &hits.to_string(),
+                ],
             ));
             true
         }
@@ -6265,7 +6735,10 @@ fn cast_hero_skill(
             }
             run.show(crate::i18n::tf(
                 "{}锁定 {} 个目标",
-                &[&crate::i18n::t(loadout.class.skill_name()), &selected.len().to_string()],
+                &[
+                    &crate::i18n::t(loadout.class.skill_name()),
+                    &selected.len().to_string(),
+                ],
             ));
             true
         }
@@ -6353,7 +6826,10 @@ fn cast_hero_skill(
                 if tower_hits > 0 {
                     run.show(crate::i18n::tf(
                         "{}超频 {} 座塔",
-                        &[&crate::i18n::t(loadout.class.skill_name()), &tower_hits.to_string()],
+                        &[
+                            &crate::i18n::t(loadout.class.skill_name()),
+                            &tower_hits.to_string(),
+                        ],
                     ));
                     return true;
                 }
@@ -6513,7 +6989,10 @@ fn cast_hero_skill(
             }
             run.show(crate::i18n::tf(
                 "{}标记 {} 个目标",
-                &[&crate::i18n::t(loadout.class.skill_name()), &selected.len().to_string()],
+                &[
+                    &crate::i18n::t(loadout.class.skill_name()),
+                    &selected.len().to_string(),
+                ],
             ));
             true
         }
@@ -6714,10 +7193,7 @@ pub fn update_volume_label(
     }
 }
 
-pub fn update_language_label(
-    lang: Res<Language>,
-    mut q: Query<&mut Text, With<LanguageLabel>>,
-) {
+pub fn update_language_label(lang: Res<Language>, mut q: Query<&mut Text, With<LanguageLabel>>) {
     let l = lang.lang;
     for mut t in &mut q {
         t.0 = format!("{}：{}", tr(l, "语言"), l.label());
@@ -6828,7 +7304,11 @@ pub fn spawn_bestiary(
             p.spawn((
                 Text::new(crate::i18n::tf(
                     "已发现 {}/{} 种   总击杀 {}",
-                    &[&found.to_string(), &MONSTER_SPECIES.len().to_string(), &total.to_string()],
+                    &[
+                        &found.to_string(),
+                        &MONSTER_SPECIES.len().to_string(),
+                        &total.to_string(),
+                    ],
                 )),
                 text_font(f, 14.0),
                 TextColor(Color::srgb(0.7, 0.7, 0.8)),
@@ -6846,13 +7326,14 @@ pub fn spawn_bestiary(
                     grid.spawn((
                         Node {
                             width: Val::Px(165.0),
-                            height: Val::Px(160.0),
+                            height: Val::Px(238.0),
                             flex_direction: FlexDirection::Column,
                             align_items: AlignItems::Center,
-                            justify_content: JustifyContent::Center,
-                            row_gap: Val::Px(2.0),
+                            justify_content: JustifyContent::FlexStart,
+                            row_gap: Val::Px(3.0),
                             margin: UiRect::all(Val::Px(4.0)),
                             padding: UiRect::all(Val::Px(6.0)),
+                            overflow: Overflow::clip(),
                             ..default()
                         },
                         BackgroundColor(UI_CARD),
@@ -6899,8 +7380,15 @@ pub fn spawn_bestiary(
                             ));
                             cell.spawn((
                                 Text::new(brief(species)),
-                                text_font(f, 10.0),
+                                text_font(f, 9.0),
                                 TextColor(Color::srgb(0.7, 0.8, 0.7)),
+                                TextLayout::justify(Justify::Left),
+                                Node {
+                                    width: Val::Percent(100.0),
+                                    height: Val::Px(92.0),
+                                    overflow: Overflow::clip(),
+                                    ..default()
+                                },
                             ));
                         } else {
                             cell.spawn((
@@ -6929,7 +7417,9 @@ pub fn spawn_bestiary(
                 },
             ));
             p.spawn((
-                Text::new(crate::i18n::t("每种技能都有 普通 / 中级 / 高级 三个级别，由怪物品级决定")),
+                Text::new(crate::i18n::t(
+                    "每种技能都有 普通 / 中级 / 高级 三个级别，由怪物品级决定",
+                )),
                 text_font(f, 13.0),
                 TextColor(Color::srgb(0.7, 0.7, 0.8)),
             ));
@@ -7171,7 +7661,9 @@ pub fn spawn_hero_codex(mut commands: Commands, fonts: Res<UiFont>, sprites: Res
                 TextColor(UI_ACCENT_GOLD),
             ));
             p.spawn((
-                Text::new(crate::i18n::t("选择出战英雄 · 种族 × 职业（悬停查看天赋与技能；三族属性不同）")),
+                Text::new(crate::i18n::t(
+                    "选择出战英雄 · 种族 × 职业（悬停查看天赋与技能；三族属性不同）",
+                )),
                 text_font(f, 13.0),
                 TextColor(UI_ACCENT_TEAL),
             ));
@@ -7261,7 +7753,10 @@ pub fn hero_codex_buttons(
     }
 }
 
-pub fn update_hero_codex_info(hero: Res<HeroLoadout>, mut q: Query<&mut Text, With<HeroCodexInfo>>) {
+pub fn update_hero_codex_info(
+    hero: Res<HeroLoadout>,
+    mut q: Query<&mut Text, With<HeroCodexInfo>>,
+) {
     if let Ok(mut t) = q.single_mut() {
         let doc = hero.class.doctrine();
         t.0 = crate::i18n::tf(
@@ -7335,7 +7830,11 @@ pub fn spawn_campaign_dossier(
                     let open = i < unlocked;
                     let stars = progress.stars.get(i).copied().unwrap_or(0);
                     let lore = LEVEL_LORE.get(i).copied().unwrap_or("档案缺失。");
-                    let status = if open { crate::i18n::t(rating_label(stars)) } else { crate::i18n::t("封存") };
+                    let status = if open {
+                        crate::i18n::t(rating_label(stars))
+                    } else {
+                        crate::i18n::t("封存")
+                    };
                     let accent = if open {
                         theme.accent
                     } else {
@@ -7358,7 +7857,11 @@ pub fn spawn_campaign_dossier(
                         cell.spawn((
                             Text::new(crate::i18n::tf(
                                 "{}. {} · {}",
-                                &[&format!("{:02}", i + 1), &crate::i18n::t(level.name), &status],
+                                &[
+                                    &format!("{:02}", i + 1),
+                                    &crate::i18n::t(level.name),
+                                    &status,
+                                ],
                             )),
                             text_font(f, 15.0),
                             TextColor(accent.mix(&Color::WHITE, 0.24)),
@@ -7820,11 +8323,25 @@ pub fn spawn_gameover(
     mut inv: ResMut<EquipmentInventory>,
     mut towers: Query<&mut crate::tower::Tower>,
 ) {
-    crate::audio::play_oneshot(&mut commands, &sfx, crate::audio::Sound::Defeat, audio.master);
+    crate::audio::play_oneshot(
+        &mut commands,
+        &sfx,
+        crate::audio::Sound::Defeat,
+        audio.master,
+    );
     let returned = recover_run_equipment(&mut inv, &mut towers);
-    let mut subtitle = settlement_summary(&crate::i18n::t("本局结算"), current.0, &levels, &run, diff.0);
+    let mut subtitle = settlement_summary(
+        &crate::i18n::t("本局结算"),
+        current.0,
+        &levels,
+        &run,
+        diff.0,
+    );
     if returned > 0 {
-        subtitle.push_str(&crate::i18n::tf("\n已回收本局装备 {} 件", &[&returned.to_string()]));
+        subtitle.push_str(&crate::i18n::tf(
+            "\n已回收本局装备 {} 件",
+            &[&returned.to_string()],
+        ));
     }
     overlay(
         &mut commands,
@@ -7852,7 +8369,12 @@ pub fn spawn_victory(
     mut rng: ResMut<Rng>,
     mut towers: Query<&mut crate::tower::Tower>,
 ) {
-    crate::audio::play_oneshot(&mut commands, &sfx, crate::audio::Sound::Victory, audio.master);
+    crate::audio::play_oneshot(
+        &mut commands,
+        &sfx,
+        crate::audio::Sound::Victory,
+        audio.master,
+    );
     let returned = recover_run_equipment(&mut inv, &mut towers);
     let level = &levels.0[current.0];
     let start_lives = (level.lives + diff.0.lives_bonus()).max(1);
@@ -7889,27 +8411,45 @@ pub fn spawn_victory(
         .collect::<Vec<_>>();
     let mut subtitle = if has_next {
         if newly_unlocked {
-            crate::i18n::tf("新关卡开启：{}", &[&crate::i18n::t(levels.0[next_idx].name)])
+            crate::i18n::tf(
+                "新关卡开启：{}",
+                &[&crate::i18n::t(levels.0[next_idx].name)],
+            )
         } else {
-            crate::i18n::tf("下一处封印：{}", &[&crate::i18n::t(levels.0[next_idx].name)])
+            crate::i18n::tf(
+                "下一处封印：{}",
+                &[&crate::i18n::t(levels.0[next_idx].name)],
+            )
         }
     } else {
         crate::i18n::t("终章完成：现实暂时稳住了，但群星仍在转动。")
     };
     subtitle.push_str(&format!(
         "\n{}",
-        settlement_summary(&crate::i18n::t("本局结算"), current.0, &levels, &run, diff.0)
+        settlement_summary(
+            &crate::i18n::t("本局结算"),
+            current.0,
+            &levels,
+            &run,
+            diff.0
+        )
     ));
     subtitle.push_str(&crate::i18n::tf(
         "\n本次评级：{}  历史最佳：{}",
-        &[&crate::i18n::t(rating_label(stars)), &crate::i18n::t(rating_label(best_stars))],
+        &[
+            &crate::i18n::t(rating_label(stars)),
+            &crate::i18n::t(rating_label(best_stars)),
+        ],
     ));
     subtitle.push_str(&crate::i18n::tf(
         "\n封印宝箱：{}",
         &[&equipment_reward_summary(&rewards)],
     ));
     if returned > 0 {
-        subtitle.push_str(&crate::i18n::tf("\n已回收本局装备 {} 件", &[&returned.to_string()]));
+        subtitle.push_str(&crate::i18n::tf(
+            "\n已回收本局装备 {} 件",
+            &[&returned.to_string()],
+        ));
     }
     overlay(
         &mut commands,
@@ -8048,7 +8588,13 @@ fn overlay(
                         );
                     }
                     button(row, f, &crate::i18n::t("重玩"), UiAction::Restart, BTN_BG);
-                    button(row, f, &crate::i18n::t("关卡选择"), UiAction::ToMenu, BTN_BG);
+                    button(
+                        row,
+                        f,
+                        &crate::i18n::t("关卡选择"),
+                        UiAction::ToMenu,
+                        BTN_BG,
+                    );
                 });
             });
         });

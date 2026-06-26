@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use bevy::asset::io::{AssetReader, AssetReaderError, PathStream, Reader, VecReader};
-use js_sys::{Promise, Uint8Array, JSON};
+use js_sys::{JSON, Promise, Uint8Array};
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Response, Window, WorkerGlobalScope};
@@ -73,7 +73,9 @@ fn fetch_promise(url: &str) -> Result<Promise, std::io::Error> {
     } else if let Ok(worker) = global.dyn_into::<WorkerGlobalScope>() {
         Ok(worker.fetch_with_str(url))
     } else {
-        Err(io("no fetch-capable JS global (neither Window nor WorkerGlobalScope)"))
+        Err(io(
+            "no fetch-capable JS global (neither Window nor WorkerGlobalScope)",
+        ))
     }
 }
 

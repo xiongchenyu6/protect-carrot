@@ -323,7 +323,11 @@ pub fn draw_tutorial_hint(tut: Res<Tutorial>, time: Res<Time>, mut gizmos: Gizmo
     let radius = 20.0 + pulse * 8.0;
     let alpha = 0.5 + pulse * 0.5;
     gizmos.circle_2d(center, radius, Color::srgba(0.96, 0.72, 0.28, alpha));
-    gizmos.circle_2d(center, radius + 3.0, Color::srgba(0.96, 0.72, 0.28, alpha * 0.5));
+    gizmos.circle_2d(
+        center,
+        radius + 3.0,
+        Color::srgba(0.96, 0.72, 0.28, alpha * 0.5),
+    );
 }
 
 // ---- persistence (mirrors i18n::load_lang / save_lang) ----

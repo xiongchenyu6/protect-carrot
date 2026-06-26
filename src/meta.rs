@@ -2,7 +2,7 @@
 //! player's active abilities (meteor / freeze / gold rush) on cooldowns.
 
 use crate::components::Enemy;
-use crate::data::{Element, BOARD_H};
+use crate::data::{BOARD_H, Element};
 use crate::game::RunState;
 use crate::tower::Damage;
 use bevy::prelude::*;
@@ -121,7 +121,10 @@ pub fn cast_abilities(
     };
     let cd = ab.cd(which);
     if cd > 0 {
-        run.show(crate::i18n::tf("技能冷却中，还需 {} 回合", &[&cd.to_string()]));
+        run.show(crate::i18n::tf(
+            "技能冷却中，还需 {} 回合",
+            &[&cd.to_string()],
+        ));
         return;
     }
     // When the hero is on the field it acts as the spell anchor — abilities

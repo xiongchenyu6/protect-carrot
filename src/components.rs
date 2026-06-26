@@ -83,6 +83,20 @@ pub struct Enemy {
     pub tower_dps: f32,
     /// Disables tower attacks in this radius.
     pub silence_aura: f32,
+    /// Ranged tower harassment: shoots towers from the path instead of walking
+    /// off-route into melee.
+    pub ranged_tower: bool,
+    pub ranged_range: f32,
+    pub ranged_damage: f32,
+    pub ranged_cooldown: f32,
+    pub ranged_timer: f32,
+    /// Active self-detonation. It triggers only while alive after approaching a
+    /// tower/hero; being killed by the player does not detonate it.
+    pub explosive: bool,
+    pub explode_damage: f32,
+    pub explode_radius: f32,
+    pub explode_sense: f32,
+    pub explode_trigger: f32,
     /// MOSS boss one-shot tower destruction skill.
     pub moss_destroy: bool,
     pub moss_destroyed: bool,

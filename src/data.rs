@@ -612,7 +612,7 @@ pub static TOWER_DEFS: &[TowerDef] = &[
         max_hp: 150.0,
         summon_hp: 120.0,
         summon_speed: 1.5,
-        max_summons: 3,
+        max_summons: 1,
         desc: "召唤狼魂阻挡敌人",
         ..base()
     },
@@ -704,6 +704,8 @@ pub enum EnemyKind {
     Charger,
     Climber,
     Silencer,
+    Ranged,
+    Exploder,
     Moss,
 }
 
@@ -737,6 +739,18 @@ pub struct EnemyDef {
     pub tower_dps: f32,
     /// Radius that disables tower attacks while this enemy is nearby.
     pub silence_aura: f32,
+    /// Attacks defensive towers from the path without leaving formation.
+    pub ranged_tower: bool,
+    pub ranged_range: f32,
+    pub ranged_damage: f32,
+    pub ranged_cooldown: f32,
+    /// Active self-detonation: leaves the path to approach towers/heroes, then
+    /// explodes while alive. Death by tower fire does not trigger this.
+    pub explosive: bool,
+    pub explode_damage: f32,
+    pub explode_radius: f32,
+    pub explode_sense: f32,
+    pub explode_trigger: f32,
     /// One-shot boss skill: obliterates the first tower it reaches.
     pub moss_destroy: bool,
     /// 孵化：存活超过固定时间会变强（普通/中级周期性强化，高级直接孵化为本关
@@ -767,13 +781,22 @@ const fn enemy_base() -> EnemyDef {
         tower_raider: false,
         tower_dps: 0.0,
         silence_aura: 0.0,
+        ranged_tower: false,
+        ranged_range: 0.0,
+        ranged_damage: 0.0,
+        ranged_cooldown: 1.5,
+        explosive: false,
+        explode_damage: 0.0,
+        explode_radius: 0.0,
+        explode_sense: 0.0,
+        explode_trigger: 0.0,
         moss_destroy: false,
         incubate: false,
     }
 }
 
 impl EnemyKind {
-    pub const ALL: [EnemyKind; 16] = [
+    pub const ALL: [EnemyKind; 18] = [
         EnemyKind::Normal,
         EnemyKind::Fast,
         EnemyKind::Tank,
@@ -789,6 +812,8 @@ impl EnemyKind {
         EnemyKind::Charger,
         EnemyKind::Climber,
         EnemyKind::Silencer,
+        EnemyKind::Ranged,
+        EnemyKind::Exploder,
         EnemyKind::Moss,
     ];
 
@@ -815,6 +840,11 @@ impl EnemyKind {
             Charger => "charger",
             Climber => "climber",
             Silencer => "silencer",
+            // Reuse the existing occult caster sprite until a dedicated ranged
+            // monster sheet exists.
+            Ranged => "silencer",
+            // Reuse the fireworm sheet for the active self-detonator.
+            Exploder => "charger",
             Moss => "moss",
         }
     }
@@ -1004,6 +1034,40 @@ pub static ENEMY_DEFS: &[EnemyDef] = &[
         magic_resist: 20.0,
         resist: ElementProfile::new(0.0, 0.35, 0.0, 0.0, -0.20, 0.28, 0.0),
         silence_aura: 95.0,
+        ..enemy_base()
+    },
+    EnemyDef {
+        kind: EnemyKind::Ranged,
+        name: "远射怪",
+        color: hex(0x9b59b6),
+        size: 10.0,
+        hp_mod: 0.95,
+        speed_mod: 0.92,
+        reward_mod: 2.15,
+        magic_resist: 14.0,
+        resist: ElementProfile::new(0.0, 0.20, -0.10, 0.0, -0.10, 0.24, 0.0),
+        ranged_tower: true,
+        ranged_range: TILE_SIZE * 4.25,
+        ranged_damage: 28.0,
+        ranged_cooldown: 1.45,
+        ..enemy_base()
+    },
+    EnemyDef {
+        kind: EnemyKind::Exploder,
+        name: "自爆怪",
+        color: hex(0xff6a18),
+        size: 9.0,
+        hp_mod: 0.85,
+        speed_mod: 1.18,
+        reward_mod: 1.85,
+        armor: 4.0,
+        magic_resist: 4.0,
+        resist: ElementProfile::new(-0.08, 0.0, 0.35, -0.25, 0.0, 0.0, -0.12),
+        explosive: true,
+        explode_damage: 82.0,
+        explode_radius: TILE_SIZE * 1.15,
+        explode_sense: TILE_SIZE * 3.2,
+        explode_trigger: TILE_SIZE * 0.72,
         ..enemy_base()
     },
     EnemyDef {
