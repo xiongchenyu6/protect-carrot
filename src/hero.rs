@@ -133,7 +133,7 @@ impl Class {
             Class::Warden => "【戍卫结界】穿透哨箭减速敌线，并大幅提升周围塔射程",
             Class::Assassin => "【背击刺杀】绕后背击爆发，专精操作打BOSS",
             Class::Priest => "【圣疗领域】圣印范围削弱敌人，持续治疗萝卜与周围塔",
-            Class::Engineer => "【超频力场】电磁脉冲弹跳迟滞敌人，全面拉高周围塔攻速",
+            Class::Engineer => "【超频力场】挥锤近战守线，全面拉高周围塔攻速",
         }
     }
 
@@ -212,7 +212,7 @@ impl Class {
             Class::Warden => "辅助 · 射程增幅 · 反隐形",
             Class::Assassin => "近战 · 背击打BOSS",
             Class::Priest => "远程 · 圣印削弱 · 召唤治疗",
-            Class::Engineer => "远程 · 电磁脉冲 · 攻速超频",
+            Class::Engineer => "近战 · 锤击守线 · 攻速超频",
         }
     }
 
@@ -333,7 +333,7 @@ impl Class {
             Class::Warden => "展开哨戒结界，强化附近塔并缠绕、削弱敌群",
             Class::Assassin => "给最靠前敌人打上死印，造成暗影爆发、剧毒和破甲诅咒",
             Class::Priest => "治疗英雄和周围防御塔，祝福塔群，同时虚弱敌人",
-            Class::Engineer => "超频附近防御塔，修复结构，并用电磁脉冲迟滞敌人",
+            Class::Engineer => "超频附近防御塔，修复结构，并用震荡锤击迟滞敌人",
         }
     }
 
@@ -420,9 +420,9 @@ impl Class {
             (Class::Priest, 5) => "神圣共鸣",
             (Class::Engineer, 0) => "精密齿轮",
             (Class::Engineer, 1) => "过载线圈",
-            (Class::Engineer, 2) => "扩容炮架",
+            (Class::Engineer, 2) => "重装底盘",
             (Class::Engineer, 3) => "自动修复",
-            (Class::Engineer, 4) => "电磁脉冲",
+            (Class::Engineer, 4) => "震荡锤击",
             (Class::Engineer, 5) => "主控核心",
             _ => "未知天赋",
         }
@@ -483,9 +483,9 @@ impl Class {
             (Class::Priest, 5) => "提高圣辉共鸣，缩短祷言冷却",
             (Class::Engineer, 0) => "提高机械伤害和基础攻速",
             (Class::Engineer, 1) => "主动技能更强力地超频防御塔",
-            (Class::Engineer, 2) => "提高射程和设备覆盖范围",
+            (Class::Engineer, 2) => "提高生命和设备覆盖范围",
             (Class::Engineer, 3) => "主动技能修复更多塔结构",
-            (Class::Engineer, 4) => "增强电磁脉冲减速和伤害",
+            (Class::Engineer, 4) => "增强锤击减速、穿甲和伤害",
             (Class::Engineer, 5) => "提高装备收益和超频冷却效率",
             _ => "",
         }
@@ -630,12 +630,12 @@ impl Class {
                 aoe_radius: 0.0,
             },
             Class::Engineer => ClassBase {
-                damage: 48.0,
-                range: 175.0,
-                cooldown: 0.64,
-                hp: 460.0,
+                damage: 68.0,
+                range: 58.0,
+                cooldown: 0.58,
+                hp: 610.0,
                 behavior: Behavior::Single,
-                element: Element::Storm,
+                element: Element::Physical,
                 aoe_radius: 0.0,
             },
         }
@@ -991,6 +991,7 @@ pub fn make_hero_tower(loadout: &HeroLoadout, pos: Vec2) -> Tower {
     // overwrite the combat stats with the race×class profile.
     let mut t = Tower::from_def(TowerKind::Arrow.def(), 0, 0);
     t.hero = true;
+    t.hero_class = Some(loadout.class);
     t.hero_pos = pos;
     t.move_target = None;
     t.footprint = 1;
@@ -1001,6 +1002,9 @@ pub fn make_hero_tower(loadout: &HeroLoadout, pos: Vec2) -> Tower {
 
 pub fn apply_loadout_to_tower(loadout: &HeroLoadout, t: &mut Tower) {
     let base = loadout.class.base();
+    if t.hero {
+        t.hero_class = Some(loadout.class);
+    }
     let m = loadout.race.mods();
     let hp_frac = if t.max_hp > 0.0 {
         (t.hp / t.max_hp).clamp(0.05, 1.0)
@@ -1141,15 +1145,13 @@ pub fn apply_loadout_to_tower(loadout: &HeroLoadout, t: &mut Tower) {
         }
         Class::Engineer => {
             damage_mult *= 1.0 + a * 0.10 + f * 0.04 + equipped_count * f * 0.025;
-            range_mult *= 1.0 + c * 0.05 + f * 0.02;
             cooldown_mult *= 1.0 - a * 0.03 - b * 0.02 - f * 0.03 - equipped_count * f * 0.01;
-            hp_mult *= 1.0 + d * 0.06;
-            armor_bonus += d * 3.0;
+            hp_mult *= 1.0 + c * 0.06 + d * 0.06;
+            armor_bonus += c * 2.0 + d * 3.0;
             armor_pierce_bonus += e * 4.0;
             t.buff_range = 135.0 + c * 16.0 + f * 10.0;
             if e > 0.0 {
-                t.behavior = Behavior::Slow;
-                t.slow_duration = 0.65 + e * 0.18;
+                t.slow_duration = 0.38 + e * 0.16;
             }
         }
     }

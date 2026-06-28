@@ -20,6 +20,7 @@ use crate::equipment::{
     return_equipment_to_inventory,
 };
 use crate::game::RunState;
+use crate::hero::Class;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 use std::collections::{HashMap, HashSet};
@@ -27,6 +28,7 @@ use std::collections::{HashMap, HashSet};
 // ============================ Components ============================
 
 pub const HERO_MELEE_ATTACK_TIME: f32 = 0.28;
+const HERO_MELEE_ATTACK_RANGE_CAP: f32 = 92.0;
 const TOWER_SUMMON_VISUAL_SCALE: f32 = 0.70;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -126,6 +128,8 @@ pub struct Tower {
     pub hero_attack_timer: f32,
     /// True for the unique movable hero tower (see `hero.rs`).
     pub hero: bool,
+    /// Exact hero class for class-specific combat presentation. Ordinary towers are `None`.
+    pub hero_class: Option<Class>,
     /// Reveals invisible enemies in range (detection towers, and the Warden hero's
     /// built-in 反隐形). Used to build `Snapshot::detectors`.
     pub detector: bool,
@@ -194,6 +198,7 @@ impl Tower {
             recoil: Vec2::ZERO,
             hero_attack_timer: 0.0,
             hero: false,
+            hero_class: None,
             hero_pos: Vec2::ZERO,
             move_target: None,
             laser_charge: 0.0,
@@ -586,7 +591,7 @@ impl Snapshot {
     /// Targetable enemy within range, selected by this tower's priority mode.
     fn target(&self, tower: &Tower) -> Option<EnemySnap> {
         let c = tower.center();
-        let effective_range = tower.range * (1.0 + tower.aura_range);
+        let effective_range = effective_attack_range(tower);
         let mut best: Option<EnemySnap> = None;
         for e in &self.enemies {
             if !self.can_target(tower, e) {
@@ -642,8 +647,28 @@ enum HeroShotStyle {
     Engineer,
 }
 
+fn is_close_combat_hero(tower: &Tower) -> bool {
+    matches!(
+        tower.hero_class,
+        Some(Class::Warrior | Class::Guardian | Class::Assassin | Class::Engineer)
+    ) || (tower.hero && tower.range < 100.0)
+}
+
+fn is_engineer_hammer_hero(tower: &Tower) -> bool {
+    tower.hero_class == Some(Class::Engineer)
+}
+
+fn effective_attack_range(tower: &Tower) -> f32 {
+    let range = tower.range * (1.0 + tower.aura_range);
+    if is_close_combat_hero(tower) {
+        range.min(HERO_MELEE_ATTACK_RANGE_CAP)
+    } else {
+        range
+    }
+}
+
 fn hero_shot_style(tower: &Tower) -> Option<HeroShotStyle> {
-    if !tower.hero || tower.range < 100.0 {
+    if !tower.hero || is_close_combat_hero(tower) {
         return None;
     }
     if tower.detector && tower.behavior == Behavior::Slow && tower.element == Element::Frost {
@@ -1263,8 +1288,8 @@ pub fn update_towers(
         // Attack flourish (skip non-attacking support behaviors).
         if !matches!(tower.behavior, Behavior::Heal | Behavior::Detect) {
             let dir = Vec2::from_angle(tower.angle);
-            if tower.hero && tower.range < 100.0 {
-                // Melee class (warrior/guardian/assassin): use the hero's own
+            if is_close_combat_hero(&tower) {
+                // Melee class (warrior/guardian/assassin/engineer): use the hero's own
                 // attack frames and a body lunge instead of a detached sword wave.
                 tower.hero_attack_timer = HERO_MELEE_ATTACK_TIME;
                 tower.recoil = dir * 10.0;
@@ -1279,11 +1304,10 @@ pub fn update_towers(
             }
         }
 
-        // Melee heroes strike instantly (no projectile) — the slash VFX is the hit.
+        // Melee heroes strike instantly (no projectile) — the close-combat VFX is the hit.
         // Warrior(Aoe)/Fire already hit directly; only single-target/poison melee
-        // classes (guardian/assassin) would otherwise fire a visible bullet.
-        if tower.hero
-            && tower.range < 100.0
+        // classes (guardian/assassin/engineer) would otherwise fire a visible bullet.
+        if is_close_combat_hero(&tower)
             && matches!(tower.behavior, Behavior::Single | Behavior::Poison)
         {
             // 背击 (backstab): the assassin (toxic melee hero) deals bonus damage when
@@ -1312,6 +1336,20 @@ pub fn update_towers(
                     });
                 }
             }
+            if is_engineer_hammer_hero(&tower) {
+                vfx.write(crate::vfx::VfxEvent::HammerImpact {
+                    pos: target.pos,
+                    angle: tower.angle,
+                    color: Color::srgb(1.0, 0.68, 0.30),
+                });
+            } else {
+                vfx.write(crate::vfx::VfxEvent::Slash {
+                    pos: target.pos,
+                    angle: tower.angle,
+                    color: tower.element.color().mix(&tower.color, 0.35),
+                    poison: tower.behavior == Behavior::Poison || tower.element == Element::Toxic,
+                });
+            }
             dmg.write(Damage {
                 source_tower: Some(entity),
                 target: target.entity,
@@ -1320,6 +1358,15 @@ pub fn update_towers(
                 element: tower.element,
                 armor_pierce: tower.armor_pierce,
             });
+            if is_engineer_hammer_hero(&tower) && tower.slow_duration > 0.0 {
+                status.write(Status {
+                    source_tower: Some(entity),
+                    target: target.entity,
+                    kind: StatusKind::Slow {
+                        duration: tower.slow_duration,
+                    },
+                });
+            }
             if tower.behavior == Behavior::Poison {
                 if tower.poison_duration > 0.0 {
                     status.write(Status {

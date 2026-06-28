@@ -57,6 +57,8 @@ pub enum VfxEvent {
         color: Color,
         poison: bool,
     },
+    /// Engineer hammer blow: blunt impact, dust ring, and metal sparks.
+    HammerImpact { pos: Vec2, angle: f32, color: Color },
     /// Local melee cleave ring for warrior-style area hits. This deliberately does
     /// not shake the camera; the normal per-enemy hit events provide impact.
     MeleeCleave {
@@ -560,6 +562,58 @@ pub fn spawn_vfx(
                         Vec2::from_angle(*angle + jitter) * (90.0 + rng.frac() * 90.0),
                         3.0,
                         0.26,
+                    );
+                }
+            }
+            VfxEvent::HammerImpact { pos, angle, color } => {
+                let impact = color.mix(&Color::WHITE, 0.18);
+                spawn_ring(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    *pos,
+                    crate::data::TILE_SIZE * 0.46,
+                    impact,
+                    0.58,
+                    0.18,
+                    16.0,
+                );
+                spawn_ring(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    *pos,
+                    crate::data::TILE_SIZE * 0.26,
+                    Color::srgb(0.76, 0.68, 0.54),
+                    0.42,
+                    0.12,
+                    16.2,
+                );
+                spark(
+                    &mut commands,
+                    &mut rng,
+                    *pos,
+                    Color::srgb(1.0, 0.93, 0.62),
+                    50.0,
+                    180.0,
+                    4.4,
+                    0.20,
+                );
+                let side = *angle + std::f32::consts::FRAC_PI_2;
+                for i in 0..10 {
+                    let spread = (rng.frac() - 0.5) * 0.9;
+                    let dir = if i % 2 == 0 {
+                        side
+                    } else {
+                        side + std::f32::consts::PI
+                    };
+                    spark_vel(
+                        &mut commands,
+                        *pos,
+                        impact,
+                        Vec2::from_angle(dir + spread) * (85.0 + rng.frac() * 110.0),
+                        3.6,
+                        0.22,
                     );
                 }
             }
