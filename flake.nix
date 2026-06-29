@@ -22,7 +22,7 @@
 
       # Overlay so the NixOS module can reference pkgs.protect-carrot-web.
       flake.overlays.default = final: prev: {
-        protect-carrot-web = final.callPackage ./packages/web.nix {};
+        protect-carrot-web = final.callPackage ./packages/web.nix { };
       };
 
       perSystem =
@@ -36,10 +36,15 @@
           ...
         }:
         {
-          # Web package: builds the game to wasm and produces static files.
-          packages.web = pkgs.callPackage ./packages/web.nix {};
+          # Web package: prebuilt wasm bundle fetched from GitHub Releases
+          # (fast, no Rust toolchain). See packages/web.nix + web-release.json.
+          packages.web = pkgs.callPackage ./packages/web.nix { };
 
-          # Default package points to the web build.
+          # Source build: compile the game to wasm locally. Used to produce the
+          # bundle CI uploads, and for local iteration without a release.
+          packages.web-source = pkgs.callPackage ./packages/web-source.nix { };
+
+          # Default package points to the (prebuilt) web build.
           packages.default = config.packages.web;
 
           devShells.default =

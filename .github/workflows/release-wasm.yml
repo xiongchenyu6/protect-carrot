@@ -1,0 +1,123 @@
+name: Release WebAssembly bundle
+
+# Build the WebGPU/wasm bundle once in CI and publish it to a GitHub Release,
+# then pin {url, sha256} into packages/web-release.json on main. Every Nix
+# deploy target (packages/web.nix) just downloads the tarball — no Rust
+# toolchain, no multi-minute compile per host.
+#
+# Trigger by pushing a tag:   git tag v0.1.1 && git push origin v0.1.1
+# or run manually from the Actions tab (workflow_dispatch) with a tag name.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build (e.g. v0.1.1). Must already exist or will be created at main HEAD.'
+        required: true
+
+concurrency:
+  group: protect-carrot-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, release and pin wasm bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Resolve tag
+        id: tag
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout (full history so we can push the pin to main)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          target: wasm32-unknown-unknown
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: false
+
+      - name: Cache wasm-bindgen binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/wasm-bindgen
+          key: ${{ runner.os }}-wasm-bindgen-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-wasm-bindgen-
+
+      - name: Install build tools
+        run: |
+          set -euo pipefail
+          command -v wasm-bindgen >/dev/null 2>&1 || cargo install -q --locked wasm-bindgen-cli
+          sudo apt-get update
+          sudo apt-get install -y binaryen brotli
+
+      - name: Build web bundle
+        run: bash build-web.sh release
+
+      - name: Package tarball
+        id: pkg
+        run: |
+          set -euo pipefail
+          # Match packages/web.nix: members at archive root, no wrapping dir.
+          tar -C web --sort=name --owner=0 --group=0 --numeric-owner \
+            -czf protect-carrot-web.tar.gz .
+          sha256=$(sha256sum protect-carrot-web.tar.gz | cut -d' ' -f1)
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+          ls -la protect-carrot-web.tar.gz
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: ${{ steps.tag.outputs.name }}
+          files: protect-carrot-web.tar.gz
+          fail_on_unmatched_files: true
+
+      - name: Pin release into web-release.json on main
+        run: |
+          set -euo pipefail
+          tag="${{ steps.tag.outputs.name }}"
+          sha="${{ steps.pkg.outputs.sha256 }}"
+          url="https://github.com/${{ github.repository }}/releases/download/${tag}/protect-carrot-web.tar.gz"
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout -B main origin/main
+
+          cat > packages/web-release.json <<EOF
+          {
+            "tag": "${tag}",
+            "url": "${url}",
+            "sha256": "${sha}"
+          }
+          EOF
+
+          git add packages/web-release.json
+          if git diff --cached --quiet; then
+            echo "web-release.json already up to date"
+          else
+            # main is not a trigger branch, so this push does not re-run CI.
+            git commit -m "chore: pin web bundle ${tag}"
+            git push origin main
+          fi
