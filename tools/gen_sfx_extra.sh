@@ -5,24 +5,35 @@
 #   export ELEVENLABS_API_KEY=sk_...
 #   ./tools/gen_sfx_extra.sh
 #
-# Output: assets/audio/<name>.mp3  (wired into src/audio.rs Sound enum)
+# Output: assets/audio/<name>.wav  (wired into src/audio.rs Sound enum)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 : "${ELEVENLABS_API_KEY:?set ELEVENLABS_API_KEY in env first}"
+command -v ffmpeg >/dev/null || { echo "ffmpeg is required to convert ElevenLabs MP3 output to WAV"; exit 1; }
 mkdir -p assets/audio
 URL="https://api.elevenlabs.io/v1/sound-generation?output_format=mp3_44100_128"
 
 gen() { # name  duration  prompt
   local name="$1" dur="$2" prompt="$3"
-  local out="assets/audio/${name}.mp3"
+  local tmp="assets/audio/${name}.mp3.tmp"
+  local out="assets/audio/${name}.wav"
   local body
   body=$(printf '{"text":%s,"duration_seconds":%s,"prompt_influence":0.5}' \
     "$(printf '%s' "$prompt" | python3 -c 'import json,sys;print(json.dumps(sys.stdin.read()))')" "$dur")
   local code
   code=$(curl -s -X POST "$URL" -H "xi-api-key: $ELEVENLABS_API_KEY" \
-    -H "Content-Type: application/json" -d "$body" -o "$out" -w "%{http_code}")
-  if [ "$code" = "200" ]; then echo "  ok  $out"; else echo "  FAIL($code) $out"; cat "$out"; echo; fi
+    -H "Content-Type: application/json" -d "$body" -o "$tmp" -w "%{http_code}")
+  if [ "$code" = "200" ]; then
+    ffmpeg -y -v error -i "$tmp" -ac 2 -ar 44100 "$out"
+    rm -f "$tmp"
+    echo "  ok  $out"
+  else
+    echo "  FAIL($code) $out"
+    cat "$tmp"
+    echo
+    rm -f "$tmp"
+  fi
 }
 
 echo ">> generating EXTRA SFX into assets/audio/"

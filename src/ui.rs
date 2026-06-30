@@ -33,6 +33,7 @@ use crate::states::GameState;
 use crate::tower::{BuffTower, Damage, Status, StatusKind};
 use bevy::audio::{PlaybackMode, Volume};
 use bevy::prelude::*;
+use bevy::ui_widgets::{Activate, Button as WidgetButton};
 use bevy::window::{MonitorSelection, WindowMode};
 
 /// Persistent progression (how many levels are unlocked).
@@ -385,6 +386,55 @@ pub enum UiAction {
     Restart,
     NextLevel,
     ToMenu,
+}
+
+/// A normalized activation emitted by `bevy_ui_widgets` for every `UiAction` button.
+#[derive(Message, Clone)]
+pub struct UiActionActivated {
+    pub entity: Entity,
+    pub action: UiAction,
+}
+
+/// Existing UI nodes still use Bevy's visual `Button`; this attaches the
+/// `bevy_ui_widgets` headless button so activation is driven by widget events
+/// (pointer click + Enter/Space when focused) instead of every screen hand-rolling
+/// `Interaction::Pressed`.
+pub fn attach_widget_buttons(
+    mut commands: Commands,
+    buttons: Query<Entity, (With<UiAction>, With<Button>, Without<WidgetButton>)>,
+) {
+    for entity in &buttons {
+        commands.entity(entity).insert(WidgetButton);
+    }
+}
+
+/// Bridge standard widget activations into the game's existing action enum.
+pub fn widget_button_activated(
+    activate: On<Activate>,
+    actions: Query<&UiAction>,
+    mut out: MessageWriter<UiActionActivated>,
+) {
+    if let Ok(action) = actions.get(activate.entity) {
+        out.write(UiActionActivated {
+            entity: activate.entity,
+            action: action.clone(),
+        });
+    }
+}
+
+/// Keep current hover/press styling separate from click handling.
+pub fn ui_button_visuals(
+    mut interactions: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<UiAction>),
+    >,
+) {
+    for (interaction, mut bg) in &mut interactions {
+        match *interaction {
+            Interaction::Pressed | Interaction::Hovered => bg.0 = bg.0.with_alpha(1.0),
+            Interaction::None => bg.0 = bg.0.with_alpha(0.85),
+        }
+    }
 }
 
 const UI_BG: Color = Color::srgb(0.045, 0.052, 0.047);
@@ -3497,7 +3547,7 @@ pub fn update_equipped_slot_icons(
 
 pub fn hud_buttons(
     mut commands: Commands,
-    mut interactions: Query<(&Interaction, &UiAction, &mut BackgroundColor), Changed<Interaction>>,
+    mut actions: MessageReader<UiActionActivated>,
     mut run: ResMut<RunState>,
     current: Res<CurrentLevel>,
     mut rng: ResMut<Rng>,
@@ -3520,273 +3570,249 @@ pub fn hud_buttons(
     mut vfx: MessageWriter<crate::vfx::VfxEvent>,
 ) {
     use crate::audio::Sound;
-    for (interaction, action, mut bg) in &mut interactions {
-        match *interaction {
-            Interaction::Pressed => {
-                bg.0 = bg.0.with_alpha(1.0);
-                sfx.write(crate::audio::SfxEvent(Sound::Click));
-                // Touch: costly/irreversible actions (talents, equip, refine, sell)
-                // need a confirming second tap so a stray tap never spends gold or
-                // sells a tower. The first tap also pins the tooltip.
-                if confirm_state.0.0 {
-                    if let Some(id) = confirm_id(action) {
-                        if confirm_state.1.pending != Some(id) {
-                            confirm_state.1.pending = Some(id);
-                            confirm_state.1.timer = 3.0;
-                            run.show(crate::i18n::t(confirm_hint(id)));
+    for event in actions.read() {
+        let action = &event.action;
+        sfx.write(crate::audio::SfxEvent(Sound::Click));
+        // Touch: costly/irreversible actions (talents, equip, refine, sell)
+        // need a confirming second tap so a stray tap never spends gold or
+        // sells a tower. The first tap also pins the tooltip.
+        if confirm_state.0.0 {
+            if let Some(id) = confirm_id(action) {
+                if confirm_state.1.pending != Some(id) {
+                    confirm_state.1.pending = Some(id);
+                    confirm_state.1.timer = 3.0;
+                    run.show(crate::i18n::t(confirm_hint(id)));
+                    continue;
+                }
+                confirm_state.1.pending = None; // confirmed → fall through
+            }
+        }
+        match action {
+            // Build arming + drag-to-place is owned by `mouse_build` (it
+            // reads the pressed Build icon directly), so nothing here.
+            UiAction::Build(_) => {}
+            UiAction::StartWave => {
+                start_wave(&mut run, current.0, &mut rng);
+                sfx.write(crate::audio::SfxEvent(Sound::Wave));
+            }
+            UiAction::ToggleAutoWave => toggle_auto_wave(&mut run),
+            UiAction::ToggleDock => {
+                confirm_state.3.dock_open = !confirm_state.3.dock_open;
+            }
+            UiAction::ToggleSettings => {
+                confirm_state.3.settings_open = !confirm_state.3.settings_open;
+            }
+            UiAction::CycleQuality => {
+                quality.cycle();
+                run.show(crate::i18n::tf(
+                    "画质：{}",
+                    &[&crate::i18n::t(quality.level.name())],
+                ));
+            }
+            UiAction::TogglePause => paused.0 = !paused.0,
+            UiAction::CycleSpeed => {
+                run.game_speed = match run.game_speed as i32 {
+                    1 => 2.0,
+                    2 => 4.0,
+                    4 => 8.0,
+                    _ => 1.0,
+                };
+            }
+            UiAction::Upgrade => {
+                if let Some(e) = sel.selected {
+                    if let Ok((_, mut t)) = towers.get_mut(e) {
+                        if t.hero {
+                            run.show(crate::i18n::t("英雄通过经验升级；请使用英雄天赋点强化"));
                             continue;
                         }
-                        confirm_state.1.pending = None; // confirmed → fall through
-                    }
-                }
-                match action {
-                    // Build arming + drag-to-place is owned by `mouse_build` (it
-                    // reads the pressed Build icon directly), so nothing here.
-                    UiAction::Build(_) => {}
-                    UiAction::StartWave => {
-                        start_wave(&mut run, current.0, &mut rng);
-                        sfx.write(crate::audio::SfxEvent(Sound::Wave));
-                    }
-                    UiAction::ToggleAutoWave => toggle_auto_wave(&mut run),
-                    UiAction::ToggleDock => {
-                        confirm_state.3.dock_open = !confirm_state.3.dock_open;
-                    }
-                    UiAction::ToggleSettings => {
-                        confirm_state.3.settings_open = !confirm_state.3.settings_open;
-                    }
-                    UiAction::CycleQuality => {
-                        quality.cycle();
-                        run.show(crate::i18n::tf(
-                            "画质：{}",
-                            &[&crate::i18n::t(quality.level.name())],
-                        ));
-                    }
-                    UiAction::TogglePause => paused.0 = !paused.0,
-                    UiAction::CycleSpeed => {
-                        run.game_speed = match run.game_speed as i32 {
-                            1 => 2.0,
-                            2 => 4.0,
-                            4 => 8.0,
-                            _ => 1.0,
-                        };
-                    }
-                    UiAction::Upgrade => {
-                        if let Some(e) = sel.selected {
-                            if let Ok((_, mut t)) = towers.get_mut(e) {
-                                if t.hero {
-                                    run.show(crate::i18n::t(
-                                        "英雄通过经验升级；请使用英雄天赋点强化",
-                                    ));
-                                    continue;
-                                }
-                                let cost = t.upgrade_cost();
-                                if t.level < 3 && run.gold >= cost {
-                                    run.gold -= cost;
-                                    upgrade_tower(&mut t);
-                                    sfx.write(crate::audio::SfxEvent(Sound::Upgrade));
-                                    // Golden upgrade burst, sized to the footprint.
-                                    vfx.write(crate::vfx::VfxEvent::Burst {
-                                        pos: t.center(),
-                                        radius: TILE_SIZE * t.footprint as f32 * 0.66,
-                                        color: Color::srgb(1.0, 0.85, 0.36),
-                                    });
-                                    if let Some(note) = upgrade_unlock_note(t.kind, t.level) {
-                                        run.show(crate::i18n::t(note));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    UiAction::Repair => {
-                        if let Some(e) = sel.selected {
-                            if let Ok((_, mut t)) = towers.get_mut(e) {
-                                repair_tower(&mut t, &mut run);
-                            }
-                        } else {
-                            run.show(crate::i18n::t("先选中一座塔"));
-                        }
-                    }
-                    UiAction::CycleTargetPriority => {
-                        if let Some(e) = sel.selected {
-                            if let Ok((_, mut t)) = towers.get_mut(e) {
-                                let priority = t.cycle_target_priority();
-                                run.show(crate::i18n::tf(
-                                    "目标优先：{} - {}",
-                                    &[
-                                        &crate::i18n::t(priority.label()),
-                                        &crate::i18n::t(priority.description()),
-                                    ],
-                                ));
-                            } else {
-                                run.show(crate::i18n::t("先选中一座塔"));
-                            }
-                        } else {
-                            run.show(crate::i18n::t("先选中一座塔"));
-                        }
-                    }
-                    UiAction::Unequip => {
-                        if let Some(e) = sel.selected {
-                            if let Ok((_, mut t)) = towers.get_mut(e) {
-                                let returned = unequip_all_to_inventory(&mut inv, &mut t);
-                                if returned > 0 && t.hero {
-                                    crate::hero::apply_loadout_to_tower(&confirm_state.2, &mut t);
-                                }
-                                if returned > 0 {
-                                    run.show(crate::i18n::tf(
-                                        "卸下装备 {} 件",
-                                        &[&returned.to_string()],
-                                    ));
-                                } else {
-                                    run.show(crate::i18n::t("没有可卸下装备"));
-                                }
-                            } else {
-                                run.show(crate::i18n::t("先选中一座塔"));
-                            }
-                        } else {
-                            run.show(crate::i18n::t("先选中一座塔"));
-                        }
-                    }
-                    UiAction::UnequipSlot(slot) => {
-                        if let Some(e) = sel.selected {
-                            if let Ok((_, mut t)) = towers.get_mut(e) {
-                                if let Some(item) =
-                                    unequip_slot_to_inventory(&mut inv, &mut t, *slot)
-                                {
-                                    if t.hero {
-                                        crate::hero::apply_loadout_to_tower(
-                                            &confirm_state.2,
-                                            &mut t,
-                                        );
-                                    }
-                                    run.show(crate::i18n::tf(
-                                        "卸下 {}",
-                                        &[&crate::i18n::t(item.def().name)],
-                                    ));
-                                } else {
-                                    run.show(crate::i18n::t("该装备槽为空"));
-                                }
-                            } else {
-                                run.show(crate::i18n::t("先选中一座塔"));
-                            }
-                        } else {
-                            run.show(crate::i18n::t("先选中一座塔"));
-                        }
-                    }
-                    UiAction::Sell => {
-                        if let Some(e) = sel.selected {
-                            if let Ok((ent, t)) = towers.get(e) {
-                                if t.hero {
-                                    run.show(crate::i18n::t(
-                                        "英雄不能出售；阵亡后会自动进入重生冷却",
-                                    ));
-                                    continue;
-                                }
-                                let refund = t.refund();
-                                let returned = return_equipment_to_inventory(&mut inv, t);
-                                run.gold += refund;
-                                vfx.write(crate::vfx::VfxEvent::Burst {
-                                    pos: t.center(),
-                                    radius: TILE_SIZE * t.footprint as f32 * 0.6,
-                                    color: Color::srgb(0.95, 0.78, 0.3),
-                                });
-                                commands.entity(ent).despawn();
-                                sel.selected = None;
-                                sfx.write(crate::audio::SfxEvent(Sound::Sell));
-                                if returned > 0 {
-                                    run.show(crate::i18n::tf(
-                                        "出售 +{}，返还装备 {} 件",
-                                        &[&refund.to_string(), &returned.to_string()],
-                                    ));
-                                }
-                            }
-                        }
-                    }
-                    UiAction::Fullscreen => {
-                        if let Ok(mut win) = windows.single_mut() {
-                            win.mode = match win.mode {
-                                WindowMode::Windowed => {
-                                    WindowMode::BorderlessFullscreen(MonitorSelection::Current)
-                                }
-                                _ => WindowMode::Windowed,
-                            };
-                        }
-                    }
-                    UiAction::TalentDamage => {
-                        let cost = talent_cost(talents.dmg_lvl);
-                        if run.gold >= cost {
+                        let cost = t.upgrade_cost();
+                        if t.level < 3 && run.gold >= cost {
                             run.gold -= cost;
-                            talents.dmg_lvl += 1;
-                            talents.damage_mult *= 1.15;
-                            for (_, mut t) in &mut towers {
-                                t.base_damage = (t.base_damage * 1.15).floor();
-                                t.damage = t.base_damage;
+                            upgrade_tower(&mut t);
+                            sfx.write(crate::audio::SfxEvent(Sound::Upgrade));
+                            // Golden upgrade burst, sized to the footprint.
+                            vfx.write(crate::vfx::VfxEvent::Burst {
+                                pos: t.center(),
+                                radius: TILE_SIZE * t.footprint as f32 * 0.66,
+                                color: Color::srgb(1.0, 0.85, 0.36),
+                            });
+                            if let Some(note) = upgrade_unlock_note(t.kind, t.level) {
+                                run.show(crate::i18n::t(note));
                             }
-                            run.show(crate::i18n::t("全体攻击强化！"));
-                        } else {
-                            run.show(crate::i18n::t("金币不足"));
                         }
                     }
-                    UiAction::TalentRange => {
-                        let cost = talent_cost(talents.rng_lvl);
-                        if run.gold >= cost {
-                            run.gold -= cost;
-                            talents.rng_lvl += 1;
-                            talents.range_mult *= 1.12;
-                            for (_, mut t) in &mut towers {
-                                t.range = (t.range * 1.12).floor();
-                            }
-                            run.show(crate::i18n::t("全体射程强化！"));
-                        } else {
-                            run.show(crate::i18n::t("金币不足"));
-                        }
-                    }
-                    UiAction::TalentSpeed => {
-                        let cost = talent_cost(talents.spd_lvl);
-                        if run.gold >= cost {
-                            run.gold -= cost;
-                            talents.spd_lvl += 1;
-                            talents.firerate_mult *= 0.9;
-                            for (_, mut t) in &mut towers {
-                                t.cooldown = (t.cooldown * 0.9).max(0.03);
-                            }
-                            run.show(crate::i18n::t("全体攻速强化！"));
-                        } else {
-                            run.show(crate::i18n::t("金币不足"));
-                        }
-                    }
-                    UiAction::Cast(a) => {
-                        abilities.pending = Some(*a);
-                    }
-                    UiAction::Equip(item) => {
-                        if let Some(e) = sel.selected {
-                            if let Ok((_, mut t)) = towers.get_mut(e) {
-                                let def = item.def();
-                                if t.equipment_count() >= 3 {
-                                    run.show(crate::i18n::t("装备槽已满"));
-                                } else if inv.take(*item) {
-                                    crate::equipment::equip_into(&mut t, *item);
-                                    run.show(crate::i18n::tf(
-                                        "装配 {}！",
-                                        &[&crate::i18n::t(def.name)],
-                                    ));
-                                } else {
-                                    run.show(crate::i18n::tf(
-                                        "没有{}",
-                                        &[&crate::i18n::t(def.name)],
-                                    ));
-                                }
-                            } else {
-                                run.show(crate::i18n::t("先选中一座塔"));
-                            }
-                        } else {
-                            run.show(crate::i18n::t("先选中一座塔"));
-                        }
-                    }
-                    _ => {}
                 }
             }
-            Interaction::Hovered => bg.0 = bg.0.with_alpha(1.0),
-            Interaction::None => bg.0 = bg.0.with_alpha(0.85),
+            UiAction::Repair => {
+                if let Some(e) = sel.selected {
+                    if let Ok((_, mut t)) = towers.get_mut(e) {
+                        repair_tower(&mut t, &mut run);
+                    }
+                } else {
+                    run.show(crate::i18n::t("先选中一座塔"));
+                }
+            }
+            UiAction::CycleTargetPriority => {
+                if let Some(e) = sel.selected {
+                    if let Ok((_, mut t)) = towers.get_mut(e) {
+                        let priority = t.cycle_target_priority();
+                        run.show(crate::i18n::tf(
+                            "目标优先：{} - {}",
+                            &[
+                                &crate::i18n::t(priority.label()),
+                                &crate::i18n::t(priority.description()),
+                            ],
+                        ));
+                    } else {
+                        run.show(crate::i18n::t("先选中一座塔"));
+                    }
+                } else {
+                    run.show(crate::i18n::t("先选中一座塔"));
+                }
+            }
+            UiAction::Unequip => {
+                if let Some(e) = sel.selected {
+                    if let Ok((_, mut t)) = towers.get_mut(e) {
+                        let returned = unequip_all_to_inventory(&mut inv, &mut t);
+                        if returned > 0 && t.hero {
+                            crate::hero::apply_loadout_to_tower(&confirm_state.2, &mut t);
+                        }
+                        if returned > 0 {
+                            run.show(crate::i18n::tf("卸下装备 {} 件", &[&returned.to_string()]));
+                        } else {
+                            run.show(crate::i18n::t("没有可卸下装备"));
+                        }
+                    } else {
+                        run.show(crate::i18n::t("先选中一座塔"));
+                    }
+                } else {
+                    run.show(crate::i18n::t("先选中一座塔"));
+                }
+            }
+            UiAction::UnequipSlot(slot) => {
+                if let Some(e) = sel.selected {
+                    if let Ok((_, mut t)) = towers.get_mut(e) {
+                        if let Some(item) = unequip_slot_to_inventory(&mut inv, &mut t, *slot) {
+                            if t.hero {
+                                crate::hero::apply_loadout_to_tower(&confirm_state.2, &mut t);
+                            }
+                            run.show(crate::i18n::tf(
+                                "卸下 {}",
+                                &[&crate::i18n::t(item.def().name)],
+                            ));
+                        } else {
+                            run.show(crate::i18n::t("该装备槽为空"));
+                        }
+                    } else {
+                        run.show(crate::i18n::t("先选中一座塔"));
+                    }
+                } else {
+                    run.show(crate::i18n::t("先选中一座塔"));
+                }
+            }
+            UiAction::Sell => {
+                if let Some(e) = sel.selected {
+                    if let Ok((ent, t)) = towers.get(e) {
+                        if t.hero {
+                            run.show(crate::i18n::t("英雄不能出售；阵亡后会自动进入重生冷却"));
+                            continue;
+                        }
+                        let refund = t.refund();
+                        let returned = return_equipment_to_inventory(&mut inv, t);
+                        run.gold += refund;
+                        vfx.write(crate::vfx::VfxEvent::Burst {
+                            pos: t.center(),
+                            radius: TILE_SIZE * t.footprint as f32 * 0.6,
+                            color: Color::srgb(0.95, 0.78, 0.3),
+                        });
+                        commands.entity(ent).despawn();
+                        sel.selected = None;
+                        sfx.write(crate::audio::SfxEvent(Sound::Sell));
+                        if returned > 0 {
+                            run.show(crate::i18n::tf(
+                                "出售 +{}，返还装备 {} 件",
+                                &[&refund.to_string(), &returned.to_string()],
+                            ));
+                        }
+                    }
+                }
+            }
+            UiAction::Fullscreen => {
+                if let Ok(mut win) = windows.single_mut() {
+                    win.mode = match win.mode {
+                        WindowMode::Windowed => {
+                            WindowMode::BorderlessFullscreen(MonitorSelection::Current)
+                        }
+                        _ => WindowMode::Windowed,
+                    };
+                }
+            }
+            UiAction::TalentDamage => {
+                let cost = talent_cost(talents.dmg_lvl);
+                if run.gold >= cost {
+                    run.gold -= cost;
+                    talents.dmg_lvl += 1;
+                    talents.damage_mult *= 1.15;
+                    for (_, mut t) in &mut towers {
+                        t.base_damage = (t.base_damage * 1.15).floor();
+                        t.damage = t.base_damage;
+                    }
+                    run.show(crate::i18n::t("全体攻击强化！"));
+                } else {
+                    run.show(crate::i18n::t("金币不足"));
+                }
+            }
+            UiAction::TalentRange => {
+                let cost = talent_cost(talents.rng_lvl);
+                if run.gold >= cost {
+                    run.gold -= cost;
+                    talents.rng_lvl += 1;
+                    talents.range_mult *= 1.12;
+                    for (_, mut t) in &mut towers {
+                        t.range = (t.range * 1.12).floor();
+                    }
+                    run.show(crate::i18n::t("全体射程强化！"));
+                } else {
+                    run.show(crate::i18n::t("金币不足"));
+                }
+            }
+            UiAction::TalentSpeed => {
+                let cost = talent_cost(talents.spd_lvl);
+                if run.gold >= cost {
+                    run.gold -= cost;
+                    talents.spd_lvl += 1;
+                    talents.firerate_mult *= 0.9;
+                    for (_, mut t) in &mut towers {
+                        t.cooldown = (t.cooldown * 0.9).max(0.03);
+                    }
+                    run.show(crate::i18n::t("全体攻速强化！"));
+                } else {
+                    run.show(crate::i18n::t("金币不足"));
+                }
+            }
+            UiAction::Cast(a) => {
+                abilities.pending = Some(*a);
+            }
+            UiAction::Equip(item) => {
+                if let Some(e) = sel.selected {
+                    if let Ok((_, mut t)) = towers.get_mut(e) {
+                        let def = item.def();
+                        if t.equipment_count() >= 3 {
+                            run.show(crate::i18n::t("装备槽已满"));
+                        } else if inv.take(*item) {
+                            crate::equipment::equip_into(&mut t, *item);
+                            run.show(crate::i18n::tf("装配 {}！", &[&crate::i18n::t(def.name)]));
+                        } else {
+                            run.show(crate::i18n::tf("没有{}", &[&crate::i18n::t(def.name)]));
+                        }
+                    } else {
+                        run.show(crate::i18n::t("先选中一座塔"));
+                    }
+                } else {
+                    run.show(crate::i18n::t("先选中一座塔"));
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -4800,7 +4826,7 @@ pub fn play_story_voiceover(
         timeline.played_mask |= bit;
         commands.spawn((
             AudioPlayer(
-                assets.load::<AudioSource>(format!("audio/story/{}_{}.mp3", prefix, speaker)),
+                assets.load::<AudioSource>(format!("audio/story/{}_{}.wav", prefix, speaker)),
             ),
             PlaybackSettings {
                 mode: PlaybackMode::Despawn,
@@ -5698,7 +5724,7 @@ pub fn update_briefing_animation(
 
 pub fn briefing_buttons(
     keys: Res<ButtonInput<KeyCode>>,
-    interactions: Query<(&Interaction, &UiAction), Changed<Interaction>>,
+    mut actions: MessageReader<UiActionActivated>,
     mut next: ResMut<NextState<GameState>>,
     mut hero: ResMut<HeroLoadout>,
 ) {
@@ -5710,11 +5736,8 @@ pub fn briefing_buttons(
         next.set(GameState::Menu);
         return;
     }
-    for (interaction, action) in &interactions {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
-        match action {
+    for event in actions.read() {
+        match &event.action {
             UiAction::BeginMission => next.set(GameState::HeroIntro),
             UiAction::ToMenu => next.set(GameState::Menu),
             UiAction::SelectHeroClass(c) => hero.set_class(*c),
@@ -6431,7 +6454,7 @@ pub fn update_hero_label(hero: Res<HeroLoadout>, mut q: Query<&mut Text, With<He
 /// within the system-param limit).
 pub fn hero_buttons(
     mut commands: Commands,
-    interactions: Query<(&Interaction, &UiAction), Changed<Interaction>>,
+    mut actions: MessageReader<UiActionActivated>,
     mut run: ResMut<RunState>,
     mut loadout: ResMut<HeroLoadout>,
     mut towers: Query<(Entity, &mut crate::tower::Tower)>,
@@ -6444,11 +6467,8 @@ pub fn hero_buttons(
     mut buff: MessageWriter<BuffTower>,
     mut vfx: MessageWriter<crate::vfx::VfxEvent>,
 ) {
-    for (interaction, action) in &interactions {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
-        match action {
+    for event in actions.read() {
+        match &event.action {
             UiAction::SummonHero => {
                 // The hero is free and auto-present; this button just force-respawns
                 // it instantly if it has died (no gold, no wait).
@@ -7201,7 +7221,7 @@ pub fn update_language_label(lang: Res<Language>, mut q: Query<&mut Text, With<L
 }
 
 pub fn menu_buttons(
-    interactions: Query<(&Interaction, &UiAction), Changed<Interaction>>,
+    mut actions: MessageReader<UiActionActivated>,
     mut current: ResMut<CurrentLevel>,
     mut diff: ResMut<GameDifficulty>,
     mut quality: ResMut<GraphicsQuality>,
@@ -7214,53 +7234,51 @@ pub fn menu_buttons(
     mut next: ResMut<NextState<GameState>>,
     mut settings: Query<&mut Node, With<MenuSettingsRoot>>,
 ) {
-    for (interaction, action) in &interactions {
-        if *interaction == Interaction::Pressed {
-            match action {
-                UiAction::CycleQuality => quality.cycle(),
-                UiAction::CycleVolume => audio.cycle(),
-                UiAction::CycleLanguage => {
-                    lang.cycle();
-                    // Update the global immediately so the rebuild below (and any
-                    // crate::i18n::t() calls during it) use the new language this frame.
-                    crate::i18n::set_current_lang(lang.lang);
-                    // Rebuild the whole menu so every translated string re-renders.
-                    dirty.0 = true;
-                }
-                UiAction::ToggleMenuSettings => {
-                    for mut node in &mut settings {
-                        node.display = if node.display == Display::None {
-                            Display::Flex
-                        } else {
-                            Display::None
-                        };
-                    }
-                }
-                UiAction::SelectHeroRace(r) => hero.set_race(*r),
-                UiAction::SelectHeroClass(c) => hero.set_class(*c),
-                UiAction::PlayLevel(i) => {
-                    mode.0 = RunMode::Campaign;
-                    current.0 = *i;
-                    next.set(if *i == 0 {
-                        GameState::Story
-                    } else {
-                        GameState::Briefing
-                    });
-                }
-                UiAction::PlayEndless => {
-                    mode.0 = RunMode::Endless;
-                    current.0 = levels.0.len().saturating_sub(1);
-                    next.set(GameState::Story);
-                }
-                UiAction::OpenBestiary => next.set(GameState::Bestiary),
-                UiAction::OpenArmory => next.set(GameState::Armory),
-                UiAction::OpenTowerArchive => next.set(GameState::TowerArchive),
-                UiAction::OpenMilestones => next.set(GameState::Milestones),
-                UiAction::OpenCampaignDossier => next.set(GameState::CampaignDossier),
-                UiAction::OpenHeroCodex => next.set(GameState::HeroCodex),
-                UiAction::SetDifficulty(d) => diff.0 = *d,
-                _ => {}
+    for event in actions.read() {
+        match &event.action {
+            UiAction::CycleQuality => quality.cycle(),
+            UiAction::CycleVolume => audio.cycle(),
+            UiAction::CycleLanguage => {
+                lang.cycle();
+                // Update the global immediately so the rebuild below (and any
+                // crate::i18n::t() calls during it) use the new language this frame.
+                crate::i18n::set_current_lang(lang.lang);
+                // Rebuild the whole menu so every translated string re-renders.
+                dirty.0 = true;
             }
+            UiAction::ToggleMenuSettings => {
+                for mut node in &mut settings {
+                    node.display = if node.display == Display::None {
+                        Display::Flex
+                    } else {
+                        Display::None
+                    };
+                }
+            }
+            UiAction::SelectHeroRace(r) => hero.set_race(*r),
+            UiAction::SelectHeroClass(c) => hero.set_class(*c),
+            UiAction::PlayLevel(i) => {
+                mode.0 = RunMode::Campaign;
+                current.0 = *i;
+                next.set(if *i == 0 {
+                    GameState::Story
+                } else {
+                    GameState::Briefing
+                });
+            }
+            UiAction::PlayEndless => {
+                mode.0 = RunMode::Endless;
+                current.0 = levels.0.len().saturating_sub(1);
+                next.set(GameState::Story);
+            }
+            UiAction::OpenBestiary => next.set(GameState::Bestiary),
+            UiAction::OpenArmory => next.set(GameState::Armory),
+            UiAction::OpenTowerArchive => next.set(GameState::TowerArchive),
+            UiAction::OpenMilestones => next.set(GameState::Milestones),
+            UiAction::OpenCampaignDossier => next.set(GameState::CampaignDossier),
+            UiAction::OpenHeroCodex => next.set(GameState::HeroCodex),
+            UiAction::SetDifficulty(d) => diff.0 = *d,
+            _ => {}
         }
     }
 }
@@ -7490,11 +7508,11 @@ pub fn spawn_bestiary(
 }
 
 pub fn bestiary_buttons(
-    interactions: Query<(&Interaction, &UiAction), Changed<Interaction>>,
+    mut actions: MessageReader<UiActionActivated>,
     mut next: ResMut<NextState<GameState>>,
 ) {
-    for (interaction, action) in &interactions {
-        if *interaction == Interaction::Pressed && matches!(action, UiAction::ToMenu) {
+    for event in actions.read() {
+        if matches!(&event.action, UiAction::ToMenu) {
             next.set(GameState::Menu);
         }
     }
@@ -7617,11 +7635,11 @@ pub fn spawn_tower_archive(mut commands: Commands, fonts: Res<UiFont>, sprites: 
 }
 
 pub fn tower_archive_buttons(
-    interactions: Query<(&Interaction, &UiAction), Changed<Interaction>>,
+    mut actions: MessageReader<UiActionActivated>,
     mut next: ResMut<NextState<GameState>>,
 ) {
-    for (interaction, action) in &interactions {
-        if *interaction == Interaction::Pressed && matches!(action, UiAction::ToMenu) {
+    for event in actions.read() {
+        if matches!(&event.action, UiAction::ToMenu) {
             next.set(GameState::Menu);
         }
     }
@@ -7736,15 +7754,12 @@ pub fn spawn_hero_codex(mut commands: Commands, fonts: Res<UiFont>, sprites: Res
 }
 
 pub fn hero_codex_buttons(
-    interactions: Query<(&Interaction, &UiAction), Changed<Interaction>>,
+    mut actions: MessageReader<UiActionActivated>,
     mut hero: ResMut<HeroLoadout>,
     mut next: ResMut<NextState<GameState>>,
 ) {
-    for (interaction, action) in &interactions {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
-        match action {
+    for event in actions.read() {
+        match &event.action {
             UiAction::SelectHeroClass(c) => hero.set_class(*c),
             UiAction::SelectHeroRace(r) => hero.set_race(*r),
             UiAction::ToMenu => next.set(GameState::Menu),
@@ -7909,11 +7924,11 @@ pub fn spawn_campaign_dossier(
 }
 
 pub fn campaign_dossier_buttons(
-    interactions: Query<(&Interaction, &UiAction), Changed<Interaction>>,
+    mut actions: MessageReader<UiActionActivated>,
     mut next: ResMut<NextState<GameState>>,
 ) {
-    for (interaction, action) in &interactions {
-        if *interaction == Interaction::Pressed && matches!(action, UiAction::ToMenu) {
+    for event in actions.read() {
+        if matches!(&event.action, UiAction::ToMenu) {
             next.set(GameState::Menu);
         }
     }
@@ -8034,11 +8049,11 @@ pub fn spawn_milestones(
 }
 
 pub fn milestone_buttons(
-    interactions: Query<(&Interaction, &UiAction), Changed<Interaction>>,
+    mut actions: MessageReader<UiActionActivated>,
     mut next: ResMut<NextState<GameState>>,
 ) {
-    for (interaction, action) in &interactions {
-        if *interaction == Interaction::Pressed && matches!(action, UiAction::ToMenu) {
+    for event in actions.read() {
+        if matches!(&event.action, UiAction::ToMenu) {
             next.set(GameState::Menu);
         }
     }
@@ -8262,7 +8277,7 @@ fn spawn_armory_contents(
 
 pub fn armory_buttons(
     mut commands: Commands,
-    interactions: Query<(&Interaction, &UiAction), Changed<Interaction>>,
+    mut actions: MessageReader<UiActionActivated>,
     roots: Query<Entity, With<ArmoryRoot>>,
     fonts: Res<UiFont>,
     sprites: Res<Sprites>,
@@ -8270,11 +8285,8 @@ pub fn armory_buttons(
     mut rng: ResMut<Rng>,
     mut next: ResMut<NextState<GameState>>,
 ) {
-    for (interaction, action) in &interactions {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
-        match action {
+    for event in actions.read() {
+        match &event.action {
             UiAction::ToMenu => next.set(GameState::Menu),
             UiAction::RefineEquipment(item) => {
                 let notice = match refine_equipment(&mut inv, &mut rng, *item) {
@@ -8602,14 +8614,11 @@ fn overlay(
 
 /// Level navigation from the in-game settings panel (重新开始 / 返回主页).
 pub fn settings_nav_buttons(
-    interactions: Query<(&Interaction, &UiAction), Changed<Interaction>>,
+    mut actions: MessageReader<UiActionActivated>,
     mut next: ResMut<NextState<GameState>>,
 ) {
-    for (interaction, action) in &interactions {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
-        match action {
+    for event in actions.read() {
+        match &event.action {
             UiAction::Restart => next.set(GameState::Briefing),
             UiAction::ToMenu => next.set(GameState::Menu),
             _ => {}
@@ -8618,16 +8627,13 @@ pub fn settings_nav_buttons(
 }
 
 pub fn overlay_buttons(
-    interactions: Query<(&Interaction, &UiAction), Changed<Interaction>>,
+    mut actions: MessageReader<UiActionActivated>,
     mut current: ResMut<CurrentLevel>,
     levels: Res<Levels>,
     mut next: ResMut<NextState<GameState>>,
 ) {
-    for (interaction, action) in &interactions {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
-        match action {
+    for event in actions.read() {
+        match &event.action {
             UiAction::Restart => next.set(GameState::Briefing),
             UiAction::NextLevel => {
                 if current.0 + 1 < levels.0.len() {

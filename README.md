@@ -23,6 +23,7 @@ direnv allow          # or: nix develop
 ```bash
 cargo run             # debug
 cargo run --release   # smooth
+cargo run --features dev   # local asset hot reload for sprite/audio tuning
 ```
 
 ### Web (WebGPU)
@@ -36,6 +37,9 @@ WebGPU needs a secure context (localhost counts) and a WebGPU-capable browser
 (Chrome/Edge 113+, or Firefox with the flag). Bevy makes the `webgpu` feature take
 precedence over the default WebGL2 backend, so `--features webgpu` is all it takes
 (already wired into `build-web.sh`).
+
+Runtime assets use Bevy's WebP, WAV, UI widget, and WebGPU cargo features:
+sprites are WebP, and all runtime audio is WAV.
 
 > The wasm CLI (`wasm-bindgen-cli`) and the `wasm-bindgen` crate **must be the same
 > version**. The flake pins the CLI and `Cargo.toml` pins the crate to match

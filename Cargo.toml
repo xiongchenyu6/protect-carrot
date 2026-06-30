@@ -5,9 +5,28 @@ edition = "2024"
 description = "保卫萝卜 tower-defense, ported to Bevy (single-player). WebGPU/wasm learning project."
 
 [dependencies]
-# Pinned to the latest stable Bevy. Default features + mp3 (SFX) + webp
-# (story portraits are WebP — ~91% smaller than PNG for illustrations).
-bevy = { version = "0.19", features = ["mp3", "webp"] }
+# Pinned to Bevy 0.19 with an explicit feature set. Avoid the broad `2d`/`ui`
+# groups because they pull Bevy's `default_platform`, including X11. This game
+# targets Wayland natively and WebGPU on wasm.
+bevy = { version = "0.19", default-features = false, features = [
+  "2d_bevy_render",
+  "bevy_audio",
+  "bevy_ui_widgets",
+  "bevy_winit",
+  "custom_cursor",
+  "default_app",
+  "default_font",
+  "keyboard",
+  "mouse",
+  "multi_threaded",
+  "scene",
+  "touch",
+  "ui_bevy_render",
+  "ui_picking",
+  "wav",
+  "wayland",
+  "webp",
+] }
 
 # Pin wasm-bindgen to the version of the `wasm-bindgen-cli` provided by the Nix
 # dev shell (flake.nix). The CLI and crate versions MUST match exactly.
@@ -26,10 +45,14 @@ web-sys = { version = "0.3.98", features = [
 ] }
 
 [features]
+# Local development only: hot-reload changed sprites/audio while tuning visuals.
+# Do not use this for release/web builds.
+dev = ["bevy/file_watcher"]
+
 # Build the web target with the WebGPU backend. Bevy makes `webgpu` take
 # precedence over the default `webgl2`, so enabling this is all that's needed:
 #   cargo build --target wasm32-unknown-unknown --release --features webgpu
-webgpu = ["bevy/webgpu"]
+webgpu = ["bevy/web", "bevy/webgpu"]
 
 # Native dev profile: optimize dependencies even in debug so Bevy runs smoothly,
 # while keeping our own crate fast to compile. This is the standard Bevy setup.

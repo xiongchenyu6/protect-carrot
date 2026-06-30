@@ -150,6 +150,7 @@ fn main() {
             // doesn't fire a 404 for every texture/audio file.
             .set(AssetPlugin {
                 meta_check: bevy::asset::AssetMetaCheck::Never,
+                watch_for_changes_override: cfg!(feature = "dev").then_some(true),
                 ..default()
             }),
     )
@@ -190,6 +191,8 @@ fn main() {
     .add_message::<vfx::VfxEvent>()
     .add_message::<audio::SfxEvent>()
     .add_message::<tower::EnemyDied>()
+    .add_message::<ui::UiActionActivated>()
+    .add_observer(ui::widget_button_activated)
     .add_systems(
         Startup,
         (
@@ -211,6 +214,8 @@ fn main() {
             signal_game_ready,
             toggle_fullscreen,
             audio::play_sfx,
+            ui::attach_widget_buttons,
+            ui::ui_button_visuals,
             creatures::animate_creatures,
             vfx::update_camera_shake,
         ),

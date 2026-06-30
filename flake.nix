@@ -54,15 +54,11 @@
               RUST_BACKTRACE = 1;
 
               # Bevy needs these libs discoverable at runtime on Linux
-              # (GPU via Vulkan, windowing via X11/Wayland, audio via ALSA).
+              # (GPU via Vulkan, windowing via Wayland, audio via ALSA).
               LD_LIBRARY_PATH = lib.makeLibraryPath [
                 vulkan-loader
                 wayland
                 libxkbcommon
-                xorg.libX11
-                xorg.libXcursor
-                xorg.libXi
-                xorg.libXrandr
                 alsa-lib
                 udev
               ];
@@ -73,10 +69,6 @@
                 udev
                 libxkbcommon
                 wayland
-                xorg.libX11
-                xorg.libXcursor
-                xorg.libXi
-                xorg.libXrandr
               ];
               nativeBuildInputs = [
                 pkg-config

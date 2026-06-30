@@ -96,6 +96,7 @@ fn main() -> AppExit {
             })
             .set(AssetPlugin {
                 meta_check: bevy::asset::AssetMetaCheck::Never,
+                watch_for_changes_override: cfg!(feature = "dev").then_some(true),
                 ..default()
             })
             .set(RenderPlugin {
