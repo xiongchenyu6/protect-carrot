@@ -48,6 +48,21 @@
           packages.default = config.packages.web;
 
           devShells.default =
+            let
+              wasm-bindgen-cli_0_2_126 = pkgs.buildWasmBindgenCli rec {
+                src = pkgs.fetchCrate {
+                  pname = "wasm-bindgen-cli";
+                  version = "0.2.126";
+                  hash = "sha256-H6Is3fiZVxZCfOMWK5dWMSrtn50VGv0sfdnsT+cTtyk=";
+                };
+
+                cargoDeps = pkgs.rustPlatform.fetchCargoVendor {
+                  inherit src;
+                  inherit (src) pname version;
+                  hash = "sha256-VucqkXbCi4qtQzY/HrXiDnbSURsagPsdNVMn1Tw3UiY=";
+                };
+              };
+            in
             with pkgs;
             mkShell.override { stdenv = pkgs.clangStdenv; } {
               RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
@@ -81,7 +96,7 @@
                 openssl
                 rustfmt
                 # Web (WebGPU/wasm) build toolchain.
-                wasm-bindgen-cli
+                wasm-bindgen-cli_0_2_126
                 trunk
                 lld # wasm32-unknown-unknown linker
                 binaryen # wasm-opt (release size/perf optimization)

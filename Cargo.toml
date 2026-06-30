@@ -27,18 +27,35 @@ bevy = { version = "0.19", default-features = false, features = [
   "wayland",
   "webp",
 ] }
+bevy_asset_loader = { version = "0.27.0", default-features = false, features = [
+  "progress_tracking",
+] }
+bevy_fluent = "0.15.0"
+bevy_cursor_kit = { version = "0.9.0", default-features = false, features = [
+  "serde_ron_asset",
+] }
+bevy_common_assets = { version = "0.17.0", default-features = false, features = [
+  "json",
+  "ron",
+] }
+bevy-persistent = { version = "0.11.0", default-features = false, features = [
+  "ron",
+] }
+iyes_progress = "0.17.0"
+moonshine-kind = "0.5.1"
+serde = { version = "1", features = ["derive"] }
 
-# Pin wasm-bindgen to the version of the `wasm-bindgen-cli` provided by the Nix
-# dev shell (flake.nix). The CLI and crate versions MUST match exactly.
-wasm-bindgen = "=0.2.121"
+# Pin wasm-bindgen to the wasm-bindgen-cli version used by build-web.sh and CI.
+# The CLI and crate schema versions MUST match exactly.
+wasm-bindgen = "=0.2.126"
 
 # Web-only: src/asset_io.rs implements a retrying HTTP asset reader (bevy 0.19's
 # built-in wasm reader panics on a stream reset mid-body). These versions match
 # the ones bevy already locks, so no duplicate crate versions are introduced.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-js-sys = "0.3.98"
-wasm-bindgen-futures = "0.4.71"
-web-sys = { version = "0.3.98", features = [
+js-sys = "0.3.103"
+wasm-bindgen-futures = "0.4.76"
+web-sys = { version = "0.3.103", features = [
   "Window",
   "WorkerGlobalScope",
   "Response",

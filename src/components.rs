@@ -4,6 +4,7 @@
 use crate::data::{Element, ElementProfile, EnemyKind};
 use crate::monster::EliteAffix;
 use bevy::prelude::*;
+use moonshine_kind::prelude::Instance;
 
 /// A walking enemy. All status-effect state lives here (durations in **seconds**).
 #[derive(Component)]
@@ -205,7 +206,7 @@ pub struct SummonHpBarFg;
 /// because tower sprites rotate toward targets.
 #[derive(Component)]
 pub struct TowerHpBar {
-    pub owner: Entity,
+    pub owner: Instance<crate::tower::Tower>,
     pub width: f32,
     pub offset_y: f32,
     pub foreground: bool,

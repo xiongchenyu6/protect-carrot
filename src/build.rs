@@ -18,6 +18,7 @@ use crate::tower::{GodTower, HERO_MELEE_ATTACK_TIME, Tower};
 use crate::ui::UiAction;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
+use moonshine_kind::prelude::Instance;
 
 /// Current build/selection state, shared with the (future) UI.
 #[derive(Resource, Default)]
@@ -40,6 +41,12 @@ pub struct Selection {
     /// palette (drag-and-drop): such gestures place on release. A gesture that
     /// begins on the board instead uses tap-to-preview then tap-to-confirm.
     pub grabbed_from_palette: bool,
+}
+
+fn tower_instance(entity: Entity) -> Instance<Tower> {
+    // All call sites pass entities spawned with a `Tower` component in the same
+    // function, so this converts the raw id into the typed harness handle.
+    unsafe { Instance::from_entity_unchecked(entity) }
 }
 
 /// Convert the cursor position to a world coordinate.
@@ -417,7 +424,7 @@ pub fn spawn_tower(
         },
         Transform::from_translation((pos + Vec2::new(0.0, bar_y)).extend(6.2)),
         TowerHpBar {
-            owner: tower_entity,
+            owner: tower_instance(tower_entity),
             width: bar_w,
             offset_y: bar_y,
             foreground: false,
@@ -433,7 +440,7 @@ pub fn spawn_tower(
         Anchor::CENTER_LEFT,
         Transform::from_translation((pos + Vec2::new(-bar_w / 2.0, bar_y)).extend(6.3)),
         TowerHpBar {
-            owner: tower_entity,
+            owner: tower_instance(tower_entity),
             width: bar_w,
             offset_y: bar_y,
             foreground: true,
@@ -504,7 +511,7 @@ pub fn summon_god_tower(
         },
         Transform::from_translation((pos + Vec2::new(0.0, bar_y)).extend(6.2)),
         TowerHpBar {
-            owner: tower_entity,
+            owner: tower_instance(tower_entity),
             width: bar_w,
             offset_y: bar_y,
             foreground: false,
@@ -520,7 +527,7 @@ pub fn summon_god_tower(
         Anchor::CENTER_LEFT,
         Transform::from_translation((pos + Vec2::new(-bar_w / 2.0, bar_y)).extend(6.3)),
         TowerHpBar {
-            owner: tower_entity,
+            owner: tower_instance(tower_entity),
             width: bar_w,
             offset_y: bar_y,
             foreground: true,
@@ -559,7 +566,7 @@ pub struct HeroWalkAnim {
 
 #[derive(Component)]
 pub struct HeroRaceBadge {
-    pub owner: Entity,
+    pub owner: Instance<Tower>,
     pub offset: Vec2,
 }
 
@@ -748,7 +755,7 @@ pub fn spawn_hero(
             (pos + Vec2::new(TILE_SIZE * 0.36, -TILE_SIZE * 0.34)).extend(7.1),
         ),
         HeroRaceBadge {
-            owner: hero_entity,
+            owner: tower_instance(hero_entity),
             offset: Vec2::new(TILE_SIZE * 0.36, -TILE_SIZE * 0.34),
         },
         LevelEntity,
@@ -765,7 +772,7 @@ pub fn spawn_hero(
         },
         Transform::from_translation((pos + Vec2::new(0.0, bar_y)).extend(6.2)),
         TowerHpBar {
-            owner: hero_entity,
+            owner: tower_instance(hero_entity),
             width: bar_w,
             offset_y: bar_y,
             foreground: false,
@@ -781,7 +788,7 @@ pub fn spawn_hero(
         Anchor::CENTER_LEFT,
         Transform::from_translation((pos + Vec2::new(-bar_w / 2.0, bar_y)).extend(6.3)),
         TowerHpBar {
-            owner: hero_entity,
+            owner: tower_instance(hero_entity),
             width: bar_w,
             offset_y: bar_y,
             foreground: true,
@@ -1069,7 +1076,7 @@ pub fn update_tower_hp_bars(
     mut bars: Query<(Entity, &TowerHpBar, &mut Transform, &mut Sprite)>,
 ) {
     for (entity, bar, mut tf, mut sprite) in &mut bars {
-        let Ok(tower) = towers.get(bar.owner) else {
+        let Ok(tower) = towers.get(bar.owner.entity()) else {
             commands.entity(entity).despawn();
             continue;
         };
@@ -1172,7 +1179,7 @@ pub fn update_hero_race_badges(
     mut badges: Query<(Entity, &HeroRaceBadge, &mut Transform)>,
 ) {
     for (entity, badge, mut tf) in &mut badges {
-        let Ok(hero) = towers.get(badge.owner) else {
+        let Ok(hero) = towers.get(badge.owner.entity()) else {
             commands.entity(entity).despawn();
             continue;
         };

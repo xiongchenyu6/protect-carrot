@@ -420,12 +420,13 @@ fn run_sim(level: usize, seed: u64, mode: RunMode, econ: Option<(i32, f32)>) -> 
         .init_resource::<equipment_inv::EquipmentInventory>()
         .init_resource::<bestiary::Bestiary>()
         .init_resource::<build::Selection>()
-        .init_resource::<ui::Progress>()
         .init_resource::<vfx::ScreenShake>()
         .init_resource::<audio::AudioSettings>()
         .init_resource::<i18n::Language>()
         .init_resource::<Report>()
         .init_resource::<EnemyCount>();
+
+    app.add_systems(Startup, ui::load_persistent_progress);
 
     app.add_message::<Damage>()
         .add_message::<tower::Status>()

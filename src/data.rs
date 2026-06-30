@@ -651,7 +651,7 @@ pub static TOWER_DEFS: &[TowerDef] = &[
         footprint: 3,
         max_hp: 520.0,
         armor: 18.0,
-        desc: "3×3 持续高能激光",
+        desc: "3×3 指数聚焦高能激光",
         ..base()
     },
     TowerDef {

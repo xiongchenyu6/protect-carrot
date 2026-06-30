@@ -13,11 +13,15 @@
 
 use bevy::camera::ScalingMode;
 use bevy::prelude::*;
-use bevy::window::{MonitorSelection, WindowMode};
+use bevy::window::{CursorIcon, MonitorSelection, WindowMode};
+use bevy_asset_loader::prelude::{ConfigureLoadingState, LoadingState, LoadingStateAppExt};
+use bevy_common_assets::ron::RonAssetPlugin;
+use bevy_cursor_kit::prelude::{CursorAssetPlugin, CustomCursorImageBuilder, StaticCursor};
+use iyes_progress::ProgressPlugin;
 
 use protect_carrot::{
-    Levels, audio, bestiary, build, creatures, data, enemy, equipment, game, hero, i18n, meta,
-    quality, sprites, states, tower, tutorial, ui, vfx,
+    Levels, audio, bestiary, build, creatures, data, enemy, equipment, fluent_i18n, game, hero,
+    i18n, meta, quality, sprites, states, tower, tuning, tutorial, ui, vfx,
 };
 
 // Web-only: a retrying HTTP asset reader, installed before AssetPlugin so a
@@ -35,8 +39,8 @@ use sprites::build_sprites;
 use states::GameState;
 use tower::{BuffTower, Damage, HealCarrot, Snapshot, Status};
 use ui::{
-    Progress, UiFont, despawn_with, hud_buttons, menu_buttons, overlay_buttons, spawn_gameover,
-    spawn_hud, spawn_menu, spawn_victory, update_hud,
+    UiFont, despawn_with, hud_buttons, menu_buttons, overlay_buttons, spawn_gameover, spawn_hud,
+    spawn_menu, spawn_victory, update_hud,
 };
 
 /// Virtual design size (board 800 + HUD panel 240, height 600). The camera and
@@ -67,6 +71,11 @@ extern "C" {
 #[cfg(not(target_arch = "wasm32"))]
 fn carrot_game_ready() {}
 
+#[derive(Resource)]
+struct CarrotCursor {
+    handle: Handle<StaticCursor>,
+}
+
 /// Signal the JS loading overlay to fade once the menu has rendered a few frames and
 /// the key menu sprites (hero portraits + carrot) have finished loading.
 fn signal_game_ready(
@@ -89,12 +98,50 @@ fn signal_game_ready(
     }
 }
 
+fn load_carrot_cursor(mut commands: Commands, assets: Res<AssetServer>) {
+    commands.insert_resource(CarrotCursor {
+        handle: assets.load("cursors/carrot.cur.ron"),
+    });
+}
+
+fn apply_carrot_cursor(
+    mut commands: Commands,
+    assets: Res<AssetServer>,
+    cursor: Option<Res<CarrotCursor>>,
+    cursors: Res<Assets<StaticCursor>>,
+    windows: Query<Entity, With<Window>>,
+    mut done: Local<bool>,
+) {
+    if *done {
+        return;
+    }
+    let Some(cursor) = cursor else {
+        return;
+    };
+    let Some(carrot) = cursors.get(&cursor.handle) else {
+        return;
+    };
+    if !assets.is_loaded(carrot.image.id()) {
+        return;
+    }
+    let Ok(window) = windows.single() else {
+        return;
+    };
+
+    commands.entity(window).insert(CursorIcon::Custom(
+        CustomCursorImageBuilder::from_static_cursor(carrot, None).build(),
+    ));
+    *done = true;
+}
+
 fn main() {
     // Resolution is adaptive: native device-pixel-ratio + `fit_canvas_to_parent`
     // let the canvas track the screen. The player-adjustable graphics quality
     // (流畅/标准/精细) controls anti-aliasing via `quality::apply_quality`, not
     // resolution. Load it here only to persist/seed the resource.
     let quality = quality::GraphicsQuality::load();
+    let language = i18n::Language::load();
+    let fluent_locale = fluent_i18n::locale_for(language.lang);
     let resolution: bevy::window::WindowResolution =
         ((BOARD_W + PANEL_W) as u32, BOARD_H as u32).into();
 
@@ -154,12 +201,26 @@ fn main() {
                 ..default()
             }),
     )
+    .add_plugins(CursorAssetPlugin)
+    .add_plugins(fluent_i18n::fluent_plugin())
+    .add_plugins(RonAssetPlugin::<tuning::FocusBeamTuningAsset>::new(&[
+        "focus.ron",
+    ]))
+    .add_plugins(
+        ProgressPlugin::<GameState>::new()
+            .with_state_transition(GameState::Loading, GameState::Menu),
+    )
     .init_state::<GameState>()
+    .add_loading_state(
+        LoadingState::new(GameState::Loading).load_collection::<tuning::TuningAssets>(),
+    )
     .insert_resource(ClearColor(hex(0x1e2a1e)))
     .insert_resource(quality)
+    .insert_resource(language)
+    .insert_resource(fluent_locale)
     .init_resource::<audio::AudioSettings>()
-    .init_resource::<i18n::Language>()
     .init_resource::<ui::MenuDirty>()
+    .init_resource::<fluent_i18n::FluentStatus>()
     .insert_resource(Levels(levels()))
     .init_resource::<CurrentLevel>()
     .init_resource::<Paused>()
@@ -169,7 +230,6 @@ fn main() {
     .init_resource::<RunState>()
     .init_resource::<Selection>()
     .init_resource::<Snapshot>()
-    .init_resource::<Progress>()
     .init_resource::<tutorial::Tutorial>()
     .init_resource::<ui::TouchMode>()
     .init_resource::<ui::HudPanels>()
@@ -197,6 +257,9 @@ fn main() {
         Startup,
         (
             setup,
+            ui::load_persistent_progress,
+            load_carrot_cursor,
+            fluent_i18n::load_fluent_bundles,
             creatures::load_creatures,
             build::load_hero_walks,
             audio::load_sfx,
@@ -211,7 +274,8 @@ fn main() {
             fit_ui_scale,
             fit_camera_mode,
             ui::cjk_linebreak,
-            signal_game_ready,
+            apply_carrot_cursor,
+            signal_game_ready.run_if(in_state(GameState::Menu)),
             toggle_fullscreen,
             audio::play_sfx,
             ui::attach_widget_buttons,
@@ -458,7 +522,12 @@ fn main() {
             quality::apply_quality,
             audio::apply_master_volume,
             i18n::sync_current_lang,
+            fluent_i18n::sync_fluent_locale,
         ),
+    )
+    .add_systems(
+        Update,
+        fluent_i18n::build_fluent_localization.after(fluent_i18n::sync_fluent_locale),
     )
     // ---- overlays ----
     .add_systems(OnEnter(GameState::GameOver), spawn_gameover)

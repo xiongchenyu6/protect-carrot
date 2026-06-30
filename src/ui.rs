@@ -35,11 +35,16 @@ use bevy::audio::{PlaybackMode, Volume};
 use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, Button as WidgetButton};
 use bevy::window::{MonitorSelection, WindowMode};
+use bevy_persistent::prelude::{Persistent, StorageFormat};
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 /// Persistent progression (how many levels are unlocked).
-#[derive(Resource)]
+#[derive(Resource, Clone, Serialize, Deserialize)]
 pub struct Progress {
+    #[serde(default = "default_unlocked")]
     pub unlocked: usize,
+    #[serde(default)]
     pub stars: [u8; 20],
 }
 impl Default for Progress {
@@ -51,6 +56,31 @@ impl Default for Progress {
     }
 }
 
+fn default_unlocked() -> usize {
+    1
+}
+
+fn persistent_progress_path() -> PathBuf {
+    if cfg!(target_arch = "wasm32") {
+        PathBuf::from("/local/protect-carrot/progress.ron")
+    } else {
+        PathBuf::from("tmp/progress.ron")
+    }
+}
+
+pub fn load_persistent_progress(mut commands: Commands) {
+    let progress = Persistent::<Progress>::builder()
+        .name("campaign progress")
+        .format(StorageFormat::Ron)
+        .path(persistent_progress_path())
+        .default(Progress::default())
+        .revertible(true)
+        .revert_to_default_on_deserialization_errors(true)
+        .build()
+        .expect("failed to initialize persistent campaign progress");
+    commands.insert_resource(progress);
+}
+
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen(inline_js = r#"
 export function load_progress() {
@@ -60,11 +90,6 @@ export function load_progress() {
     return '';
   }
 }
-export function save_progress(value) {
-  try {
-    globalThis.localStorage?.setItem('protect_carrot_unlocked', value);
-  } catch (_) {}
-}
 export function load_progress_stars() {
   try {
     return globalThis.localStorage?.getItem('protect_carrot_stars') || '';
@@ -72,21 +97,12 @@ export function load_progress_stars() {
     return '';
   }
 }
-export function save_progress_stars(value) {
-  try {
-    globalThis.localStorage?.setItem('protect_carrot_stars', value);
-  } catch (_) {}
-}
 "#)]
 extern "C" {
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = load_progress)]
     fn load_progress_js() -> String;
-    #[wasm_bindgen::prelude::wasm_bindgen(js_name = save_progress)]
-    fn save_progress_js(value: &str);
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = load_progress_stars)]
     fn load_progress_stars_js() -> String;
-    #[wasm_bindgen::prelude::wasm_bindgen(js_name = save_progress_stars)]
-    fn save_progress_stars_js(value: &str);
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -95,18 +111,8 @@ fn load_progress_unlocked() -> usize {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn save_progress_unlocked(unlocked: usize) {
-    save_progress_js(&unlocked.to_string());
-}
-
-#[cfg(target_arch = "wasm32")]
 fn load_progress_stars() -> [u8; 20] {
     decode_stars(&load_progress_stars_js())
-}
-
-#[cfg(target_arch = "wasm32")]
-fn save_progress_stars(stars: &[u8; 20]) {
-    save_progress_stars_js(&encode_stars(stars));
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -118,30 +124,10 @@ fn load_progress_unlocked() -> usize {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn save_progress_unlocked(unlocked: usize) {
-    let _ = std::fs::create_dir_all("tmp");
-    let _ = std::fs::write("tmp/progress_unlocked.txt", unlocked.to_string());
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 fn load_progress_stars() -> [u8; 20] {
     std::fs::read_to_string("tmp/progress_stars.txt")
         .map(|raw| decode_stars(&raw))
         .unwrap_or([0; 20])
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn save_progress_stars(stars: &[u8; 20]) {
-    let _ = std::fs::create_dir_all("tmp");
-    let _ = std::fs::write("tmp/progress_stars.txt", encode_stars(stars));
-}
-
-fn encode_stars(stars: &[u8; 20]) -> String {
-    stars
-        .iter()
-        .map(|star| star.to_string())
-        .collect::<Vec<_>>()
-        .join(",")
 }
 
 fn decode_stars(raw: &str) -> [u8; 20] {
@@ -5776,7 +5762,7 @@ pub fn update_hero_select_buttons(
 pub fn spawn_menu(
     mut commands: Commands,
     levels: Res<Levels>,
-    progress: Res<Progress>,
+    progress: Res<Persistent<Progress>>,
     inv: Res<EquipmentInventory>,
     bestiary: Res<Bestiary>,
     fonts: Res<UiFont>,
@@ -7798,7 +7784,7 @@ pub fn spawn_campaign_dossier(
     mut commands: Commands,
     fonts: Res<UiFont>,
     levels: Res<Levels>,
-    progress: Res<Progress>,
+    progress: Res<Persistent<Progress>>,
 ) {
     let f = &fonts.0;
     let unlocked = progress.unlocked.min(levels.0.len());
@@ -7940,7 +7926,7 @@ pub fn spawn_milestones(
     mut commands: Commands,
     fonts: Res<UiFont>,
     levels: Res<Levels>,
-    progress: Res<Progress>,
+    progress: Res<Persistent<Progress>>,
     inv: Res<EquipmentInventory>,
     bestiary: Res<Bestiary>,
 ) {
@@ -8372,7 +8358,7 @@ pub fn spawn_victory(
     levels: Res<Levels>,
     run: Res<RunState>,
     diff: Res<GameDifficulty>,
-    mut progress: ResMut<Progress>,
+    mut progress: ResMut<Persistent<Progress>>,
     fonts: Res<UiFont>,
     sprites: Res<Sprites>,
     sfx: Res<crate::audio::Sfx>,
@@ -8392,9 +8378,10 @@ pub fn spawn_victory(
     let start_lives = (level.lives + diff.0.lives_bonus()).max(1);
     let stars = victory_rating(run.lives.max(0), start_lives);
     let old_stars = progress.stars[current.0];
+    let mut persist_progress = false;
     if stars > old_stars {
         progress.stars[current.0] = stars;
-        save_progress_stars(&progress.stars);
+        persist_progress = true;
     }
     // Unlock the next level.
     let next_idx = current.0 + 1;
@@ -8402,7 +8389,12 @@ pub fn spawn_victory(
     let newly_unlocked = has_next && progress.unlocked < next_idx + 1;
     if newly_unlocked {
         progress.unlocked = next_idx + 1;
-        save_progress_unlocked(progress.unlocked);
+        persist_progress = true;
+    }
+    if persist_progress {
+        if let Err(err) = progress.persist() {
+            warn!("failed to persist campaign progress: {err}");
+        }
     }
     let best_stars = progress.stars[current.0];
     let rewards = roll_clear_rewards(&mut rng, stars, clear_reward_bonus(diff.0), current.0);

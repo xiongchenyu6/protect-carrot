@@ -25,6 +25,9 @@ concurrency:
 permissions:
   contents: write
 
+env:
+  WASM_BINDGEN_CLI_VERSION: "0.2.126"
+
 jobs:
   release:
     name: Build, release and pin wasm bundle
@@ -61,13 +64,17 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin/wasm-bindgen
-          key: ${{ runner.os }}-wasm-bindgen-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-wasm-bindgen-
+          key: ${{ runner.os }}-wasm-bindgen-${{ env.WASM_BINDGEN_CLI_VERSION }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-wasm-bindgen-${{ env.WASM_BINDGEN_CLI_VERSION }}-
 
       - name: Install build tools
         run: |
           set -euo pipefail
-          command -v wasm-bindgen >/dev/null 2>&1 || cargo install -q --locked wasm-bindgen-cli
+          if ! command -v wasm-bindgen >/dev/null 2>&1 \
+            || ! wasm-bindgen --version | grep -q "$WASM_BINDGEN_CLI_VERSION"; then
+            cargo install -q --locked wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION"
+          fi
+          wasm-bindgen --version
           sudo apt-get update
           sudo apt-get install -y binaryen brotli
 

@@ -36,7 +36,7 @@ use game::{
 };
 use sprites::build_sprites;
 use tower::{BuffTower, Damage, HealCarrot, Snapshot, Status};
-use ui::{Progress, UiFont, spawn_hud, update_hud};
+use ui::{UiFont, spawn_hud, update_hud};
 
 const CAPTURE_W: u32 = 1280;
 const CAPTURE_H: u32 = 720;
@@ -128,7 +128,6 @@ fn main() -> AppExit {
     .init_resource::<RunState>()
     .init_resource::<Selection>()
     .init_resource::<Snapshot>()
-    .init_resource::<Progress>()
     .init_resource::<tutorial::Tutorial>()
     .init_resource::<ui::TouchMode>()
     .init_resource::<ui::HudPanels>()
@@ -147,6 +146,7 @@ fn main() -> AppExit {
     .init_resource::<ui::StoryDialogue>()
     .init_resource::<CapturePrepared>()
     .insert_resource(job)
+    .add_systems(Startup, ui::load_persistent_progress)
     .add_message::<Damage>()
     .add_message::<Status>()
     .add_message::<BuffTower>()

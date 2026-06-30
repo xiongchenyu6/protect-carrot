@@ -13,6 +13,35 @@ set -euo pipefail
 PROFILE="${1:-release}"
 TARGET=wasm32-unknown-unknown
 NAME=protect_carrot
+WASM_BINDGEN_VERSION="${WASM_BINDGEN_VERSION:-0.2.126}"
+
+wasm_bindgen_version_ok() {
+  "$1" --version 2>/dev/null | grep -q "wasm-bindgen $WASM_BINDGEN_VERSION"
+}
+
+resolve_wasm_bindgen() {
+  local cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+  local cargo_bin="$cargo_home/bin/wasm-bindgen"
+  if [ -x "$cargo_bin" ] && wasm_bindgen_version_ok "$cargo_bin"; then
+    printf '%s\n' "$cargo_bin"
+    return
+  fi
+
+  if command -v wasm-bindgen >/dev/null 2>&1; then
+    local path_bin
+    path_bin="$(command -v wasm-bindgen)"
+    if wasm_bindgen_version_ok "$path_bin"; then
+      printf '%s\n' "$path_bin"
+      return
+    fi
+  fi
+
+  echo ">> installing wasm-bindgen-cli $WASM_BINDGEN_VERSION" >&2
+  cargo install -q --locked wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION"
+  printf '%s\n' "$cargo_bin"
+}
+
+WASM_BINDGEN_BIN="$(resolve_wasm_bindgen)"
 
 echo ">> cargo build ($PROFILE, WebGPU) for $TARGET"
 if [ "$PROFILE" = "release" ]; then
@@ -24,7 +53,7 @@ else
 fi
 
 echo ">> wasm-bindgen -> web/"
-wasm-bindgen --no-typescript --target web --out-dir web --out-name "$NAME" "$WASM"
+"$WASM_BINDGEN_BIN" --no-typescript --target web --out-dir web --out-name "$NAME" "$WASM"
 
 # Release: shrink + optimize the wasm with binaryen's wasm-opt.
 if [ "$PROFILE" = "release" ] && command -v wasm-opt >/dev/null; then
@@ -58,7 +87,7 @@ rm -rf web/assets
 cp -r assets web/assets
 
 # Release: pre-compress the big text/wasm so the server can serve them compressed
-# (massive win on slow connections). PNG/MP3 are already compressed — skip.
+# (massive win on slow connections). Images/audio are already compressed — skip.
 # Produce both .gz (gzip_static) and .br (brotli_static, ~25-30% smaller on wasm).
 if [ "$PROFILE" = "release" ]; then
   for ff in "web/${NAME}_bg.wasm" "web/${NAME}.js"; do

@@ -987,7 +987,7 @@ fn dict() -> &'static HashMap<&'static str, &'static str> {
             ("要塞炮", "Fortress Cannon"),
             ("2×2 重炮·超大范围爆炸", "2x2 heavy cannon - massive area explosion"),
             ("光棱塔", "Prism Tower"),
-            ("3×3 持续高能激光", "3x3 continuous high-energy laser"),
+            ("3×3 指数聚焦高能激光", "3x3 exponential-focus high-energy laser"),
             ("死灵塔", "Necromancer Tower"),
             ("击杀范围内敌人→复活为我方作战", "Kills enemies in range and raises them to fight for you"),
             ("普通怪", "Grunt"),

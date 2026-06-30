@@ -1089,6 +1089,11 @@ fn spawn_projectile(
 
 // ============================ Tower behavior ============================
 
+fn focus_beam_dps(base_damage: f32, charge: f32, profile: crate::tuning::FocusBeamProfile) -> f32 {
+    (base_damage * profile.base_dps_mult * 2f32.powf(charge * profile.charge_rate))
+        .min(profile.dps_cap)
+}
+
 pub fn update_towers(
     mut commands: Commands,
     time: Res<Time>,
@@ -1104,6 +1109,8 @@ pub fn update_towers(
     creatures: Res<crate::creatures::Creatures>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
+    focus_tuning_handles: Option<Res<crate::tuning::TuningAssets>>,
+    focus_tunings: Option<Res<Assets<crate::tuning::FocusBeamTuningAsset>>>,
 ) {
     let dt = time.delta_secs() * run.game_speed;
 
@@ -1152,15 +1159,18 @@ pub fn update_towers(
             }
 
             Behavior::Laser => {
-                let is_laser = tower.kind == TowerKind::Laser;
-                // Sticky targeting (Laser only): keep melting the SAME target while
-                // it's alive, targetable and in range, so the exponential focus ramp
-                // can actually build. `snap.target()` re-picks the "best" enemy every
+                let focus = crate::tuning::focus_profile_from_assets(
+                    tower.kind,
+                    focus_tuning_handles.as_deref(),
+                    focus_tunings.as_deref(),
+                );
+                // Sticky targeting for focus beams: keep melting the SAME target while
+                // it's alive, targetable and in range, so the exponential ramp can
+                // actually build. `snap.target()` re-picks the "best" enemy every
                 // frame, which against a moving stream would reset the charge each
-                // frame — the reason the ramp felt absent. We only re-acquire once the
-                // held target is gone.
+                // frame. We only re-acquire once the held target is gone.
                 let eff_range = tower.range * (1.0 + tower.aura_range);
-                let held = if is_laser {
+                let held = if focus.is_some() {
                     tower.laser_target.and_then(|prev| {
                         snap.enemies.iter().copied().find(|e| {
                             e.entity == prev
@@ -1173,33 +1183,37 @@ pub fn update_towers(
                 };
                 if let Some(t) = held.or_else(|| snap.target(&tower)) {
                     tower.angle = (t.pos - c).to_angle();
-                    // The Laser tower is the anti-boss weapon: dwelling on one target
-                    // ramps its DPS *exponentially* (doubling ~every 1.0s focus) up to a
-                    // hard cap. Switching target resets the charge, so it only pays off
-                    // against something that stays in the beam (bosses, tanky leads).
-                    const LASER_CAP: f32 = 3000.0;
-                    let dps = if is_laser {
+                    // Focus beams are anti-boss weapons: dwelling on one target ramps
+                    // DPS exponentially. The 650-cost Prism starts higher, charges
+                    // faster, pierces wider, and caps far above the basic Laser.
+                    let dps = if let Some(profile) = focus {
                         if tower.laser_target == Some(t.entity) {
                             tower.laser_charge += dt;
                         } else {
                             tower.laser_target = Some(t.entity);
                             tower.laser_charge = 0.0;
                         }
-                        (tower.damage * 2f32.powf(tower.laser_charge)).min(LASER_CAP)
+                        focus_beam_dps(tower.damage, tower.laser_charge, profile)
                     } else {
                         tower.damage
                     };
-                    let charge_frac = if is_laser {
-                        (tower.laser_charge / 5.0).clamp(0.0, 1.0)
-                    } else {
-                        0.0
-                    };
+                    let charge_frac = focus
+                        .map(|profile| {
+                            (tower.laser_charge / profile.visual_full_charge).clamp(0.0, 1.0)
+                        })
+                        .unwrap_or(0.0);
                     let base_width = if tower.kind == TowerKind::Prism {
                         8.5
                     } else {
                         5.5
                     };
-                    let width = base_width + charge_frac * 7.0; // thickens as it charges
+                    let width =
+                        base_width + charge_frac * focus.map_or(0.0, |profile| profile.width_bonus);
+                    let hit_radius = focus
+                        .map(|profile| {
+                            profile.hit_radius_base + charge_frac * profile.hit_radius_bonus
+                        })
+                        .unwrap_or(15.0);
                     spawn_layered_beam(
                         &mut commands,
                         c,
@@ -1219,7 +1233,7 @@ pub fn update_towers(
                         if !snap.can_target(&tower, e) {
                             continue;
                         }
-                        if seg_dist(c, t.pos, e.pos) <= 15.0 {
+                        if seg_dist(c, t.pos, e.pos) <= hit_radius {
                             dmg.write(Damage {
                                 source_tower: Some(entity),
                                 target: e.entity,
@@ -3923,5 +3937,25 @@ pub fn apply_damage(
                 element: d.element,
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prism_focus_beam_scales_like_a_final_tower() {
+        let laser = crate::tuning::default_focus_profile(TowerKind::Laser).unwrap();
+        let prism = crate::tuning::default_focus_profile(TowerKind::Prism).unwrap();
+
+        assert!(prism.base_dps_mult > laser.base_dps_mult);
+        assert!(prism.charge_rate > laser.charge_rate);
+        assert!(prism.dps_cap > laser.dps_cap);
+        assert!(prism.hit_radius_bonus > laser.hit_radius_bonus);
+
+        let basic_laser_dps = focus_beam_dps(25.0, 3.0, laser);
+        let final_prism_dps = focus_beam_dps(55.0, 3.0, prism);
+        assert!(final_prism_dps > basic_laser_dps * 3.0);
     }
 }
