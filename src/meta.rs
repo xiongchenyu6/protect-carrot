@@ -15,6 +15,11 @@ pub struct Talents {
     pub damage_mult: f32,
     pub range_mult: f32,
     pub firerate_mult: f32, // cooldown multiplier (<1 = faster)
+    /// Per-level roguelite tower multipliers. These reset on each map load and
+    /// are kept separate from the gold-bought global upgrades.
+    pub rogue_damage_mult: f32,
+    pub rogue_range_mult: f32,
+    pub rogue_firerate_mult: f32,
     pub dmg_lvl: i32,
     pub rng_lvl: i32,
     pub spd_lvl: i32,
@@ -26,6 +31,9 @@ impl Default for Talents {
             damage_mult: 1.0,
             range_mult: 1.0,
             firerate_mult: 1.0,
+            rogue_damage_mult: 1.0,
+            rogue_range_mult: 1.0,
+            rogue_firerate_mult: 1.0,
             dmg_lvl: 0,
             rng_lvl: 0,
             spd_lvl: 0,

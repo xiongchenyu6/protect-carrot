@@ -31,6 +31,7 @@ bevy_asset_loader = { version = "0.27.0", default-features = false, features = [
   "progress_tracking",
 ] }
 bevy_fluent = "0.15.0"
+bevy-paperdoll = "0.9.1"
 bevy_cursor_kit = { version = "0.9.0", default-features = false, features = [
   "serde_ron_asset",
 ] }
@@ -40,6 +41,12 @@ bevy_common_assets = { version = "0.17.0", default-features = false, features = 
 ] }
 bevy-persistent = { version = "0.11.0", default-features = false, features = [
   "ron",
+] }
+bevy-sequential-actions = "0.16.0"
+bevy_spritesheet_animation = { version = "7.0.1", default-features = false }
+bevy_firefly = { version = "0.19.0", default-features = false }
+bevy_fog_of_war = { version = "0.4.0", default-features = false, features = [
+  "format-json",
 ] }
 iyes_progress = "0.17.0"
 moonshine-kind = "0.5.1"
@@ -70,6 +77,12 @@ dev = ["bevy/file_watcher"]
 # precedence over the default `webgl2`, so enabling this is all that's needed:
 #   cargo build --target wasm32-unknown-unknown --release --features webgpu
 webgpu = ["bevy/web", "bevy/webgpu"]
+
+[patch.crates-io]
+# Firefly 0.19's published Cargo.toml explicitly enables Bevy's `x11` feature.
+# Keep the crate source unchanged except for that dependency feature so the game
+# stays Wayland-native while still using Firefly's WebGPU 2D lighting pipeline.
+bevy_firefly = { path = "vendor/bevy_firefly" }
 
 # Native dev profile: optimize dependencies even in debug so Bevy runs smoothly,
 # while keeping our own crate fast to compile. This is the standard Bevy setup.

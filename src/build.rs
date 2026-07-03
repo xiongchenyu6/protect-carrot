@@ -5,19 +5,22 @@
 
 use crate::board::Board;
 use crate::components::{LevelEntity, Particle, TowerHpBar};
-use crate::data::Behavior;
 use crate::data::{BOARD_H, BOARD_W, COLS, ROWS, TILE_SIZE, TowerKind, cell_center};
 use crate::equipment::{
     EquipmentInventory, return_equipment_to_inventory, unequip_all_to_inventory,
 };
 use crate::game::RunState;
-use crate::hero::{Class, HeroLoadout, Race, hero_move_speed};
+use crate::hero::{HeroLoadout, HeroWeapon, Race, hero_move_speed};
 use crate::meta::Talents;
 use crate::sprites::Sprites;
-use crate::tower::{GodTower, HERO_MELEE_ATTACK_TIME, Tower};
-use crate::ui::UiAction;
+use crate::tower::{HERO_MELEE_ATTACK_TIME, Tower};
+use crate::ui::{HudPanels, UiAction};
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
+use bevy_sequential_actions::SequentialActions;
+use bevy_spritesheet_animation::prelude::{
+    Animation, AnimationDuration, AnimationRepeat, Spritesheet, SpritesheetAnimation,
+};
 use moonshine_kind::prelude::Instance;
 
 /// Current build/selection state, shared with the (future) UI.
@@ -52,7 +55,7 @@ fn tower_instance(entity: Entity) -> Instance<Tower> {
 /// Convert the cursor position to a world coordinate.
 fn cursor_world(
     windows: &Query<&Window>,
-    camera: &Query<(&Camera, &GlobalTransform)>,
+    camera: &Query<(&Camera, &GlobalTransform), (With<Camera2d>, With<crate::vfx::ShakeCamera>)>,
 ) -> Option<Vec2> {
     let window = windows.single().ok()?;
     let cursor = window.cursor_position()?;
@@ -75,7 +78,7 @@ pub fn update_build_ghost(
     sprites: Res<Sprites>,
     towers: Query<&Tower>,
     windows: Query<&Window>,
-    camera: Query<(&Camera, &GlobalTransform)>,
+    camera: Query<(&Camera, &GlobalTransform), (With<Camera2d>, With<crate::vfx::ShakeCamera>)>,
     mut ghost: Query<(&mut Sprite, &mut Transform, &mut Visibility), With<BuildGhost>>,
 ) {
     let Ok((mut sprite, mut tf, mut vis)) = ghost.single_mut() else {
@@ -161,10 +164,11 @@ pub fn mouse_build(
     buttons: Res<ButtonInput<MouseButton>>,
     touches: Res<Touches>,
     windows: Query<&Window>,
-    camera: Query<(&Camera, &GlobalTransform)>,
+    camera: Query<(&Camera, &GlobalTransform), (With<Camera2d>, With<crate::vfx::ShakeCamera>)>,
     board: Res<Board>,
     mut run: ResMut<RunState>,
     mut sel: ResMut<Selection>,
+    mut panels: ResMut<HudPanels>,
     towers: Query<(Entity, &Tower)>,
     sprites: Res<Sprites>,
     talents: Res<Talents>,
@@ -184,21 +188,24 @@ pub fn mouse_build(
         return;
     }
 
-    // Which UI element (if any) is currently pressed, and is the pointer over UI?
-    let pressed_build = ui_buttons.iter().find_map(|(i, a)| match (i, a) {
-        (Interaction::Pressed, UiAction::Build(k)) => Some(*k),
-        _ => None,
-    });
-    let pressed_other_ui = ui_buttons
-        .iter()
-        .any(|(i, a)| *i == Interaction::Pressed && !matches!(a, UiAction::Build(_)));
-    let over_ui = ui_buttons
-        .iter()
-        .any(|(i, _)| !matches!(*i, Interaction::None));
-
     let fresh_press =
         buttons.just_pressed(MouseButton::Left) || touches.iter_just_pressed().next().is_some();
     let is_touch_press = touches.iter_just_pressed().next().is_some();
+    // Desktop build buttons are handled by `hud_buttons` via UiActionActivated.
+    // `Interaction::Pressed` is only used for touch drag-out from the palette; if
+    // it gets stale on desktop, board clicks must still reach the world.
+    let pressed_build = if is_touch_press {
+        ui_buttons.iter().find_map(|(i, a)| match (i, a) {
+            (Interaction::Pressed, UiAction::Build(k)) => Some(*k),
+            _ => None,
+        })
+    } else {
+        None
+    };
+    let pressed_other_ui = is_touch_press
+        && ui_buttons
+            .iter()
+            .any(|(i, a)| *i == Interaction::Pressed && !matches!(a, UiAction::Build(_)));
 
     let Ok((cam, cam_tf)) = camera.single() else {
         return;
@@ -260,17 +267,17 @@ pub fn mouse_build(
     //    visible the whole drag, so the range is already previewed).
     //  * Tap an empty board cell → the first tap only *previews* the range there;
     //    a second tap on the same cell confirms and builds.
-    let (col, row, building, was_touch) = if buttons.just_pressed(MouseButton::Left) {
-        if over_ui {
-            return;
-        }
+    let (world, col, row, building, was_touch) = if buttons.just_pressed(MouseButton::Left) {
         match windows
             .single()
             .ok()
             .and_then(|w| w.cursor_position())
-            .and_then(to_cell)
-        {
-            Some((c, r)) => (c, r, true, false),
+            .and_then(|screen| {
+                cam.viewport_to_world_2d(cam_tf, screen)
+                    .ok()
+                    .and_then(|world| world_to_cell(world).map(|(c, r)| (world, c, r)))
+            }) {
+            Some((world, c, r)) => (world, c, r, true, false),
             None => return,
         }
     } else if let Some(t) = touches.iter_just_released().next() {
@@ -280,12 +287,16 @@ pub fn mouse_build(
         }
         let grabbed = sel.grabbed_from_palette;
         sel.grabbed_from_palette = false;
-        match to_cell(t.position()) {
-            Some((c, r)) => {
+        match cam.viewport_to_world_2d(cam_tf, t.position()).ok() {
+            Some(world) => {
+                let Some((c, r)) = world_to_cell(world) else {
+                    sel.preview_cell = None;
+                    return;
+                };
                 // Build now only if dragged from the palette, or this cell already
                 // had its preview armed by a prior tap.
                 let confirm = grabbed || sel.preview_cell == Some((c, r));
-                (c, r, confirm, true)
+                (world, c, r, confirm, true)
             }
             None => {
                 // Released off the board (e.g. back over the panel): cancel preview.
@@ -297,15 +308,34 @@ pub fn mouse_build(
         return;
     };
 
-    // Tapping/clicking a placed tower selects it (and cancels any pending build).
-    if let Some((e, _)) = towers.iter().find(|(_, t)| t.covers(col, row)) {
+    // Heroes are free-moving units, not grid towers. Battle-field clicks only
+    // select the hero; the dedicated portrait button opens the paperdoll panel.
+    if let Some((e, _)) = towers
+        .iter()
+        .find(|(_, t)| t.hero && world.distance(t.hero_pos) <= TILE_SIZE * 0.7)
+    {
         sel.selected = Some(e);
         sel.build_kind = None;
         sel.preview_cell = None;
+        panels.hero_open = false;
+        panels.settings_open = false;
+        return;
+    }
+
+    // Tapping/clicking a placed tower selects it (and cancels any pending build).
+    if let Some((e, _)) = towers.iter().find(|(_, t)| !t.hero && t.covers(col, row)) {
+        sel.selected = Some(e);
+        sel.build_kind = None;
+        sel.preview_cell = None;
+        panels.hero_open = false;
+        panels.settings_open = false;
         return;
     }
 
     let Some(kind) = sel.build_kind else {
+        if !was_touch {
+            sel.selected = None;
+        }
         return;
     };
 
@@ -380,6 +410,14 @@ pub fn footprint_buildable<'a>(
     true
 }
 
+fn tower_level_visual_scale(level: i32) -> f32 {
+    1.0 + (level - 1).max(0) as f32 * 0.09
+}
+
+fn tower_visual_size(tower: &Tower) -> f32 {
+    TILE_SIZE * tower.footprint.max(1) as f32 * 0.95 * tower_level_visual_scale(tower.level)
+}
+
 /// Spawn a tower entity using its sprite. The sprite art faces +x; `rotate_towers`
 /// turns it toward the current target.
 pub fn spawn_tower(
@@ -396,16 +434,17 @@ pub fn spawn_tower(
     let pos = cell_center(col as f32 + off, row as f32 + off);
     // Apply current global talents to the new tower's base stats.
     let mut tower = Tower::from_def(def, col, row);
-    tower.base_damage *= talents.damage_mult;
+    tower.base_damage *= talents.damage_mult * talents.rogue_damage_mult;
     tower.damage = tower.base_damage;
-    tower.range *= talents.range_mult;
-    tower.cooldown *= talents.firerate_mult;
+    tower.range *= talents.range_mult * talents.rogue_range_mult;
+    tower.cooldown *= talents.firerate_mult * talents.rogue_firerate_mult;
+    let visual_size = tower_visual_size(&tower);
     let tower_entity = commands
         .spawn((
             tower,
             Sprite {
                 image: sprites.towers[&kind].clone(),
-                custom_size: Some(Vec2::splat(TILE_SIZE * fp as f32 * 0.95)),
+                custom_size: Some(Vec2::splat(visual_size)),
                 ..default()
             },
             Transform::from_translation(pos.extend(4.0)),
@@ -449,96 +488,9 @@ pub fn spawn_tower(
     ));
 }
 
-/// Engineer's level-30 ultimate: summon a single 神之塔 (god tower) — a stationary
-/// tower fusing every attribute (huge AoE damage + chain + slow + poison + range).
-/// Runs each frame; spawns at most one (guarded by the `GodTower` marker).
-pub fn summon_god_tower(
-    mut commands: Commands,
-    loadout: Res<HeroLoadout>,
-    sprites: Res<Sprites>,
-    existing: Query<(), With<GodTower>>,
-) {
-    if loadout.class != Class::Engineer
-        || loadout.level < HeroLoadout::MAX_LEVEL
-        || !existing.is_empty()
-    {
-        return;
-    }
-    // Place it on a central upper-board cell so its huge range blankets the field.
-    let (col, row) = (COLS / 2, ROWS / 3);
-    let pos = cell_center(col as f32, row as f32);
-    let mut t = Tower::from_def(TowerKind::Arrow.def(), col, row);
-    t.behavior = Behavior::Aoe;
-    t.base_damage = 520.0;
-    t.damage = 520.0;
-    t.range = 360.0;
-    t.cooldown = 0.3;
-    t.aoe_radius = 130.0;
-    t.chain_count = 4;
-    t.chain_range = 150.0;
-    t.slow_duration = 1.0;
-    t.freeze_duration = 0.4;
-    t.dot_damage = 80.0;
-    t.poison_duration = 3.0;
-    t.knock_dist = 16.0;
-    t.armor_reduce = 12.0;
-    t.curse_duration = 2.0;
-    t.max_hp = 6000.0;
-    t.hp = 6000.0;
-    t.armor = 50.0;
-    t.color = Color::srgb(1.0, 0.88, 0.35);
-    let tower_entity = commands
-        .spawn((
-            t,
-            GodTower,
-            Sprite {
-                image: sprites.towers[&TowerKind::Fortress].clone(),
-                color: Color::srgb(1.0, 0.88, 0.35),
-                custom_size: Some(Vec2::splat(TILE_SIZE * 1.6)),
-                ..default()
-            },
-            Transform::from_translation(pos.extend(4.5)),
-            LevelEntity,
-        ))
-        .id();
-    let bar_w = TILE_SIZE * 1.3;
-    let bar_y = TILE_SIZE * 0.95;
-    commands.spawn((
-        Sprite {
-            color: Color::srgb(0.09, 0.04, 0.04),
-            custom_size: Some(Vec2::new(bar_w, 5.0)),
-            ..default()
-        },
-        Transform::from_translation((pos + Vec2::new(0.0, bar_y)).extend(6.2)),
-        TowerHpBar {
-            owner: tower_instance(tower_entity),
-            width: bar_w,
-            offset_y: bar_y,
-            foreground: false,
-        },
-        LevelEntity,
-    ));
-    commands.spawn((
-        Sprite {
-            color: Color::srgb(1.0, 0.86, 0.3),
-            custom_size: Some(Vec2::new(bar_w, 5.0)),
-            ..default()
-        },
-        Anchor::CENTER_LEFT,
-        Transform::from_translation((pos + Vec2::new(-bar_w / 2.0, bar_y)).extend(6.3)),
-        TowerHpBar {
-            owner: tower_instance(tower_entity),
-            width: bar_w,
-            offset_y: bar_y,
-            foreground: true,
-        },
-        LevelEntity,
-    ));
-}
-
 /// Spawn the unique hero entity (a `Tower` with `hero = true`) plus its HP bars.
-/// The sprite is chosen from dedicated hero class art, tinted by race color.
-/// A class's walk-cycle sprite sheet: a horizontal strip of 128px square frames,
+/// The sprite is chosen from dedicated hero weapon art, tinted by race color.
+/// A weapon's walk-cycle sprite sheet: a horizontal strip of 128px square frames,
 /// frame 0 = idle portrait, frames 1.. = walk poses (Flux-Kontext generated, see
 /// `tools/comfy_kontext.py`). Plugged into Bevy's `TextureAtlas` like the creatures.
 const HERO_WORLD_SIZE: f32 = TILE_SIZE * 1.18;
@@ -549,19 +501,32 @@ pub struct HeroWalkCfg {
     pub layout: Handle<TextureAtlasLayout>,
     pub frames: usize,
     pub size: f32,
+    pub idle_anim: Handle<Animation>,
+    pub walk_anim: Handle<Animation>,
+    pub attack_anim: Handle<Animation>,
 }
 
 #[derive(Resource, Default)]
 pub struct HeroWalks {
-    pub class_walks: std::collections::HashMap<Class, HeroWalkCfg>,
-    pub race_worlds: std::collections::HashMap<(Class, Race), HeroWalkCfg>,
+    pub weapon_walks: std::collections::HashMap<HeroWeapon, HeroWalkCfg>,
+    pub race_worlds: std::collections::HashMap<(HeroWeapon, Race), HeroWalkCfg>,
 }
 
-/// Per-hero walk animation cursor.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum HeroAnimState {
+    Idle,
+    Walk,
+    Attack,
+}
+
+/// Per-hero animation state. Frame playback is owned by bevy_spritesheet_animation.
 #[derive(Component)]
 pub struct HeroWalkAnim {
-    pub timer: Timer,
+    pub idle: Handle<Animation>,
+    pub walk: Handle<Animation>,
+    pub attack: Handle<Animation>,
     pub frames: usize,
+    pub state: HeroAnimState,
 }
 
 #[derive(Component)]
@@ -570,19 +535,19 @@ pub struct HeroRaceBadge {
     pub offset: Vec2,
 }
 
-/// Classes that have a walk strip in `assets/heroes_walk/<name>.webp` (frame count
-/// includes the idle frame 0). Add a class here once its strip is generated.
-fn hero_walk_mapping() -> &'static [(Class, &'static str, usize)] {
+/// Weapons that have a walk strip in `assets/heroes_walk/<name>.webp` (frame count
+/// includes the idle frame 0). Add a weapon here once its strip is generated.
+fn hero_walk_mapping() -> &'static [(HeroWeapon, &'static str, usize)] {
     &[
-        (Class::Warrior, "warrior", 7),
-        (Class::Mage, "mage", 7),
-        (Class::Ranger, "ranger", 7),
-        (Class::Guardian, "guardian", 7),
-        (Class::Stormcaller, "stormcaller", 7),
-        (Class::Warden, "warden", 7),
-        (Class::Assassin, "assassin", 7),
-        (Class::Priest, "priest", 7),
-        (Class::Engineer, "engineer", 7),
+        (HeroWeapon::BannerSword, "warrior", 7),
+        (HeroWeapon::StarfireStaff, "mage", 7),
+        (HeroWeapon::ShadowBow, "ranger", 7),
+        (HeroWeapon::OathShield, "guardian", 7),
+        (HeroWeapon::StormOrb, "stormcaller", 7),
+        (HeroWeapon::SentryCrossbow, "warden", 7),
+        (HeroWeapon::NightDagger, "assassin", 7),
+        (HeroWeapon::SummonStaff, "summoner", 7),
+        (HeroWeapon::ForgeHammer, "engineer", 7),
     ]
 }
 
@@ -594,14 +559,15 @@ fn hero_race_file(race: Race) -> &'static str {
     }
 }
 
-/// Startup: load the per-class walk sheets into a `HeroWalks` resource.
+/// Startup: load the per-weapon walk sheets into a `HeroWalks` resource.
 pub fn load_hero_walks(
     mut commands: Commands,
     assets: Res<AssetServer>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
+    mut animations: ResMut<Assets<Animation>>,
 ) {
-    let mut class_walks = std::collections::HashMap::new();
-    for (class, file, frames) in hero_walk_mapping() {
+    let mut weapon_walks = std::collections::HashMap::new();
+    for (weapon, file, frames) in hero_walk_mapping() {
         let image = assets.load(format!("heroes_walk/{}.webp", file));
         let layout = layouts.add(TextureAtlasLayout::from_grid(
             UVec2::splat(128),
@@ -610,23 +576,27 @@ pub fn load_hero_walks(
             None,
             None,
         ));
-        class_walks.insert(
-            *class,
+        let sheet = Spritesheet::new(&image, *frames, 1);
+        weapon_walks.insert(
+            *weapon,
             HeroWalkCfg {
                 image,
                 layout,
                 frames: *frames,
                 size: HERO_WORLD_SIZE,
+                idle_anim: animations.add(hero_idle_animation(&sheet)),
+                walk_anim: animations.add(hero_walk_animation(&sheet, *frames)),
+                attack_anim: animations.add(hero_attack_animation(&sheet, *frames)),
             },
         );
     }
 
     let mut race_worlds = std::collections::HashMap::new();
-    for class in Class::ALL {
+    for weapon in HeroWeapon::ALL {
         for race in Race::ALL {
             let image = assets.load(format!(
                 "heroes_world/{}_{}.webp",
-                class.sprite_name(),
+                weapon.sprite_name(),
                 hero_race_file(race)
             ));
             let layout = layouts.add(TextureAtlasLayout::from_grid(
@@ -636,67 +606,100 @@ pub fn load_hero_walks(
                 None,
                 None,
             ));
+            let sheet = Spritesheet::new(&image, 4, 4);
             race_worlds.insert(
-                (class, race),
+                (weapon, race),
                 HeroWalkCfg {
                     image,
                     layout,
                     frames: 16,
                     size: TILE_SIZE * 1.12,
+                    idle_anim: animations.add(hero_idle_animation(&sheet)),
+                    walk_anim: animations.add(hero_walk_animation(&sheet, 16)),
+                    attack_anim: animations.add(hero_attack_animation(&sheet, 16)),
                 },
             );
         }
     }
 
     commands.insert_resource(HeroWalks {
-        class_walks,
+        weapon_walks,
         race_worlds,
     });
 }
 
-fn hero_world_cfg(walks: &HeroWalks, class: Class, race: Race) -> Option<&HeroWalkCfg> {
+fn hero_idle_animation(sheet: &Spritesheet) -> Animation {
+    sheet
+        .create_animation()
+        .add_cell(0, 0)
+        .set_duration(AnimationDuration::PerFrame(1000))
+        .set_repetitions(AnimationRepeat::Loop)
+        .build()
+}
+
+fn hero_walk_animation(sheet: &Spritesheet, frames: usize) -> Animation {
+    let indices = if frames > 1 {
+        (1..frames).collect::<Vec<_>>()
+    } else {
+        vec![0]
+    };
+    sheet
+        .create_animation()
+        .add_indices(indices)
+        .set_duration(AnimationDuration::PerFrame(90))
+        .set_repetitions(AnimationRepeat::Loop)
+        .build()
+}
+
+fn hero_attack_animation(sheet: &Spritesheet, frames: usize) -> Animation {
+    let last = frames.saturating_sub(1).max(1);
+    let mid = 2.min(last);
+    sheet
+        .create_animation()
+        .add_indices([mid, last, 1.min(last)])
+        .set_duration(AnimationDuration::PerFrame(70))
+        .set_repetitions(AnimationRepeat::Loop)
+        .build()
+}
+
+fn hero_world_cfg(walks: &HeroWalks, weapon: HeroWeapon, race: Race) -> Option<&HeroWalkCfg> {
     walks
         .race_worlds
-        .get(&(class, race))
-        .or_else(|| walks.class_walks.get(&class))
+        .get(&(weapon, race))
+        .or_else(|| walks.weapon_walks.get(&weapon))
 }
 
 /// Advance the hero's walk/attack cycle. Frame 0 is idle; movement cycles the walk
 /// frames, while melee attacks briefly hold generated sword-out frames from the
 /// same sheet so the hero body appears to swing.
 pub fn animate_hero_walk(
-    time: Res<Time>,
-    mut q: Query<(&Tower, &mut HeroWalkAnim, &mut Sprite)>,
+    mut q: Query<(&Tower, &mut HeroWalkAnim, &mut SpritesheetAnimation)>,
     mut last: Local<Vec2>,
 ) {
-    for (t, mut a, mut sprite) in &mut q {
+    for (t, mut a, mut animation) in &mut q {
         if !t.hero {
             continue;
         }
         let pos = t.center();
         let moving = pos.distance(*last) > 0.4;
         *last = pos;
-        let Some(atlas) = &mut sprite.texture_atlas else {
-            continue;
-        };
-        if t.hero_attack_timer > 0.0 && a.frames > 2 {
-            let progress = 1.0 - (t.hero_attack_timer / HERO_MELEE_ATTACK_TIME).clamp(0.0, 1.0);
-            atlas.index = if progress < 0.42 {
-                2.min(a.frames - 1)
-            } else if progress < 0.82 {
-                (a.frames - 1).max(1)
-            } else {
-                1.min(a.frames - 1)
-            };
+        let next = if t.hero_attack_timer > 0.0 {
+            HeroAnimState::Attack
         } else if moving && a.frames > 1 {
-            a.timer.tick(time.delta());
-            if a.timer.just_finished() {
-                // Cycle frames 1..=frames-1 (frame 0 is the idle pose).
-                atlas.index = 1 + (atlas.index % (a.frames - 1));
-            }
+            HeroAnimState::Walk
         } else {
-            atlas.index = 0;
+            HeroAnimState::Idle
+        };
+        if next == a.state {
+            continue;
         }
+        a.state = next;
+        let handle = match next {
+            HeroAnimState::Idle => a.idle.clone(),
+            HeroAnimState::Walk => a.walk.clone(),
+            HeroAnimState::Attack => a.attack.clone(),
+        };
+        animation.switch(handle);
     }
 }
 
@@ -705,7 +708,7 @@ pub fn spawn_hero(
     tower: Tower,
     sprites: &Sprites,
     walks: &HeroWalks,
-    class: Class,
+    weapon: HeroWeapon,
     race: Race,
 ) {
     let pos = tower.hero_pos;
@@ -713,10 +716,12 @@ pub fn spawn_hero(
     let mut ec = commands.spawn((
         tower,
         Transform::from_translation(pos.extend(5.0)),
+        SequentialActions,
+        crate::hero_paperdoll::HeroPaperdollSprite,
         LevelEntity,
     ));
-    if let Some(cfg) = hero_world_cfg(walks, class, race) {
-        // Race-specific world atlas first; old class walk strips are only fallback.
+    if let Some(cfg) = hero_world_cfg(walks, weapon, race) {
+        // Race-specific world atlas first; weapon walk strips are only fallback.
         let mut sprite = Sprite::from_atlas_image(
             cfg.image.clone(),
             TextureAtlas {
@@ -728,15 +733,19 @@ pub fn spawn_hero(
         sprite.custom_size = Some(Vec2::splat(cfg.size));
         ec.insert((
             sprite,
+            SpritesheetAnimation::new(cfg.idle_anim.clone()),
             HeroWalkAnim {
-                timer: Timer::from_seconds(0.10, TimerMode::Repeating),
+                idle: cfg.idle_anim.clone(),
+                walk: cfg.walk_anim.clone(),
+                attack: cfg.attack_anim.clone(),
                 frames: cfg.frames,
+                state: HeroAnimState::Idle,
             },
         ));
     } else {
-        // Fallback: static portrait (classes without a walk sheet yet).
+        // Fallback: static portrait (weapons without a walk sheet yet).
         ec.insert(Sprite {
-            image: sprites.heroes[&class].clone(),
+            image: sprites.heroes[&weapon].clone(),
             color: tint,
             custom_size: Some(Vec2::splat(HERO_WORLD_SIZE)),
             ..default()
@@ -838,7 +847,7 @@ pub fn hero_move(
 
 /// Motion trail: while the hero moves, periodically spawn a fading, tinted copy of
 /// its sprite (afterimage / 身影遁形). This sells movement — without it the hero looks
-/// like it's sliding/floating — and reads as a dash especially for the assassin.
+/// like it's sliding/floating — and reads as a dash especially for the night dagger.
 /// Reuses `Particle` (fades alpha by life/max_life, so starting life<max_life makes
 /// the ghost start translucent) and `update_particles` for the fade + despawn.
 pub fn hero_afterimage(
@@ -847,6 +856,7 @@ pub fn hero_afterimage(
     loadout: Res<HeroLoadout>,
     sprites: Res<Sprites>,
     walks: Res<HeroWalks>,
+    paperdoll: Option<Res<crate::hero_paperdoll::HeroPaperdollRuntime>>,
     heroes: Query<&Tower>,
     mut commands: Commands,
     mut last: Local<Vec2>,
@@ -869,7 +879,15 @@ pub fn hero_afterimage(
     *acc = 0.0;
     // Match the hero's left/right facing so the ghost isn't mirrored wrong.
     let flip = if t.angle.cos() < 0.0 { -1.0 } else { 1.0 };
-    let mut sprite = if let Some(cfg) = hero_world_cfg(&walks, loadout.class, loadout.race) {
+    let mut sprite = if let Some(image) = paperdoll.as_ref().and_then(|runtime| runtime.image()) {
+        Sprite {
+            image,
+            custom_size: Some(Vec2::splat(
+                crate::hero_paperdoll::HERO_PAPERDOLL_GHOST_SIZE,
+            )),
+            ..default()
+        }
+    } else if let Some(cfg) = hero_world_cfg(&walks, loadout.weapon, loadout.race) {
         let mut sprite = Sprite::from_atlas_image(
             cfg.image.clone(),
             TextureAtlas {
@@ -881,7 +899,7 @@ pub fn hero_afterimage(
         sprite
     } else {
         Sprite {
-            image: sprites.heroes[&loadout.class].clone(),
+            image: sprites.heroes[&loadout.weapon].clone(),
             custom_size: Some(Vec2::splat(HERO_GHOST_SIZE)),
             ..default()
         }
@@ -889,7 +907,7 @@ pub fn hero_afterimage(
     sprite.color = loadout
         .race
         .color()
-        .mix(&loadout.class.skill_color(), 0.35)
+        .mix(&loadout.weapon.skill_color(), 0.35)
         .with_alpha(0.58);
     commands.spawn((
         sprite,
@@ -906,21 +924,20 @@ pub fn hero_afterimage(
 
 /// Tap/click handling for the hero: tapping near it selects it; with the hero
 /// selected, tapping open ground commands it to walk there. Building takes
-/// priority (handled in `mouse_build`), and taps over UI are ignored.
+/// priority (handled in `mouse_build`).
 pub fn hero_control(
     mode: Res<crate::ui::TouchMode>,
     buttons: Res<ButtonInput<MouseButton>>,
     touches: Res<Touches>,
     windows: Query<&Window>,
-    camera: Query<(&Camera, &GlobalTransform)>,
+    camera: Query<(&Camera, &GlobalTransform), (With<Camera2d>, With<crate::vfx::ShakeCamera>)>,
     mut sel: ResMut<Selection>,
-    ui_buttons: Query<&Interaction>,
+    mut panels: ResMut<HudPanels>,
     mut heroes: Query<(Entity, &mut Tower)>,
 ) {
     if sel.build_kind.is_some() {
         return; // a tower is armed — that gesture is for building
     }
-    let over_ui = ui_buttons.iter().any(|i| !matches!(*i, Interaction::None));
     let Ok((cam, cam_tf)) = camera.single() else {
         return;
     };
@@ -944,14 +961,16 @@ pub fn hero_control(
 
     // Desktop, Warcraft-style: LEFT-click selects the hero, RIGHT-click commands a
     // move while it is selected. (Mouse is never blocked by the joystick zone.)
-    if buttons.just_pressed(MouseButton::Left) && !over_ui {
+    if buttons.just_pressed(MouseButton::Left) {
         if let Some(world) = win.cursor_position().and_then(raw) {
             if near_hero(world, &hero) {
                 sel.selected = Some(hero_e);
+                panels.hero_open = false;
+                panels.settings_open = false;
             }
         }
     }
-    if buttons.just_pressed(MouseButton::Right) && !over_ui && sel.selected == Some(hero_e) {
+    if buttons.just_pressed(MouseButton::Right) && sel.selected == Some(hero_e) {
         if let Some(world) = win.cursor_position().and_then(raw) {
             hero.move_target = Some(world);
         }
@@ -964,6 +983,8 @@ pub fn hero_control(
             if let Some(world) = to_world_touch(t.position()) {
                 if near_hero(world, &hero) {
                     sel.selected = Some(hero_e);
+                    panels.hero_open = false;
+                    panels.settings_open = false;
                 } else if sel.selected == Some(hero_e) {
                     hero.move_target = Some(world);
                 }
@@ -996,7 +1017,7 @@ pub fn hero_status(
                         vfx.write(crate::vfx::VfxEvent::Burst {
                             pos: hero.center(),
                             radius: 72.0,
-                            color: loadout.class.skill_color(),
+                            color: loadout.weapon.skill_color(),
                         });
                     }
                 }
@@ -1037,7 +1058,7 @@ pub fn auto_spawn_hero(
         tower,
         &sprites,
         &walks,
-        loadout.class,
+        loadout.weapon,
         loadout.race,
     );
     loadout.alive = true;
@@ -1064,7 +1085,7 @@ pub fn hero_respawn(
         tower,
         &sprites,
         &walks,
-        loadout.class,
+        loadout.weapon,
         loadout.race,
     );
     loadout.alive = true;
@@ -1103,6 +1124,15 @@ pub fn update_tower_hp_bars(
             tf.translation.z = 6.2;
             tf.scale.x = 1.0;
         }
+    }
+}
+
+pub fn update_tower_upgrade_visuals(mut towers: Query<(&Tower, &mut Sprite), Without<TowerHpBar>>) {
+    for (tower, mut sprite) in &mut towers {
+        if tower.hero {
+            continue;
+        }
+        sprite.custom_size = Some(Vec2::splat(tower_visual_size(tower)));
     }
 }
 
@@ -1406,11 +1436,11 @@ pub fn draw_range_gizmos(
     run: Res<RunState>,
     towers: Query<&Tower>,
     windows: Query<&Window>,
-    camera: Query<(&Camera, &GlobalTransform)>,
+    camera: Query<(&Camera, &GlobalTransform), (With<Camera2d>, With<crate::vfx::ShakeCamera>)>,
 ) {
     if let Some(e) = sel.selected {
         if let Ok(t) = towers.get(e) {
-            // Show the effective range (includes a Warden hero's range aura).
+            // Show the effective range (includes a Sentry Crossbow hero's range aura).
             let r = t.range * (1.0 + t.aura_range);
             gizmos.circle_2d(t.center(), r, Color::WHITE.with_alpha(0.4));
             if t.aura_range > 0.0 {

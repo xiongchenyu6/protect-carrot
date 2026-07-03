@@ -15,7 +15,7 @@ pub enum GameState {
     Story,
     /// Pre-level briefing: lore, threat intel, and animated tactical transition.
     Briefing,
-    /// Hero deploy cutscene: the chosen class×race portrait reveal before the level.
+    /// Hero deploy cutscene: the chosen weapon×race portrait reveal before the level.
     HeroIntro,
     /// Actively playing a level. (Pause is a separate `Paused` resource flag so
     /// toggling it does not re-trigger `OnEnter(Playing)` / reload the level.)
@@ -32,7 +32,7 @@ pub enum GameState {
     Milestones,
     /// Campaign lore and level threat dossier (reached from the menu).
     CampaignDossier,
-    /// Hero codex: browse all classes × races, read doctrines/skills/ultimates, and
+    /// Hero codex: browse all weapons × races, read doctrines/skills/ultimates, and
     /// pick the deploy hero (moved off the cluttered main menu).
     HeroCodex,
 }

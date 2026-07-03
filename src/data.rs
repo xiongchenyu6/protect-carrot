@@ -1125,6 +1125,45 @@ pub struct LevelTheme {
     pub seal: Color,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LevelWeather {
+    VerdantDusk,
+    MarshMist,
+    Starfall,
+    MoonlitGorge,
+    EmberDust,
+    Sandstorm,
+    Blizzard,
+    BloodRain,
+    RottenCanopy,
+    VioletFog,
+    DeepNight,
+    ThunderRift,
+}
+
+pub const LEVEL_WEATHERS: [LevelWeather; 20] = [
+    LevelWeather::VerdantDusk,
+    LevelWeather::MarshMist,
+    LevelWeather::Starfall,
+    LevelWeather::MoonlitGorge,
+    LevelWeather::RottenCanopy,
+    LevelWeather::Sandstorm,
+    LevelWeather::Blizzard,
+    LevelWeather::EmberDust,
+    LevelWeather::VerdantDusk,
+    LevelWeather::VioletFog,
+    LevelWeather::DeepNight,
+    LevelWeather::ThunderRift,
+    LevelWeather::BloodRain,
+    LevelWeather::MoonlitGorge,
+    LevelWeather::VioletFog,
+    LevelWeather::MarshMist,
+    LevelWeather::Starfall,
+    LevelWeather::DeepNight,
+    LevelWeather::ThunderRift,
+    LevelWeather::BloodRain,
+];
+
 /// Visual mood for each campaign level. These are intentionally data-only so the
 /// board renderer can make every stage feel like a different Lovecraftian front
 /// without hardcoding level-specific branches.
@@ -1371,7 +1410,7 @@ pub fn levels() -> Vec<Level> {
                 reward: 8.0,
                 count: 4,
             },
-            spawn_interval_ms: 1200.0,
+            spawn_interval_ms: 900.0,
         },
         Level {
             name: "蜿蜒小径",
@@ -1398,11 +1437,11 @@ pub fn levels() -> Vec<Level> {
                 reward: 9.0,
                 count: 5,
             },
-            spawn_interval_ms: 1100.0,
+            spawn_interval_ms: 850.0,
         },
         Level {
             name: "森林迷宫",
-            gold: 220,
+            gold: 205,
             lives: 10,
             waves: 7,
             path: p(&[
@@ -1424,14 +1463,14 @@ pub fn levels() -> Vec<Level> {
             enemies: EnemyBase {
                 hp: 100.0,
                 speed: 1.4,
-                reward: 10.0,
-                count: 5,
+                reward: 9.0,
+                count: 8,
             },
-            spawn_interval_ms: 1000.0,
+            spawn_interval_ms: 720.0,
         },
         Level {
             name: "湖边防线",
-            gold: 250,
+            gold: 230,
             lives: 10,
             waves: 8,
             path: p(&[
@@ -1451,10 +1490,10 @@ pub fn levels() -> Vec<Level> {
             enemies: EnemyBase {
                 hp: 130.0,
                 speed: 1.5,
-                reward: 11.0,
-                count: 6,
+                reward: 10.0,
+                count: 8,
             },
-            spawn_interval_ms: 950.0,
+            spawn_interval_ms: 720.0,
         },
         Level {
             name: "山谷伏击",
@@ -1479,9 +1518,9 @@ pub fn levels() -> Vec<Level> {
                 hp: 160.0,
                 speed: 1.6,
                 reward: 12.0,
-                count: 6,
+                count: 7,
             },
-            spawn_interval_ms: 900.0,
+            spawn_interval_ms: 700.0,
         },
         Level {
             name: "沙漠风暴",
@@ -1503,12 +1542,12 @@ pub fn levels() -> Vec<Level> {
                 (19, 1),
             ]),
             enemies: EnemyBase {
-                hp: 200.0,
-                speed: 1.8,
+                hp: 185.0,
+                speed: 1.7,
                 reward: 13.0,
                 count: 7,
             },
-            spawn_interval_ms: 850.0,
+            spawn_interval_ms: 780.0,
         },
         Level {
             name: "雪域奇缘",
@@ -1564,7 +1603,7 @@ pub fn levels() -> Vec<Level> {
                 reward: 15.0,
                 count: 8,
             },
-            spawn_interval_ms: 750.0,
+            spawn_interval_ms: 840.0,
         },
         Level {
             name: "幽暗沼泽",
@@ -1588,12 +1627,12 @@ pub fn levels() -> Vec<Level> {
                 (19, 6),
             ]),
             enemies: EnemyBase {
-                hp: 360.0,
-                speed: 2.1,
+                hp: 330.0,
+                speed: 2.0,
                 reward: 16.0,
                 count: 8,
             },
-            spawn_interval_ms: 700.0,
+            spawn_interval_ms: 760.0,
         },
         Level {
             name: "龙之谷",
@@ -1617,12 +1656,12 @@ pub fn levels() -> Vec<Level> {
                 (19, 7),
             ]),
             enemies: EnemyBase {
-                hp: 450.0,
-                speed: 2.3,
+                hp: 430.0,
+                speed: 2.2,
                 reward: 18.0,
                 count: 9,
             },
-            spawn_interval_ms: 650.0,
+            spawn_interval_ms: 760.0,
         },
         Level {
             name: "天空回廊",
@@ -1642,12 +1681,12 @@ pub fn levels() -> Vec<Level> {
                 (19, 10),
             ]),
             enemies: EnemyBase {
-                hp: 520.0,
-                speed: 2.4,
+                hp: 480.0,
+                speed: 2.25,
                 reward: 19.0,
                 count: 9,
             },
-            spawn_interval_ms: 600.0,
+            spawn_interval_ms: 700.0,
         },
         Level {
             name: "水晶洞穴",
@@ -1669,12 +1708,12 @@ pub fn levels() -> Vec<Level> {
                 (19, 3),
             ]),
             enemies: EnemyBase {
-                hp: 600.0,
-                speed: 2.5,
+                hp: 550.0,
+                speed: 2.35,
                 reward: 20.0,
                 count: 10,
             },
-            spawn_interval_ms: 580.0,
+            spawn_interval_ms: 690.0,
         },
         Level {
             name: "熔岩地狱",
@@ -1725,12 +1764,12 @@ pub fn levels() -> Vec<Level> {
                 (19, 6),
             ]),
             enemies: EnemyBase {
-                hp: 800.0,
-                speed: 2.7,
+                hp: 760.0,
+                speed: 2.55,
                 reward: 24.0,
-                count: 11,
+                count: 10,
             },
-            spawn_interval_ms: 540.0,
+            spawn_interval_ms: 620.0,
         },
         Level {
             name: "荆棘丛林",
@@ -1752,12 +1791,12 @@ pub fn levels() -> Vec<Level> {
                 (19, 4),
             ]),
             enemies: EnemyBase {
-                hp: 920.0,
-                speed: 2.8,
+                hp: 830.0,
+                speed: 2.6,
                 reward: 26.0,
-                count: 11,
+                count: 10,
             },
-            spawn_interval_ms: 520.0,
+            spawn_interval_ms: 650.0,
         },
         Level {
             name: "遗迹守卫",
@@ -1780,11 +1819,11 @@ pub fn levels() -> Vec<Level> {
             ]),
             enemies: EnemyBase {
                 hp: 1050.0,
-                speed: 2.9,
+                speed: 2.85,
                 reward: 28.0,
                 count: 12,
             },
-            spawn_interval_ms: 500.0,
+            spawn_interval_ms: 520.0,
         },
         Level {
             name: "风暴之巅",
@@ -1804,12 +1843,12 @@ pub fn levels() -> Vec<Level> {
                 (19, 6),
             ]),
             enemies: EnemyBase {
-                hp: 1200.0,
-                speed: 3.0,
+                hp: 1100.0,
+                speed: 2.8,
                 reward: 30.0,
                 count: 12,
             },
-            spawn_interval_ms: 480.0,
+            spawn_interval_ms: 560.0,
         },
         Level {
             name: "虚空裂隙",
@@ -1831,12 +1870,12 @@ pub fn levels() -> Vec<Level> {
                 (19, 3),
             ]),
             enemies: EnemyBase {
-                hp: 1400.0,
-                speed: 3.1,
+                hp: 1180.0,
+                speed: 2.9,
                 reward: 33.0,
-                count: 13,
+                count: 12,
             },
-            spawn_interval_ms: 460.0,
+            spawn_interval_ms: 600.0,
         },
         Level {
             name: "末日堡垒",
@@ -1863,7 +1902,7 @@ pub fn levels() -> Vec<Level> {
                 reward: 36.0,
                 count: 13,
             },
-            spawn_interval_ms: 440.0,
+            spawn_interval_ms: 540.0,
         },
         Level {
             name: "萝卜保卫战",
@@ -1887,42 +1926,38 @@ pub fn levels() -> Vec<Level> {
                 (19, 7),
             ]),
             enemies: EnemyBase {
-                hp: 2200.0,
+                hp: 2300.0,
                 speed: 3.5,
                 reward: 40.0,
                 count: 15,
             },
-            spawn_interval_ms: 400.0,
+            spawn_interval_ms: 390.0,
         },
     ];
-    // Baked per-level economy from the Layer-3 optimizer (`sim … opt`): the minimum
-    // starting gold + kill reward at which the greedy player can clear each level,
-    // replacing the original near-linear curve that left levels 10+ unwinnable
-    // against geometric HP scaling. Re-baked after the tiered-skill enemy buffs
-    // (split generations, flying short-cut, scaled regen/shield/armor): the curve
-    // follows a descending target win-rate (0.95→0.57) so later levels stay tense
-    // without being gold-starved; 11 & 15 are composition spikes already high.
+    // Baked per-level economy from the Layer-3 optimizer (`sim ... opt`), then
+    // hand-trimmed after roguelite talents and the hero baseline were added. The
+    // goal is to avoid mid-campaign gold snowball while keeping 16/17 playable.
     const ECON: [(i32, f32); 20] = [
         (180, 8.0),
         (200, 9.0),
-        (220, 10.0),
-        (250, 12.0),
-        (280, 12.0),
-        (300, 13.0),
-        (320, 15.0),
-        (364, 18.0),
-        (437, 22.0),
-        (546, 27.0),
-        (800, 40.0),
-        (923, 46.0),
-        (1076, 54.0),
-        (1100, 55.0),
-        (1564, 78.0),
-        (1444, 72.0),
-        (1650, 83.0),
-        (1925, 96.0),
-        (2338, 117.0),
-        (3025, 151.0),
+        (205, 9.0),
+        (230, 10.0),
+        (275, 11.0),
+        (320, 14.0),
+        (315, 13.0),
+        (410, 18.0),
+        (580, 26.0),
+        (630, 29.0),
+        (800, 37.0),
+        (900, 42.0),
+        (980, 45.0),
+        (1160, 54.0),
+        (1500, 70.0),
+        (1600, 80.0),
+        (1800, 90.0),
+        (2050, 96.0),
+        (2500, 126.0),
+        (2600, 132.0),
     ];
     for (i, lvl) in levels.iter_mut().enumerate() {
         if let Some(&(gold, reward)) = ECON.get(i) {

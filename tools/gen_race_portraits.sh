@@ -5,7 +5,7 @@
 set -u
 cd "$(dirname "$0")/.."
 mkdir -p /tmp/rp assets/sprites/heroes_combo
-CLASSES="warrior mage ranger guardian stormcaller warden assassin priest engineer"
+CLASSES="warrior mage ranger guardian stormcaller warden assassin summoner engineer"
 ELF="Make this character a NIGHT ELF. DRAMATICALLY change the face and head: very LONG POINTED elf ears, pale lavender skin, slender delicate face, glowing eyes, long flowing hair. Keep the same class outfit, armor and weapons and pose."
 ORC="Make this character a brutal ORC. DRAMATICALLY change the face and skin: BRIGHT GREEN skin, two large white TUSKS jutting up from the lower jaw, heavy jaw, bulky muscular brute, fierce scowl. Keep the same class outfit, armor and weapons and pose."
 GUID=4.0

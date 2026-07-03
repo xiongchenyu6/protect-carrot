@@ -10,6 +10,7 @@ use crate::equipment::{
     EquipmentInventory, Rarity, equipment_set_bonus, return_equipment_to_inventory, roll_drop,
 };
 use crate::game::{AUTO_WAVE_DELAY, CurrentLevel, KILL_COMBO_WINDOW, Rng, RunState};
+use crate::hero::{HeroLoadout, HeroWeapon};
 use crate::monster::{
     BossSkill, EliteAffix, MONSTER_SPECIES, MonsterSpecies, boss_skill, default_species_id,
     pick_boss, pick_elite_affix, pick_regular, species_by_id,
@@ -24,6 +25,65 @@ const HEAL_AURA_RADIUS: f32 = 90.0;
 const BOSS_CAST_WINDUP: f32 = 0.75;
 const BOSS_ENRAGE_HP_FRACTION: f32 = 0.35;
 const BOSS_ENRAGE_SKILL_RATE: f32 = 1.55;
+const CAMPAIGN_HP_PRESSURE_BASE: f32 = 1.09;
+const CAMPAIGN_HP_PRESSURE_WAVE: f32 = 0.20;
+const CAMPAIGN_HP_PRESSURE_LEVEL: f32 = 0.07;
+const CAMPAIGN_LEVEL_PRESSURE: [f32; 20] = [
+    1.62, 1.68, 1.88, 1.78, 1.66, 1.72, 1.36, 1.40, 1.42, 1.28, 1.42, 1.34, 1.54, 1.28, 1.56, 1.16,
+    1.18, 1.30, 1.17, 1.14,
+];
+
+fn campaign_hp_pressure(wave: i32, level_index: usize, endless: bool) -> f32 {
+    if endless {
+        return 1.0;
+    }
+    let wave_t = ((wave - 1).max(0) as f32 / 17.0).clamp(0.0, 1.0);
+    let level_t = (level_index as f32 / 18.0).clamp(0.0, 1.0);
+    let level_pressure = CAMPAIGN_LEVEL_PRESSURE
+        .get(level_index)
+        .copied()
+        .unwrap_or(1.0);
+    (CAMPAIGN_HP_PRESSURE_BASE
+        + CAMPAIGN_HP_PRESSURE_WAVE * wave_t
+        + CAMPAIGN_HP_PRESSURE_LEVEL * level_t)
+        * level_pressure
+}
+
+fn hero_build_pressure(loadout: &HeroLoadout, level_index: usize, endless: bool) -> f32 {
+    if endless {
+        return 1.0;
+    }
+
+    let expected_level = 1.0 + level_index as f32 * 1.15;
+    let overlevel = ((loadout.level as f32 - expected_level) / 24.0).clamp(0.0, 1.0);
+    let gear = (loadout.gear_count() as f32 / crate::hero_gear::HeroGearSlot::COUNT as f32)
+        .clamp(0.0, 1.0);
+    let talent_cap =
+        (HeroLoadout::TALENT_SLOTS as f32 * HeroLoadout::TALENT_MAX_RANK as f32).max(1.0);
+    let talents = (loadout.spent_in_current_weapon() as f32 / talent_cap).clamp(0.0, 1.0);
+    let affinity = (crate::hero_gear::weapon_affinity_count(&loadout.gear, loadout.weapon) as f32
+        / crate::hero_gear::HeroGearSlot::COUNT as f32)
+        .clamp(0.0, 1.0);
+    let stats = crate::hero_gear::active_stats_for_weapon(&loadout.gear, loadout.weapon);
+    let offensive = ((stats.damage_mult * stats.skill_mult / stats.cooldown_mult.max(0.35)) - 1.0)
+        .clamp(0.0, 1.35)
+        / 1.35;
+    let extra =
+        overlevel * 0.10 + gear * 0.06 + talents * 0.05 + affinity * 0.05 + offensive * 0.08;
+    let weapon_pressure = match loadout.weapon {
+        HeroWeapon::StarfireStaff => 0.58,
+        HeroWeapon::ShadowBow => 0.58,
+        HeroWeapon::StormOrb => 0.48,
+        HeroWeapon::SentryCrossbow => 0.78,
+        HeroWeapon::SummonStaff => 0.78,
+        HeroWeapon::BannerSword => 0.52,
+        HeroWeapon::OathShield => 0.78,
+        HeroWeapon::ForgeHammer => 0.92,
+        HeroWeapon::NightDagger => 0.30,
+    };
+
+    (1.0 + extra * weapon_pressure).clamp(1.0, 1.35)
+}
 
 fn enemy_visual_px(size: f32, boss: bool, elite: bool) -> f32 {
     let base = if boss {
@@ -34,6 +94,79 @@ fn enemy_visual_px(size: f32, boss: bool, elite: bool) -> f32 {
         (size * 10.0).clamp(TILE_SIZE * 1.9, TILE_SIZE * 3.0)
     };
     base * if elite { 1.22 } else { 1.0 }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hero::{HeroRunMods, Race};
+    use crate::hero_gear::{self, HeroGear};
+
+    fn test_loadout(
+        level: u8,
+        weapon: HeroWeapon,
+        gear: [Option<HeroGear>; hero_gear::HeroGearSlot::COUNT],
+        rank: u8,
+    ) -> HeroLoadout {
+        let mut talents = [[0; HeroLoadout::TALENT_SLOTS]; HeroWeapon::ALL.len()];
+        let weapon_index = HeroWeapon::ALL
+            .iter()
+            .position(|candidate| *candidate == weapon)
+            .unwrap_or(0);
+        for slot in 0..HeroLoadout::TALENT_SLOTS {
+            if slot != weapon.ult_slot() {
+                talents[weapon_index][slot] = rank;
+            }
+        }
+        HeroLoadout {
+            race: Race::Human,
+            weapon,
+            level,
+            xp: 0,
+            talent_points: 0,
+            weapon_talents: talents,
+            gear,
+            skill_cd: 0,
+            run_mods: HeroRunMods::default(),
+            alive: false,
+            respawn_waves: 0,
+        }
+    }
+
+    #[test]
+    fn baseline_hero_does_not_raise_campaign_pressure() {
+        let loadout = test_loadout(1, HeroWeapon::BannerSword, hero_gear::empty_gear(), 0);
+        assert!((hero_build_pressure(&loadout, 0, false) - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn mature_resonant_ranged_build_raises_campaign_pressure() {
+        let gear = [
+            Some(HeroGear::StarweaveRobe),
+            Some(HeroGear::EmberPrayer),
+            Some(HeroGear::SentryScope),
+            Some(HeroGear::StarpathSandals),
+        ];
+        let loadout = test_loadout(18, HeroWeapon::StarfireStaff, gear, 3);
+        let pressure = hero_build_pressure(&loadout, 11, false);
+        assert!(
+            pressure > 1.12,
+            "expected mature resonant ranged build to raise enemy pressure, got {pressure}"
+        );
+        assert!(pressure <= 1.35);
+    }
+
+    #[test]
+    fn endless_uses_its_own_scaling() {
+        let gear = [
+            Some(HeroGear::StarweaveRobe),
+            Some(HeroGear::EmberPrayer),
+            Some(HeroGear::SentryScope),
+            Some(HeroGear::StarpathSandals),
+        ];
+        let loadout = test_loadout(30, HeroWeapon::StarfireStaff, gear, 5);
+        assert!((hero_build_pressure(&loadout, 0, true) - 1.0).abs() < f32::EPSILON);
+    }
 }
 
 #[derive(Component)]
@@ -97,6 +230,7 @@ fn spawn_one(
     diff: crate::game::Difficulty,
     elite_affix: EliteAffix,
     endless: bool,
+    build_pressure: f32,
     // 孵化升级用：在指定位置/路径进度处生成（高级孵化原地变身为 boss）。
     // None 表示常规从出生点入场。
     start_at: Option<(Vec2, usize)>,
@@ -131,6 +265,11 @@ fn spawn_one(
     } else {
         1.0
     };
+    let campaign_melee = if endless {
+        1.0
+    } else {
+        1.0 + (wave - 1).max(0) as f32 * 0.08 + level_index as f32 * 0.035
+    };
     let elite_hp = if is_elite { 2.6 } else { 1.0 };
     let elite_rw = if is_elite { 3.0 } else { 1.0 };
     let affix_hp = match elite_affix {
@@ -146,12 +285,14 @@ fn spawn_one(
     };
     let hp = (level_hp
         * wave_mult
+        * campaign_hp_pressure(wave, level_index, endless)
         * def.hp_mod
         * species.hp_mult
         * diff.hp_mult()
         * endless_hp
         * elite_hp
-        * affix_hp)
+        * affix_hp
+        * build_pressure)
         .floor();
     // px/sec: original moved `speed*dt/16` with speed = level.speed*TILE/60*mod.
     let base_speed =
@@ -306,8 +447,8 @@ fn spawn_one(
         sprite.custom_size = Some(Vec2::splat(px));
         (sprite, None)
     } else {
-        let (sprite, anim) = creatures.sprite(kind, px);
-        (sprite, Some(anim))
+        let (sprite, anim, sheet_anim) = creatures.sprite(kind, px);
+        (sprite, Some((anim, sheet_anim)))
     };
     if is_elite {
         sprite.color = elite_affix_color(elite_affix);
@@ -364,7 +505,8 @@ fn spawn_one(
             } else {
                 6.0 + def.hp_mod * 6.0
             }) * melee_mult
-                * endless_melee,
+                * endless_melee
+                * campaign_melee,
             elite: is_elite,
             elite_affix,
             boss_skill_timer: if def.boss {
@@ -398,8 +540,8 @@ fn spawn_one(
         Transform::from_translation(start.extend(5.0)),
         LevelEntity,
     ));
-    if let Some(anim) = creature_anim {
-        spawned.insert(anim);
+    if let Some((anim, sheet_anim)) = creature_anim {
+        spawned.insert((anim, sheet_anim));
     }
     spawned.with_children(|p| {
         // HP bar background (dark) + foreground (green, anchored left so it
@@ -602,11 +744,14 @@ pub fn spawn_enemies(
     diff: Res<crate::game::GameDifficulty>,
     mut next: ResMut<NextState<GameState>>,
     mut vfx: MessageWriter<crate::vfx::VfxEvent>,
+    mut roguelite: ResMut<crate::roguelite::RogueliteRun>,
+    loadout: Res<crate::hero::HeroLoadout>,
 ) {
     if !run.wave_in_progress {
         return;
     }
     let level = &levels.0[current.0];
+    let build_pressure = hero_build_pressure(&loadout, current.0, run.is_endless());
 
     run.spawn_timer += time.delta_secs() * run.game_speed;
     if run.spawn_timer >= run.spawn_interval && run.spawned < run.spawn_target {
@@ -627,14 +772,20 @@ pub fn spawn_enemies(
             pick_regular(run.wave, current.0, &mut rng)
         };
         // Elite chance grows with wave & difficulty (bosses are never "elite").
-        let elite_cap = if run.is_endless() { 0.75 } else { 0.5 };
+        let elite_cap = if run.is_endless() {
+            0.75
+        } else {
+            (0.58 + current.0.saturating_sub(16) as f32 * 0.01).min(0.61)
+        };
         let endless_elite_bonus = if run.is_endless() {
             run.wave as f32 * 0.003
         } else {
             0.0
         };
         let elite_chance = if run.wave >= 4 {
-            ((0.04 + run.wave as f32 * 0.012 + endless_elite_bonus) * diff.0.elite_mult())
+            ((0.075 + run.wave as f32 * 0.019 + current.0 as f32 * 0.0016 + endless_elite_bonus)
+                * diff.0.elite_mult()
+                * (1.0 + (build_pressure - 1.0) * 1.35))
                 .min(elite_cap)
         } else {
             0.0
@@ -661,6 +812,7 @@ pub fn spawn_enemies(
             diff.0,
             elite_affix,
             run.is_endless(),
+            build_pressure,
             None,
         );
         // Dramatic boss entrance: heavy shockwave + shake + banner at the gate.
@@ -669,7 +821,7 @@ pub fn spawn_enemies(
             vfx.write(crate::vfx::VfxEvent::BossEntrance {
                 pos: entrance,
                 color: boss_skill_color(boss_skill(species.id)),
-                name: species.name.to_string(),
+                name: crate::i18n::t(species.name),
             });
         }
         if first_encounter {
@@ -765,7 +917,27 @@ pub fn spawn_enemies(
                     gold: perfect_bonus,
                 });
             }
-            if run.auto_wave {
+            let draft_offered = roguelite.offer_wave_draft(&loadout, run.wave, &mut rng);
+            if draft_offered {
+                run.auto_wave_timer = 0.0;
+                if perfect_bonus > 0 {
+                    run.show_for(
+                        crate::i18n::tf(
+                            "波次完成！利息 +{}，完美防守 +{} · 选择一个构筑天赋",
+                            &[&interest.to_string(), &perfect_bonus.to_string()],
+                        ),
+                        2.6,
+                    );
+                } else {
+                    run.show_for(
+                        crate::i18n::tf(
+                            "波次完成！利息 +{} · 选择一个构筑天赋",
+                            &[&interest.to_string()],
+                        ),
+                        2.6,
+                    );
+                }
+            } else if run.auto_wave {
                 run.auto_wave_timer = AUTO_WAVE_DELAY;
                 if perfect_bonus > 0 {
                     run.show_for(
@@ -1078,7 +1250,7 @@ fn damage_towers_in_radius(
             pos,
             amount: actual,
             color,
-            label: source_label,
+            label: crate::i18n::t(source_label),
         });
         let hp_frac = if tower.max_hp > 0.0 {
             (tower.hp / tower.max_hp).clamp(0.0, 1.0)
@@ -1328,7 +1500,7 @@ pub fn boss_specials(
             pos,
             radius,
             color,
-            label: skill.name(),
+            label: crate::i18n::t(skill.name()),
         });
     }
 
@@ -1672,6 +1844,8 @@ pub fn update_enemies(
             if e.stun_timer <= 0.0 {
                 e.frozen = false;
             }
+        } else if e.frozen {
+            e.frozen = false;
         }
         if e.slow_timer > 0.0 {
             e.slow_timer -= dt;
@@ -1693,7 +1867,25 @@ pub fn update_enemies(
             }
         }
         let pos = tf.translation.truncate();
-        let explosive_target = if e.explosive && !e.frozen && e.hp > 0.0 {
+        let mut invisible_route_moved = false;
+        if e.invisible && !e.frozen && !e.blocked && e.path_index < last {
+            let target = path[e.path_index + 1];
+            let delta = target - pos;
+            let dist = delta.length();
+            if dist < 5.0 {
+                tf.translation.x = target.x;
+                tf.translation.y = target.y;
+                e.path_index += 1;
+            } else if dist > 0.5 {
+                let unit = delta / dist;
+                e.facing = unit;
+                let step = unit * (speed * dt).min(dist);
+                tf.translation.x += step.x;
+                tf.translation.y += step.y;
+            }
+            invisible_route_moved = true;
+        }
+        let explosive_target = if !e.invisible && e.explosive && !e.frozen && e.hp > 0.0 {
             let nearest = tower_positions
                 .iter()
                 .filter_map(|tpos| {
@@ -1721,7 +1913,7 @@ pub fn update_enemies(
         } else {
             None
         };
-        if !e.frozen && !e.blocked && e.path_index < last {
+        if !invisible_route_moved && !e.frozen && !e.blocked && e.path_index < last {
             // Flying units ignore the winding ground path and beeline straight to
             // the carrot (the final path point) — the shortest possible route.
             let target = if e.flying {
@@ -1777,7 +1969,7 @@ pub fn update_enemies(
                 let step_len = (speed * mult * dt).min(dist);
                 if dist > 0.5 {
                     let unit = delta / dist;
-                    e.facing = unit; // for assassin backstab detection
+                    e.facing = unit; // for night dagger backstab detection
                     let step = unit * step_len;
                     tf.translation.x += step.x;
                     tf.translation.y += step.y;
@@ -1856,13 +2048,13 @@ pub fn update_enemies(
                             vfx.write(crate::vfx::VfxEvent::Burst {
                                 pos: tower.center(),
                                 radius: 74.0,
-                                color: hero_loadout.class.skill_color(),
+                                color: hero_loadout.weapon.skill_color(),
                             });
                         } else if xp >= 50 {
                             vfx.write(crate::vfx::VfxEvent::Text {
                                 pos: tower.center() + Vec2::new(0.0, 24.0),
                                 text: crate::i18n::tf("英雄经验 +{}", &[&xp.to_string()]),
-                                color: hero_loadout.class.skill_color(),
+                                color: hero_loadout.weapon.skill_color(),
                                 size: 14.0,
                                 life: 0.85,
                             });
@@ -1900,7 +2092,7 @@ pub fn update_enemies(
                     } else {
                         Color::srgb(1.0, 0.86, 0.3)
                     },
-                    label: "金",
+                    label: crate::i18n::t("金"),
                 });
             }
             let combo = run.kill_combo;
@@ -1989,7 +2181,7 @@ pub fn update_enemies(
 fn spawn_splinter(commands: &mut Commands, creatures: &Creatures, parent: &Enemy, pos: Vec2) {
     let size = (parent.size * 0.5).max(6.0);
     let hp = (parent.max_hp * 0.5).max(6.0);
-    let (sprite, anim) = creatures.sprite(parent.kind, size * 4.5);
+    let (sprite, anim, sheet_anim) = creatures.sprite(parent.kind, size * 4.5);
     commands.spawn((
         Enemy {
             kind: parent.kind,
@@ -2058,6 +2250,7 @@ fn spawn_splinter(commands: &mut Commands, creatures: &Creatures, parent: &Enemy
         },
         sprite,
         anim,
+        sheet_anim,
         Transform::from_translation(pos.extend(5.0)),
         LevelEntity,
     ));
@@ -2074,7 +2267,7 @@ fn spawn_child(
 ) {
     let def = EnemyKind::Swarmer.def();
     let size = def.size * 0.9;
-    let (sprite, anim) = creatures.sprite(EnemyKind::Swarmer, size * 4.5);
+    let (sprite, anim, sheet_anim) = creatures.sprite(EnemyKind::Swarmer, size * 4.5);
     commands.spawn((
         Enemy {
             kind: EnemyKind::Swarmer,
@@ -2143,6 +2336,7 @@ fn spawn_child(
         },
         sprite,
         anim,
+        sheet_anim,
         Transform::from_translation(pos.extend(5.0)),
         LevelEntity,
     ));
@@ -2168,6 +2362,7 @@ pub fn incubation(
     creatures: Res<Creatures>,
     font: Res<UiFont>,
     diff: Res<crate::game::GameDifficulty>,
+    loadout: Res<HeroLoadout>,
     mut enemies: Query<(Entity, &mut Enemy, &mut Transform, &mut Sprite)>,
     mut vfx: MessageWriter<crate::vfx::VfxEvent>,
 ) {
@@ -2178,6 +2373,7 @@ pub fn incubation(
     const INCUBATE_PERIOD: f32 = 6.0;
     const MAX_INCUBATE_STACKS: i32 = 4;
     let level = &levels.0[current.0];
+    let build_pressure = hero_build_pressure(&loadout, current.0, run.is_endless());
     for (entity, mut e, tf, mut sprite) in &mut enemies {
         // 已经是 boss（含刚孵化出来的）不再孵化。
         if !e.incubate || e.boss {
@@ -2210,12 +2406,13 @@ pub fn incubation(
                 diff.0,
                 EliteAffix::None,
                 run.is_endless(),
+                build_pressure,
                 Some((pos, path_index)),
             );
             vfx.write(crate::vfx::VfxEvent::BossEntrance {
                 pos,
                 color: boss_skill_color(boss_skill(boss.id)),
-                name: boss.name.to_string(),
+                name: crate::i18n::t(boss.name),
             });
         } else if e.incubate_stacks < MAX_INCUBATE_STACKS {
             // 普通/中级：叠加一层强化（中级 ×1.55，普通 ×1.32）。

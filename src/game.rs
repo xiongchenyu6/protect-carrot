@@ -301,6 +301,7 @@ pub fn load_level(
     mut materials: ResMut<Assets<ColorMaterial>>,
     assets: Res<AssetServer>,
     sprites: Res<crate::sprites::Sprites>,
+    lighting: Res<crate::lighting::LightingSettings>,
 ) {
     for mut tower in &mut old_towers {
         unequip_all_to_inventory(&mut inv, &mut tower);
@@ -355,6 +356,7 @@ pub fn load_level(
         &mut materials,
         bg,
         &sprites,
+        &lighting,
     );
 
     commands.insert_resource(board);
@@ -370,6 +372,7 @@ fn draw_board(
     materials: &mut Assets<ColorMaterial>,
     bg: Handle<Image>,
     sprites: &crate::sprites::Sprites,
+    lighting: &crate::lighting::LightingSettings,
 ) {
     let theme = LEVEL_THEMES
         .get(board.level_index)
@@ -445,6 +448,8 @@ fn draw_board(
         ));
     }
 
+    draw_map_decoration(commands, board, theme, meshes, materials, lighting);
+
     let spawn = board.spawn_pos();
     commands.spawn((
         Sprite {
@@ -498,6 +503,225 @@ fn draw_board(
         Anchor::CENTER_LEFT,
         Transform::from_translation(bar_pos.extend(3.3)),
         CarrotSealBar { width: bar_width },
+        LevelEntity,
+    ));
+
+    crate::lighting::spawn_level_lighting(commands, board, theme, lighting);
+}
+
+fn draw_map_decoration(
+    commands: &mut Commands,
+    board: &Board,
+    theme: crate::data::LevelTheme,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<ColorMaterial>,
+    lighting: &crate::lighting::LightingSettings,
+) {
+    let path_cells = expanded_path_cells(board);
+    let mut torches = 0;
+    let torch_limit = 3 + (board.level_index % 2) as i32;
+    for y in 0..ROWS {
+        for x in 0..COLS {
+            if !board.buildable.contains(&(x, y)) {
+                continue;
+            }
+            if edge_cell(x, y) {
+                continue;
+            }
+            let dist = distance_to_path((x, y), &path_cells);
+            let hash = decor_hash(board.level_index, x, y, 0x9e37_79b9);
+            if dist == 1 && torches < torch_limit && hash % 17 == 0 {
+                draw_torch(commands, x, y, board, theme, meshes, materials, lighting);
+                torches += 1;
+                continue;
+            }
+
+            if dist > 3 {
+                continue;
+            }
+            match hash % 17 {
+                0 | 1 => draw_rock(commands, x, y, board, theme, meshes, materials, hash),
+                2 => draw_roots(commands, x, y, board, theme, hash),
+                3 if dist <= 2 => draw_ground_crack(commands, x, y, board, theme, hash),
+                _ => {}
+            }
+        }
+    }
+}
+
+fn expanded_path_cells(board: &Board) -> HashSet<(i32, i32)> {
+    let mut cells = HashSet::new();
+    for x in 0..COLS {
+        for y in 0..ROWS {
+            if !board.buildable.contains(&(x, y)) {
+                cells.insert((x, y));
+            }
+        }
+    }
+    cells
+}
+
+fn distance_to_path(cell: (i32, i32), path_cells: &HashSet<(i32, i32)>) -> i32 {
+    path_cells
+        .iter()
+        .map(|&(px, py)| (cell.0 - px).abs() + (cell.1 - py).abs())
+        .min()
+        .unwrap_or(i32::MAX)
+}
+
+fn edge_cell(x: i32, y: i32) -> bool {
+    x <= 1 || y <= 1 || x >= COLS - 2 || y >= ROWS - 2
+}
+
+fn decor_hash(level: usize, x: i32, y: i32, salt: u32) -> u32 {
+    let mut v = salt ^ ((level as u32 + 1).wrapping_mul(0x85eb_ca6b));
+    v ^= (x as u32).wrapping_mul(0xc2b2_ae35);
+    v = v.rotate_left(13);
+    v ^= (y as u32).wrapping_mul(0x27d4_eb2f);
+    v ^ (v >> 16)
+}
+
+fn cell_jitter(level: usize, x: i32, y: i32, salt: u32, amount: f32) -> Vec2 {
+    let h = decor_hash(level, x, y, salt);
+    let jx = ((h & 0xff) as f32 / 255.0 - 0.5) * amount;
+    let jy = (((h >> 8) & 0xff) as f32 / 255.0 - 0.5) * amount;
+    Vec2::new(jx, jy)
+}
+
+fn draw_torch(
+    commands: &mut Commands,
+    x: i32,
+    y: i32,
+    board: &Board,
+    theme: crate::data::LevelTheme,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<ColorMaterial>,
+    lighting: &crate::lighting::LightingSettings,
+) {
+    let base = cell_center(x as f32, y as f32)
+        + cell_jitter(board.level_index, x, y, 0x51f1_5e12, TILE_SIZE * 0.22);
+    let rot = ((decor_hash(board.level_index, x, y, 0xbadc_0ffe) % 9) as f32 - 4.0) * 0.025;
+    commands.spawn((
+        Sprite {
+            color: Color::srgb(0.24, 0.15, 0.08).with_alpha(0.82),
+            custom_size: Some(Vec2::new(5.0, TILE_SIZE * 0.42)),
+            ..default()
+        },
+        Transform::from_translation((base + Vec2::new(0.0, -3.0)).extend(1.82))
+            .with_rotation(Quat::from_rotation_z(rot)),
+        LevelEntity,
+    ));
+    commands.spawn((
+        Mesh2d(meshes.add(Ellipse::new(8.0, 11.0))),
+        MeshMaterial2d(materials.add(Color::srgb(1.0, 0.36, 0.08).with_alpha(0.82))),
+        Transform::from_translation((base + Vec2::new(0.0, 10.0)).extend(1.92)),
+        LevelEntity,
+    ));
+    commands.spawn((
+        Mesh2d(meshes.add(Ellipse::new(4.6, 7.0))),
+        MeshMaterial2d(materials.add(Color::srgb(1.0, 0.88, 0.28).with_alpha(0.9))),
+        Transform::from_translation((base + Vec2::new(0.0, 12.0)).extend(1.94)),
+        LevelEntity,
+    ));
+    commands.spawn((
+        Mesh2d(meshes.add(Ellipse::new(12.0, 4.2))),
+        MeshMaterial2d(materials.add(theme.path_edge.mix(&Color::BLACK, 0.24).with_alpha(0.42))),
+        Transform::from_translation((base + Vec2::new(5.0, -13.0)).extend(1.24)),
+        LevelEntity,
+    ));
+    crate::lighting::spawn_scene_light(
+        commands,
+        base + Vec2::new(0.0, 10.0),
+        Color::srgb(1.0, 0.48, 0.14),
+        TILE_SIZE * 4.2,
+        2.35,
+        true,
+        48.0,
+        lighting,
+    );
+}
+
+fn draw_rock(
+    commands: &mut Commands,
+    x: i32,
+    y: i32,
+    board: &Board,
+    theme: crate::data::LevelTheme,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<ColorMaterial>,
+    hash: u32,
+) {
+    let pos = cell_center(x as f32, y as f32)
+        + cell_jitter(board.level_index, x, y, 0x7255_a11a, TILE_SIZE * 0.34);
+    let w = 7.0 + (hash & 0x7) as f32;
+    let h = 4.5 + ((hash >> 4) & 0x7) as f32;
+    commands.spawn((
+        Mesh2d(meshes.add(Ellipse::new(w, h))),
+        MeshMaterial2d(
+            materials.add(
+                theme
+                    .path_edge
+                    .mix(&Color::srgb(0.12, 0.12, 0.13), 0.40)
+                    .with_alpha(0.54),
+            ),
+        ),
+        Transform::from_translation(pos.extend(1.16))
+            .with_rotation(Quat::from_rotation_z((hash as f32).sin() * 0.28)),
+        LevelEntity,
+    ));
+}
+
+fn draw_roots(
+    commands: &mut Commands,
+    x: i32,
+    y: i32,
+    board: &Board,
+    theme: crate::data::LevelTheme,
+    hash: u32,
+) {
+    let pos = cell_center(x as f32, y as f32)
+        + cell_jitter(board.level_index, x, y, 0x9191_f00d, TILE_SIZE * 0.30);
+    for i in 0..2 {
+        let angle = ((hash.rotate_left(i * 7) % 360) as f32).to_radians();
+        commands.spawn((
+            Sprite {
+                color: theme
+                    .backdrop
+                    .mix(&Color::srgb(0.08, 0.045, 0.025), 0.68)
+                    .with_alpha(0.36),
+                custom_size: Some(Vec2::new(TILE_SIZE * 0.42, 3.0)),
+                ..default()
+            },
+            Transform::from_translation(
+                (pos + Vec2::from_angle(angle) * (i as f32 * 4.0)).extend(1.12),
+            )
+            .with_rotation(Quat::from_rotation_z(angle)),
+            LevelEntity,
+        ));
+    }
+}
+
+fn draw_ground_crack(
+    commands: &mut Commands,
+    x: i32,
+    y: i32,
+    board: &Board,
+    theme: crate::data::LevelTheme,
+    hash: u32,
+) {
+    let pos = cell_center(x as f32, y as f32)
+        + cell_jitter(board.level_index, x, y, 0x6d2b_79f5, TILE_SIZE * 0.24);
+    let angle = ((hash % 180) as f32).to_radians();
+    commands.spawn((
+        Sprite {
+            color: theme
+                .path
+                .mix(&Color::srgb(0.02, 0.02, 0.025), 0.58)
+                .with_alpha(0.32),
+            custom_size: Some(Vec2::new(TILE_SIZE * 0.46, 2.0)),
+            ..default()
+        },
+        Transform::from_translation(pos.extend(1.13)).with_rotation(Quat::from_rotation_z(angle)),
         LevelEntity,
     ));
 }
@@ -574,6 +798,7 @@ pub fn keyboard_controls(
     mut paused: ResMut<Paused>,
     current: Res<CurrentLevel>,
     mut rng: ResMut<Rng>,
+    roguelite: Res<crate::roguelite::RogueliteRun>,
 ) {
     if keys.just_pressed(KeyCode::KeyP) {
         paused.0 = !paused.0;
@@ -590,7 +815,11 @@ pub fn keyboard_controls(
         toggle_auto_wave(&mut run);
     }
     if keys.just_pressed(KeyCode::Space) {
-        start_wave(&mut run, current.0, &mut rng);
+        if roguelite.is_waiting() {
+            run.show(crate::i18n::t("先选择一个本波构筑天赋"));
+        } else {
+            start_wave(&mut run, current.0, &mut rng);
+        }
     }
 }
 
@@ -611,7 +840,7 @@ pub fn start_wave(run: &mut RunState, level_index: usize, rng: &mut Rng) {
         let wave = run.wave as f32;
         (run.base_count as f32 + wave * 2.2 + (wave / 5.0).floor() * 2.0).round() as i32
     } else {
-        run.base_count + (run.wave as f32 * 1.8) as i32
+        run.base_count + (run.wave as f32 * 1.95) as i32 + ((run.wave - 1) / 8).max(0)
     };
     if run.is_endless() {
         target = target.clamp(10, 96);
@@ -621,7 +850,7 @@ pub fn start_wave(run: &mut RunState, level_index: usize, rng: &mut Rng) {
         target = if run.is_endless() {
             ((target as f32) * 0.72).round() as i32 + 2
         } else {
-            target + 1
+            target + 2
         };
     }
     run.spawn_target = target;
@@ -676,8 +905,9 @@ pub fn tick_auto_wave(
     mut run: ResMut<RunState>,
     current: Res<CurrentLevel>,
     mut rng: ResMut<Rng>,
+    roguelite: Res<crate::roguelite::RogueliteRun>,
 ) {
-    if !run.auto_wave || !run.can_start_next_wave() {
+    if roguelite.is_waiting() || !run.auto_wave || !run.can_start_next_wave() {
         return;
     }
     if run.auto_wave_timer <= 0.0 {

@@ -11,6 +11,9 @@ use crate::components::Enemy;
 use crate::data::EnemyKind;
 use crate::tower::Summon;
 use bevy::prelude::*;
+use bevy_spritesheet_animation::prelude::{
+    Animation, AnimationDuration, AnimationRepeat, Spritesheet, SpritesheetAnimation,
+};
 use std::collections::HashMap;
 
 pub struct CreatureCfg {
@@ -22,6 +25,8 @@ pub struct CreatureCfg {
     pub atk_image: Handle<Image>,
     pub atk_layout: Handle<TextureAtlasLayout>,
     pub atk_frames: usize,
+    pub move_anim: Handle<Animation>,
+    pub attack_anim: Handle<Animation>,
 }
 
 #[derive(Resource)]
@@ -30,8 +35,6 @@ pub struct Creatures(pub HashMap<EnemyKind, CreatureCfg>);
 /// Per-entity animation cursor.
 #[derive(Component)]
 pub struct CreatureAnim {
-    pub timer: Timer,
-    pub frames: usize,
     pub kind: EnemyKind,
     /// Currently showing the attack sheet (vs locomotion).
     pub attacking: bool,
@@ -75,6 +78,7 @@ pub fn load_creatures(
     mut commands: Commands,
     assets: Res<AssetServer>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
+    mut animations: ResMut<Assets<Animation>>,
 ) {
     let mut m = HashMap::new();
     for (kind, file, frame, frames, atk_frames) in mapping() {
@@ -94,6 +98,26 @@ pub fn load_creatures(
             None,
             None,
         ));
+        let move_sheet = Spritesheet::new(&image, frames, 1);
+        let attack_sheet = Spritesheet::new(&atk_image, atk_frames, 1);
+        let frame_ms = (1000.0 / 10.0_f32).round() as u32;
+        let attack_frame_ms = (1000.0 / 14.0_f32).round() as u32;
+        let move_anim = animations.add(
+            move_sheet
+                .create_animation()
+                .add_row(0)
+                .set_duration(AnimationDuration::PerFrame(frame_ms))
+                .set_repetitions(AnimationRepeat::Loop)
+                .build(),
+        );
+        let attack_anim = animations.add(
+            attack_sheet
+                .create_animation()
+                .add_row(0)
+                .set_duration(AnimationDuration::PerFrame(attack_frame_ms))
+                .set_repetitions(AnimationRepeat::Loop)
+                .build(),
+        );
         m.insert(
             kind,
             CreatureCfg {
@@ -104,6 +128,8 @@ pub fn load_creatures(
                 atk_image,
                 atk_layout,
                 atk_frames,
+                move_anim,
+                attack_anim,
             },
         );
     }
@@ -113,7 +139,7 @@ pub fn load_creatures(
 impl Creatures {
     /// Build the animated `Sprite` + `CreatureAnim` for an enemy kind at a given
     /// on-screen size (pixels across). Starts on the locomotion sheet.
-    pub fn sprite(&self, kind: EnemyKind, px: f32) -> (Sprite, CreatureAnim) {
+    pub fn sprite(&self, kind: EnemyKind, px: f32) -> (Sprite, CreatureAnim, SpritesheetAnimation) {
         let cfg = &self.0[&kind];
         let mut sprite = Sprite::from_atlas_image(
             cfg.image.clone(),
@@ -124,12 +150,11 @@ impl Creatures {
         );
         sprite.custom_size = Some(Vec2::splat(px));
         let anim = CreatureAnim {
-            timer: Timer::from_seconds(1.0 / cfg.fps, TimerMode::Repeating),
-            frames: cfg.frames,
             kind,
             attacking: false,
         };
-        (sprite, anim)
+        let sheet_anim = SpritesheetAnimation::new(cfg.move_anim.clone());
+        (sprite, anim, sheet_anim)
     }
 }
 
@@ -137,16 +162,16 @@ impl Creatures {
 /// the creature is currently striking. Enemies use `Enemy::blocked`; allied summons
 /// use their melee attack timer.
 pub fn animate_creatures(
-    time: Res<Time>,
     creatures: Res<Creatures>,
     mut q: Query<(
         Option<&Enemy>,
         Option<&Summon>,
         &mut CreatureAnim,
         &mut Sprite,
+        &mut SpritesheetAnimation,
     )>,
 ) {
-    for (enemy, summon, mut a, mut sprite) in &mut q {
+    for (enemy, summon, mut a, mut sprite, mut sheet_anim) in &mut q {
         let attacking = enemy.is_some_and(|e| e.blocked && e.hp > 0.0)
             || summon.is_some_and(|s| s.attack_timer > 0.0 && s.hp > 0.0);
         let facing = enemy
@@ -164,24 +189,17 @@ pub fn animate_creatures(
                 (
                     cfg.atk_image.clone(),
                     cfg.atk_layout.clone(),
-                    cfg.atk_frames,
+                    cfg.attack_anim.clone(),
                 )
             } else {
-                (cfg.image.clone(), cfg.layout.clone(), cfg.frames)
+                (cfg.image.clone(), cfg.layout.clone(), cfg.move_anim.clone())
             };
             sprite.image = img;
             if let Some(atlas) = &mut sprite.texture_atlas {
                 atlas.layout = lay;
                 atlas.index = 0;
             }
-            a.frames = frames;
-            a.timer.reset();
-        }
-        a.timer.tick(time.delta());
-        if a.timer.just_finished() {
-            if let Some(atlas) = &mut sprite.texture_atlas {
-                atlas.index = (atlas.index + 1) % a.frames.max(1);
-            }
+            sheet_anim.switch(frames);
         }
     }
 }

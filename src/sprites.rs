@@ -5,7 +5,7 @@
 
 use crate::data::{EnemyKind, TowerKind};
 use crate::equipment::Equipment;
-use crate::hero::{Class, HeroLoadout, Race};
+use crate::hero::{HeroLoadout, HeroWeapon, Race};
 use crate::meta::Ability;
 use crate::monster::{BossSkill, MONSTER_SPECIES};
 use bevy::prelude::*;
@@ -21,12 +21,14 @@ pub struct Sprites {
     pub abilities: HashMap<Ability, Handle<Image>>,
     /// Talent icons, keyed by "damage" / "range" / "speed".
     pub talents: HashMap<&'static str, Handle<Image>>,
-    /// Hero class portraits keyed by class.
-    pub heroes: HashMap<Class, Handle<Image>>,
-    /// Hero active skill icons keyed by class.
-    pub hero_skills: HashMap<Class, Handle<Image>>,
-    /// Hero talent icons keyed by (class, talent index).
-    pub hero_talents: HashMap<(Class, usize), Handle<Image>>,
+    /// Hero weapon portraits keyed by weapon.
+    pub heroes: HashMap<HeroWeapon, Handle<Image>>,
+    /// Hero active skill icons keyed by weapon.
+    pub hero_skills: HashMap<HeroWeapon, Handle<Image>>,
+    /// Hero talent icons keyed by (weapon, talent index).
+    pub hero_talents: HashMap<(HeroWeapon, usize), Handle<Image>>,
+    /// Independent allied creature sprite used by the summon-staff active skill.
+    pub mythic_summon: Handle<Image>,
     /// Boss portraits keyed by the boss's signature skill.
     pub bosses: HashMap<BossSkill, Handle<Image>>,
     /// The defended carrot (level goal) and the enemy spawn portal. The carrot has
@@ -94,24 +96,24 @@ pub fn build_sprites(assets: &AssetServer) -> Sprites {
     let mut heroes = HashMap::new();
     let mut hero_skills = HashMap::new();
     let mut hero_talents = HashMap::new();
-    for class in Class::ALL {
+    for weapon in HeroWeapon::ALL {
         heroes.insert(
-            class,
-            assets.load(format!("sprites/heroes/{}.webp", class.sprite_name())),
+            weapon,
+            assets.load(format!("sprites/heroes/{}.webp", weapon.sprite_name())),
         );
         hero_skills.insert(
-            class,
+            weapon,
             assets.load(format!(
                 "sprites/hero_skills/{}.webp",
-                class.skill_sprite_name()
+                weapon.skill_sprite_name()
             )),
         );
         for talent in 0..HeroLoadout::TALENT_SLOTS {
             hero_talents.insert(
-                (class, talent),
+                (weapon, talent),
                 assets.load(format!(
                     "sprites/hero_talents/{}.webp",
-                    class.talent_sprite_name(talent)
+                    weapon.talent_sprite_name(talent)
                 )),
             );
         }
@@ -132,6 +134,7 @@ pub fn build_sprites(assets: &AssetServer) -> Sprites {
         heroes,
         hero_skills,
         hero_talents,
+        mythic_summon: assets.load("sprites/summons/mythic_summon.webp"),
         bosses,
         carrot: assets.load("sprites/carrot.webp"),
         carrot_hurt: assets.load("sprites/carrot_hurt.webp"),

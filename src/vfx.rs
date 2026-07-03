@@ -6,6 +6,7 @@ use crate::components::{Enemy, FloatText, LevelEntity, Particle, Shockwave};
 use crate::data::Element;
 use crate::equipment::Equipment;
 use crate::game::Rng;
+use crate::lighting;
 use crate::sprites::Sprites;
 use crate::ui::UiFont;
 use bevy::prelude::*;
@@ -49,7 +50,7 @@ pub enum VfxEvent {
     },
     /// Muzzle flash + forward sparks when a tower fires (`dir` = firing direction).
     Muzzle { pos: Vec2, dir: Vec2, color: Color },
-    /// Melee slash arc (for close-range hero classes). `angle` orients the swoosh,
+    /// Melee slash arc (for close-range hero weapones). `angle` orients the swoosh,
     /// `poison` picks the toxic variant.
     Slash {
         pos: Vec2,
@@ -57,9 +58,9 @@ pub enum VfxEvent {
         color: Color,
         poison: bool,
     },
-    /// Engineer hammer blow: blunt impact, dust ring, and metal sparks.
+    /// Forge Hammer blow: blunt impact, dust ring, and metal sparks.
     HammerImpact { pos: Vec2, angle: f32, color: Color },
-    /// Local melee cleave ring for warrior-style area hits. This deliberately does
+    /// Local melee cleave ring for banner-sword-style area hits. This deliberately does
     /// not shake the camera; the normal per-enemy hit events provide impact.
     MeleeCleave {
         pos: Vec2,
@@ -75,7 +76,7 @@ pub enum VfxEvent {
         pos: Vec2,
         amount: f32,
         color: Color,
-        label: &'static str,
+        label: String,
     },
     /// Small silent ring used to make elemental weakness/resistance readable.
     ElementPulse {
@@ -83,7 +84,7 @@ pub enum VfxEvent {
         color: Color,
         strong: bool,
     },
-    /// Priest hit feedback: a gold-white holy strike attached to the enemy body.
+    /// Summon Staff hit feedback: an attached pact strike on the enemy body.
     HolyStrike { pos: Vec2, strong: bool },
     /// Floating label for discoveries and other non-damage feedback.
     Text {
@@ -134,7 +135,7 @@ pub enum VfxEvent {
         pos: Vec2,
         radius: f32,
         color: Color,
-        label: &'static str,
+        label: String,
     },
     /// Boss arrival: heavy multi-ring shockwave, big shake, and a名牌 banner.
     BossEntrance {
@@ -278,7 +279,7 @@ fn spawn_holy_strike(
     let life = if strong { 0.34 } else { 0.24 };
 
     // A vertical light column pins the impact to the monster body instead of
-    // reading as another projectile fired from the priest.
+    // reading as another projectile fired from the summon staff.
     commands.spawn((
         Sprite {
             color: white.with_alpha(if strong { 0.95 } else { 0.72 }),
@@ -366,11 +367,11 @@ fn spawn_number(
     pos: Vec2,
     amount: f32,
     color: Color,
-    label: Option<&'static str>,
+    label: Option<&str>,
 ) {
     let jitter = Vec2::new(rng.frac() * 10.0 - 5.0, 0.0);
     let text = if let Some(label) = label {
-        format!("{} {}", amount.round() as i32, crate::i18n::t(label))
+        format!("{} {}", amount.round() as i32, label)
     } else {
         format!("{}", amount.round() as i32)
     };
@@ -480,6 +481,7 @@ pub fn spawn_vfx(
                 }
                 // Element-specific flourish on top of the generic impact.
                 element_hit_flourish(&mut commands, &mut rng, *pos, *element);
+                lighting::pulse_light(&mut commands, *pos, *color, 58.0, 0.92, 0.18, false);
             }
             VfxEvent::Muzzle { pos, dir, color } => {
                 // Bright stationary flash at the barrel.
@@ -508,6 +510,7 @@ pub fn spawn_vfx(
                         0.16,
                     );
                 }
+                lighting::pulse_light(&mut commands, *pos, *color, 48.0, 0.72, 0.13, false);
             }
             VfxEvent::Slash {
                 pos,
@@ -564,6 +567,7 @@ pub fn spawn_vfx(
                         0.26,
                     );
                 }
+                lighting::pulse_light(&mut commands, *pos, *color, 68.0, 0.78, 0.18, false);
             }
             VfxEvent::HammerImpact { pos, angle, color } => {
                 let impact = color.mix(&Color::WHITE, 0.18);
@@ -616,6 +620,7 @@ pub fn spawn_vfx(
                         0.22,
                     );
                 }
+                lighting::pulse_light(&mut commands, *pos, impact, 78.0, 0.86, 0.20, true);
             }
             VfxEvent::MeleeCleave { pos, radius, color } => {
                 spawn_ring(
@@ -652,6 +657,15 @@ pub fn spawn_vfx(
                         0.25,
                     );
                 }
+                lighting::pulse_light(
+                    &mut commands,
+                    *pos,
+                    *color,
+                    *radius * 1.6,
+                    0.75,
+                    0.22,
+                    false,
+                );
             }
             VfxEvent::Heal { pos } => {
                 for _ in 0..4 {
@@ -666,6 +680,15 @@ pub fn spawn_vfx(
                         0.45,
                     );
                 }
+                lighting::pulse_light(
+                    &mut commands,
+                    *pos,
+                    Color::srgb(0.45, 1.0, 0.55),
+                    62.0,
+                    0.58,
+                    0.34,
+                    false,
+                );
             }
             VfxEvent::Number { pos, amount } => {
                 spawn_number(
@@ -720,6 +743,15 @@ pub fn spawn_vfx(
                         if *strong { 0.38 } else { 0.24 },
                     );
                 }
+                lighting::pulse_light(
+                    &mut commands,
+                    *pos,
+                    *color,
+                    if *strong { 92.0 } else { 56.0 },
+                    if *strong { 1.08 } else { 0.62 },
+                    if *strong { 0.34 } else { 0.22 },
+                    false,
+                );
             }
             VfxEvent::HolyStrike { pos, strong } => {
                 spawn_holy_strike(
@@ -729,6 +761,15 @@ pub fn spawn_vfx(
                     &mut materials,
                     *pos,
                     *strong,
+                );
+                lighting::pulse_light(
+                    &mut commands,
+                    *pos,
+                    Color::srgb(1.0, 0.92, 0.48),
+                    if *strong { 108.0 } else { 74.0 },
+                    if *strong { 1.32 } else { 0.82 },
+                    0.28,
+                    true,
                 );
             }
             VfxEvent::Text {
@@ -811,6 +852,15 @@ pub fn spawn_vfx(
                     color,
                     if danger { 20.0 } else { 17.0 },
                     if danger { 1.10 } else { 0.90 },
+                );
+                lighting::pulse_light(
+                    &mut commands,
+                    *pos,
+                    color,
+                    if danger { 118.0 } else { 86.0 },
+                    if danger { 1.18 } else { 0.82 },
+                    0.30,
+                    true,
                 );
                 if danger && lives > 0 {
                     spawn_text(
@@ -1158,6 +1208,15 @@ pub fn spawn_vfx(
                 for _ in 0..n {
                     spark(&mut commands, &mut rng, *pos, *color, 80.0, 240.0, 5.0, 0.6);
                 }
+                lighting::pulse_light(
+                    &mut commands,
+                    *pos,
+                    *color,
+                    if *big { 190.0 } else { 74.0 },
+                    if *big { 1.55 } else { 0.62 },
+                    if *big { 0.46 } else { 0.24 },
+                    *big,
+                );
             }
             VfxEvent::BossCast {
                 pos,
@@ -1190,7 +1249,7 @@ pub fn spawn_vfx(
                     16.1,
                 );
                 commands.spawn((
-                    Text2d::new(format!("{}!", crate::i18n::t(label))),
+                    Text2d::new(format!("{}!", label)),
                     TextFont {
                         font: FontSource::Handle(font.0.clone()),
                         font_size: FontSize::Px(17.0),
@@ -1204,6 +1263,15 @@ pub fn spawn_vfx(
                     },
                     LevelEntity,
                 ));
+                lighting::pulse_light(
+                    &mut commands,
+                    *pos,
+                    *color,
+                    *radius * 1.15,
+                    1.25,
+                    0.62,
+                    true,
+                );
             }
             VfxEvent::BossEntrance { pos, color, name } => {
                 sfx.write(SfxEvent(Sound::Boss));
@@ -1242,6 +1310,7 @@ pub fn spawn_vfx(
                     },
                     LevelEntity,
                 ));
+                lighting::pulse_light(&mut commands, *pos, *color, 260.0, 1.85, 0.78, true);
             }
             VfxEvent::Explosion { pos, radius, color } => {
                 sfx.write(SfxEvent(Sound::Explosion));
@@ -1271,6 +1340,15 @@ pub fn spawn_vfx(
                         0.45,
                     );
                 }
+                lighting::pulse_light(
+                    &mut commands,
+                    *pos,
+                    *color,
+                    *radius * 1.35,
+                    (*radius / 80.0).clamp(0.85, 2.15),
+                    0.34,
+                    true,
+                );
             }
             VfxEvent::Burst { pos, radius, color } => {
                 // White core flash, expanding ring, and a spray of sparks.
@@ -1308,6 +1386,15 @@ pub fn spawn_vfx(
                         0.42,
                     );
                 }
+                lighting::pulse_light(
+                    &mut commands,
+                    *pos,
+                    *color,
+                    *radius * 1.25,
+                    0.95,
+                    0.28,
+                    true,
+                );
             }
             VfxEvent::MeteorStorm { center, radius } => {
                 use crate::data::{BOARD_H, BOARD_W};
@@ -1414,6 +1501,15 @@ pub fn spawn_vfx(
                         0.55,
                     );
                 }
+                lighting::pulse_light(
+                    &mut commands,
+                    *center,
+                    Color::srgb(1.0, 0.45, 0.12),
+                    *radius * 1.7,
+                    2.25,
+                    0.56,
+                    true,
+                );
             }
             VfxEvent::GoldExplosion { center } => {
                 shake.add(0.25);
@@ -1462,6 +1558,7 @@ pub fn spawn_vfx(
                         0.5,
                     );
                 }
+                lighting::pulse_light(&mut commands, *center, gold, 150.0, 1.4, 0.52, false);
             }
             VfxEvent::FrostNova { center } => {
                 use crate::data::{BOARD_H, BOARD_W};
@@ -1501,6 +1598,15 @@ pub fn spawn_vfx(
                         0.6,
                     );
                 }
+                lighting::pulse_light(
+                    &mut commands,
+                    *center,
+                    Color::srgb(0.58, 0.88, 1.0),
+                    diag * 0.56,
+                    1.35,
+                    0.70,
+                    true,
+                );
             }
         }
     }

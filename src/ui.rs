@@ -8,32 +8,37 @@ use crate::bestiary::{Bestiary, brief};
 use crate::build::{Selection, repair_tower, upgrade_tower, upgrade_unlock_note};
 use crate::components::Enemy;
 use crate::data::{
-    BOARD_W, BOSS_WAVE_INTERVAL, Behavior, COLS, Category, Element, LEVEL_LORE, LEVEL_THEMES,
-    Level, PROLOGUE, ROWS, TILE_SIZE, TowerDef, TowerKind,
+    BOARD_H, BOARD_W, BOSS_WAVE_INTERVAL, Behavior, COLS, Category, Element, LEVEL_LORE,
+    LEVEL_THEMES, Level, PROLOGUE, ROWS, TILE_SIZE, TowerDef, TowerKind,
 };
 use crate::enemy::PendingBossCast;
 use crate::equipment::{
-    Equipment, EquipmentInventory, EquipmentVisual, drop_source_hint, equipment_set_bonus,
-    equipment_set_bonus_summary, refine_equipment, return_equipment_to_inventory,
-    roll_clear_rewards, unequip_all_to_inventory, unequip_slot_to_inventory,
+    Equipment, EquipmentInventory, EquipmentVisual, drop_source_hint, equipment_mechanic_summary,
+    equipment_set_bonus, equipment_set_bonus_summary, refine_equipment,
+    return_equipment_to_inventory, roll_clear_rewards, unequip_all_to_inventory,
+    unequip_slot_to_inventory,
 };
 use crate::game::{
     CurrentLevel, Difficulty, GameDifficulty, GameMode, KILL_COMBO_WINDOW, Rng, RunMode, RunState,
     start_wave, toggle_auto_wave,
 };
-use crate::hero::{Class, HeroLoadout, Race};
+use crate::hero::{HeroLoadout, HeroWeapon, Race};
+use crate::hero_gear::{HeroGear, HeroGearInventory, HeroGearSlot};
 use crate::i18n::{Language, tr};
+use crate::lighting::LightingSettings;
 use crate::meta::{Abilities, Ability, Talents, talent_cost};
 use crate::monster::{
     BossSkill, MONSTER_SPECIES, boss_skill, elite_affix_pool, is_boss_wave, species_by_id,
 };
 use crate::quality::GraphicsQuality;
+use crate::roguelite::RogueliteRun;
 use crate::sprites::Sprites;
 use crate::states::GameState;
-use crate::tower::{BuffTower, Damage, Status, StatusKind};
+use crate::tower::{BuffTower, Damage, FixedSummonHome, Status, StatusKind, TemporaryGuard};
 use bevy::audio::{PlaybackMode, Volume};
 use bevy::prelude::*;
-use bevy::ui_widgets::{Activate, Button as WidgetButton};
+use bevy::ui::FocusPolicy;
+use bevy::ui_widgets::{Activate, ActivateOnPress, Button as WidgetButton};
 use bevy::window::{MonitorSelection, WindowMode};
 use bevy_persistent::prelude::{Persistent, StorageFormat};
 use serde::{Deserialize, Serialize};
@@ -163,10 +168,32 @@ pub struct MobileHudRoot;
 /// wave/pause/speed + abilities), so they're hidden in touch mode to avoid clutter.
 #[derive(Component)]
 pub struct TouchHiddenRow;
-/// The bottom loadout dock (hero + selected unit + equipment). Toggled open/closed
-/// by [`HudPanels::dock_open`] so it doesn't permanently cover the board.
+/// The selected-tower context dock. It is visible only while inspecting a
+/// non-hero tower, so upgrade/socket controls never behave like a global menu.
 #[derive(Component)]
 pub struct DockRoot;
+/// Dedicated in-game hero paperdoll panel. This is deliberately separate from the
+/// tower gem dock so hero equipment never shares tower upgrade/socket controls.
+#[derive(Component)]
+pub struct HeroPanelRoot;
+#[derive(Component)]
+pub struct HeroPaperdollPreview;
+#[derive(Component)]
+pub struct HeroPaperdollPortrait;
+#[derive(Component)]
+pub struct HeroWeaponSlotIcon;
+#[derive(Component)]
+pub struct HeroGearSlotButton {
+    pub slot: HeroGearSlot,
+}
+#[derive(Component)]
+pub struct HeroGearSlotIcon {
+    pub slot: HeroGearSlot,
+}
+#[derive(Component)]
+pub struct HeroGearSlotLabel {
+    pub slot: HeroGearSlot,
+}
 /// The settings panel opened from the top-right gear. Toggled by
 /// [`HudPanels::settings_open`].
 #[derive(Component)]
@@ -179,6 +206,7 @@ pub struct SettingsGear;
 #[derive(Resource, Default)]
 pub struct HudPanels {
     pub dock_open: bool,
+    pub hero_open: bool,
     pub settings_open: bool,
 }
 #[derive(Component)]
@@ -218,7 +246,10 @@ pub struct DiffLabel;
 /// Label (menu + in-game panel) showing the current graphics-quality tier.
 #[derive(Component)]
 pub struct QualityLabel;
-/// Menu label showing the chosen hero race + class.
+/// Label (menu + in-game panel) showing the current Firefly brightness tier.
+#[derive(Component)]
+pub struct BrightnessLabel;
+/// Menu label showing the chosen hero race + weapon.
 #[derive(Component)]
 pub struct HeroLabel;
 /// In-game label showing hero level, XP, talent points, and skill cooldown.
@@ -293,6 +324,14 @@ pub struct EquipmentButtonIcon {
     item: Equipment,
 }
 #[derive(Component)]
+pub struct EquipmentBagTile {
+    pub item: Equipment,
+}
+#[derive(Component)]
+pub struct HeroGearBagTile {
+    pub item: HeroGear,
+}
+#[derive(Component)]
 pub struct EquippedSlotFrame {
     slot: usize,
 }
@@ -306,7 +345,29 @@ pub struct EquippedSlotText {
 }
 /// Big always-visible feedback message (sits over the board, not in the panel).
 #[derive(Component)]
+pub struct BannerRoot;
+#[derive(Component)]
 pub struct BannerText;
+#[derive(Component)]
+pub struct RogueliteDraftRoot;
+#[derive(Component)]
+pub struct RogueliteDraftWaveText;
+#[derive(Component)]
+pub struct RogueliteChoiceSource {
+    index: usize,
+}
+#[derive(Component)]
+pub struct RogueliteChoiceTitle {
+    index: usize,
+}
+#[derive(Component)]
+pub struct RogueliteChoiceDesc {
+    index: usize,
+}
+#[derive(Component)]
+pub struct RogueliteChoiceButton {
+    index: usize,
+}
 #[derive(Component)]
 pub struct BossBarRoot;
 #[derive(Component)]
@@ -347,6 +408,7 @@ pub enum UiAction {
     TalentSpeed,
     Cast(Ability),
     CycleQuality,
+    CycleBrightness,
     CycleVolume,
     CycleLanguage,
     /// Open/close the menu settings popup (画质/音量/语言/全屏).
@@ -357,15 +419,21 @@ pub enum UiAction {
     /// Show/hide the bottom loadout dock (hero + selected unit + equipment) so the
     /// board underneath is reachable for building.
     ToggleDock,
+    /// Show/hide the dedicated hero paperdoll panel.
+    ToggleHeroPanel,
     /// Open/close the settings panel (gear icon, top-right).
     ToggleSettings,
     SummonHero,
     HeroTalent(usize),
     HeroSkill,
     ResetHeroTalents,
-    /// Pick a specific hero class/race on the briefing selection screen.
-    SelectHeroClass(Class),
+    PickRogueliteTalent(usize),
+    /// Pick a specific hero weapon archetype. Internally this still maps to the
+    /// old weapon combat profile until the wider codebase is renamed.
+    SelectHeroWeapon(HeroWeapon),
     SelectHeroRace(Race),
+    EquipHeroGear(HeroGear),
+    UnequipHeroGear(HeroGearSlot),
     PlayLevel(usize),
     PlayEndless,
     BeginMission,
@@ -384,13 +452,54 @@ pub struct UiActionActivated {
 /// Existing UI nodes still use Bevy's visual `Button`; this attaches the
 /// `bevy_ui_widgets` headless button so activation is driven by widget events
 /// (pointer click + Enter/Space when focused) instead of every screen hand-rolling
-/// `Interaction::Pressed`.
+/// `Interaction::Pressed`. Descendant text/image nodes are marked as transparent
+/// to picking so pointer events target the parent action button.
 pub fn attach_widget_buttons(
     mut commands: Commands,
     buttons: Query<Entity, (With<UiAction>, With<Button>, Without<WidgetButton>)>,
 ) {
     for entity in &buttons {
-        commands.entity(entity).insert(WidgetButton);
+        commands
+            .entity(entity)
+            .insert((WidgetButton, ActivateOnPress));
+    }
+}
+
+pub fn passthrough_button_children(
+    mut commands: Commands,
+    buttons: Query<&Children, (With<UiAction>, With<Button>)>,
+    children: Query<&Children>,
+    interactive: Query<(), Or<(With<UiAction>, With<Button>)>>,
+    pickables: Query<&Pickable>,
+) {
+    for button_children in &buttons {
+        for child in button_children.iter() {
+            mark_pick_passthrough(&mut commands, child, &children, &interactive, &pickables);
+        }
+    }
+}
+
+fn mark_pick_passthrough(
+    commands: &mut Commands,
+    entity: Entity,
+    children: &Query<&Children>,
+    interactive: &Query<(), Or<(With<UiAction>, With<Button>)>>,
+    pickables: &Query<&Pickable>,
+) {
+    if interactive.contains(entity) {
+        return;
+    }
+
+    if pickables.get(entity).copied().ok() != Some(Pickable::IGNORE) {
+        commands
+            .entity(entity)
+            .insert((Pickable::IGNORE, FocusPolicy::Pass));
+    }
+
+    if let Ok(entity_children) = children.get(entity) {
+        for child in entity_children.iter() {
+            mark_pick_passthrough(commands, child, children, interactive, pickables);
+        }
     }
 }
 
@@ -940,6 +1049,10 @@ fn equipment_stat_line(d: &crate::equipment::EquipmentDef) -> String {
     if let Some(element) = d.element {
         parts.push(crate::i18n::tf("转{}", &[&crate::i18n::t(element.name())]));
     }
+    let mechanics = equipment_mechanic_summary(d);
+    if !mechanics.is_empty() {
+        parts.push(mechanics);
+    }
     if parts.is_empty() {
         crate::i18n::t("稳定遗物")
     } else {
@@ -1338,6 +1451,424 @@ fn icon_button(
         });
 }
 
+fn hero_gear_icon(sprites: &Sprites, item: HeroGear) -> Handle<Image> {
+    let fallback = match item {
+        HeroGear::VowPlate => Equipment::BulwarkPlate,
+        HeroGear::StarweaveRobe => Equipment::CultistManual,
+        HeroGear::WindrunnerCloak => Equipment::BoneFletching,
+        HeroGear::ThunderCharm => Equipment::ThunderCoil,
+        HeroGear::SaintBell => Equipment::SaintedGear,
+        HeroGear::NightMask => Equipment::ShadowSeal,
+        HeroGear::ForgeGauntlet => Equipment::StarMetalBarrel,
+        HeroGear::SentryScope => Equipment::RustySight,
+        HeroGear::CarrotHalo => Equipment::CarrotSigil,
+        HeroGear::WildhideHarness => Equipment::DeepOneScale,
+        HeroGear::MoonthreadVest => Equipment::PrismShard,
+        HeroGear::NullMantle => Equipment::VoidCapacitor,
+        HeroGear::BloodBanner => Equipment::CarrotSigil,
+        HeroGear::EmberPrayer => Equipment::EmberCore,
+        HeroGear::ClockworkBadge => Equipment::ClockworkTrigger,
+        HeroGear::RiftIdol => Equipment::ShadowSeal,
+        HeroGear::BrassCompass => Equipment::RustySight,
+        HeroGear::DragonheartCrown => Equipment::KrakenHeart,
+        HeroGear::WayfarerBoots => Equipment::BoneFletching,
+        HeroGear::BloodstepGreaves => Equipment::WitchSalt,
+        HeroGear::StarpathSandals => Equipment::PrismShard,
+        HeroGear::EngineerTreads => Equipment::ClockworkTrigger,
+        HeroGear::SummonerGreaves => Equipment::SaintedGear,
+        HeroGear::CarrotWings => Equipment::CarrotSigil,
+        HeroGear::WarflagTabard => Equipment::CarrotSigil,
+        HeroGear::MeteorCodex => Equipment::CultistManual,
+        HeroGear::BountyQuiver => Equipment::BoneFletching,
+        HeroGear::CitadelSeal => Equipment::BulwarkPlate,
+        HeroGear::TempestCore => Equipment::ThunderCoil,
+        HeroGear::WatchtowerGreaves => Equipment::RustySight,
+        HeroGear::AssassinWraps => Equipment::ShadowSeal,
+        HeroGear::MythcallerTotem => Equipment::SaintedGear,
+        HeroGear::GolemBlueprint => Equipment::ClockworkTrigger,
+    };
+    sprites.equipment[&fallback].clone()
+}
+
+fn hero_gear_button(
+    parent: &mut ChildSpawnerCommands,
+    f: &Handle<Font>,
+    icon: Handle<Image>,
+    item: HeroGear,
+    count: u32,
+) {
+    let def = item.def();
+    let owned = count > 0;
+    parent
+        .spawn((
+            Button,
+            Node {
+                width: Val::Px(64.0),
+                height: Val::Px(58.0),
+                margin: UiRect::all(Val::Px(2.0)),
+                padding: UiRect::all(Val::Px(4.0)),
+                position_type: PositionType::Relative,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(if owned {
+                def.rarity.color().with_alpha(0.34)
+            } else {
+                Color::srgba(0.16, 0.16, 0.16, 0.52)
+            }),
+            UiAction::EquipHeroGear(item),
+            HeroGearBagTile { item },
+        ))
+        .with_children(|b| {
+            b.spawn((
+                ImageNode {
+                    image: icon,
+                    color: if owned {
+                        Color::WHITE
+                    } else {
+                        Color::srgba(0.55, 0.55, 0.55, 0.55)
+                    },
+                    ..default()
+                },
+                Node {
+                    width: Val::Px(38.0),
+                    height: Val::Px(38.0),
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+            ));
+            b.spawn((
+                Text::new(if owned {
+                    format!("×{count}")
+                } else {
+                    crate::i18n::t("锁")
+                }),
+                text_font(f, 9.0),
+                TextColor(if owned {
+                    Color::srgb(0.92, 0.90, 0.68)
+                } else {
+                    Color::srgb(0.48, 0.48, 0.48)
+                }),
+                Node {
+                    position_type: PositionType::Absolute,
+                    right: Val::Px(4.0),
+                    bottom: Val::Px(2.0),
+                    ..default()
+                },
+            ));
+        });
+}
+
+fn hero_gear_codex_card(
+    parent: &mut ChildSpawnerCommands,
+    f: &Handle<Font>,
+    icon: Handle<Image>,
+    item: HeroGear,
+    count: u32,
+) {
+    let def = item.def();
+    parent
+        .spawn((
+            Node {
+                width: Val::Px(154.0),
+                height: Val::Px(118.0),
+                margin: UiRect::all(Val::Px(4.0)),
+                padding: UiRect::all(Val::Px(8.0)),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                row_gap: Val::Px(4.0),
+                overflow: Overflow::clip(),
+                ..default()
+            },
+            BackgroundColor(def.rarity.color().with_alpha(0.18)),
+        ))
+        .with_children(|card| {
+            card.spawn((
+                ImageNode {
+                    image: icon,
+                    ..default()
+                },
+                Node {
+                    width: Val::Px(38.0),
+                    height: Val::Px(38.0),
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+            ));
+            card.spawn((
+                Text::new(crate::i18n::t(def.name)),
+                text_font(f, 12.0),
+                TextColor(def.rarity.color().mix(&Color::WHITE, 0.25)),
+            ));
+            card.spawn((
+                Text::new(crate::i18n::tf(
+                    "{} · {} · ×{}",
+                    &[
+                        &def.rarity.label(),
+                        &crate::i18n::t(def.slot.name()),
+                        &count.to_string(),
+                    ],
+                )),
+                text_font(f, 10.0),
+                TextColor(Color::srgb(0.86, 0.86, 0.72)),
+            ));
+            card.spawn((
+                Text::new(hero_gear_stat_line(def)),
+                text_font(f, 9.0),
+                TextColor(Color::srgb(0.72, 0.82, 0.78)),
+            ));
+        });
+}
+
+fn hero_gear_stat_line(d: &crate::hero_gear::HeroGearDef) -> String {
+    let mut parts = Vec::new();
+    if (d.damage_mult - 1.0).abs() > 0.001 {
+        parts.push(crate::i18n::tf(
+            "伤害×{}",
+            &[&format!("{:.2}", d.damage_mult)],
+        ));
+    }
+    if (d.range_mult - 1.0).abs() > 0.001 {
+        parts.push(crate::i18n::tf(
+            "射程×{}",
+            &[&format!("{:.2}", d.range_mult)],
+        ));
+    }
+    if (d.cooldown_mult - 1.0).abs() > 0.001 {
+        parts.push(crate::i18n::tf(
+            "攻速×{}",
+            &[&format!("{:.2}", 1.0 / d.cooldown_mult.max(0.01))],
+        ));
+    }
+    if (d.hp_mult - 1.0).abs() > 0.001 {
+        parts.push(crate::i18n::tf("HP×{}", &[&format!("{:.2}", d.hp_mult)]));
+    }
+    if d.armor_add > 0.0 {
+        parts.push(crate::i18n::tf(
+            "护甲+{}",
+            &[&format!("{:.0}", d.armor_add)],
+        ));
+    }
+    if d.armor_pierce > 0.0 {
+        parts.push(crate::i18n::tf(
+            "穿甲+{}",
+            &[&format!("{:.0}", d.armor_pierce)],
+        ));
+    }
+    if (d.move_mult - 1.0).abs() > 0.001 {
+        parts.push(crate::i18n::tf(
+            "移速×{}",
+            &[&format!("{:.2}", d.move_mult)],
+        ));
+    }
+    if (d.skill_mult - 1.0).abs() > 0.001 {
+        parts.push(crate::i18n::tf(
+            "技能×{}",
+            &[&format!("{:.2}", d.skill_mult)],
+        ));
+    }
+    if d.skill_cooldown_reduction > 0 {
+        parts.push(crate::i18n::tf(
+            "技能冷却-{}波",
+            &[&d.skill_cooldown_reduction.to_string()],
+        ));
+    }
+    if d.summon_power_add > 0.0 {
+        parts.push(crate::i18n::tf(
+            "召唤强度+{}%",
+            &[&format!("{:.0}", d.summon_power_add * 100.0)],
+        ));
+    }
+    if d.aura_damage_add > 0.0 {
+        parts.push(crate::i18n::tf(
+            "光环伤害+{}%",
+            &[&format!("{:.0}", d.aura_damage_add * 100.0)],
+        ));
+    }
+    if d.tower_haste_add > 0.0 {
+        parts.push(crate::i18n::tf(
+            "塔攻速光环+{}%",
+            &[&format!("{:.0}", d.tower_haste_add * 100.0)],
+        ));
+    }
+    if d.gold_bonus_add > 0.0 {
+        parts.push(crate::i18n::tf(
+            "击杀金币+{}%",
+            &[&format!("{:.0}", d.gold_bonus_add * 100.0)],
+        ));
+    }
+    if parts.is_empty() {
+        crate::i18n::t("外观收藏")
+    } else {
+        parts.join("  ")
+    }
+}
+
+fn hero_gear_affinity_line(item: HeroGear, current: HeroWeapon) -> String {
+    let current_name = crate::i18n::t(crate::hero_gear::HeroWeaponKind::for_weapon(current).name());
+    let (route, route_desc) = crate::hero_gear::weapon_resonance_route(current);
+    let status = if item.has_weapon_affinity(current) {
+        crate::i18n::t("已激活")
+    } else {
+        crate::i18n::t("未激活")
+    };
+    crate::i18n::tf(
+        "适配武器：{}\n当前{}：{}\n共鸣路线：{}\n{}",
+        &[
+            &crate::i18n::t(item.affinity_weapons_label()),
+            &current_name,
+            &status,
+            &crate::i18n::t(route),
+            &crate::i18n::t(route_desc),
+        ],
+    )
+}
+
+fn hero_weapon_slot(parent: &mut ChildSpawnerCommands, f: &Handle<Font>, icon: Handle<Image>) {
+    parent
+        .spawn((
+            Node {
+                width: Val::Px(68.0),
+                height: Val::Px(72.0),
+                margin: UiRect::all(Val::Px(2.0)),
+                padding: UiRect::all(Val::Px(5.0)),
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                row_gap: Val::Px(2.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.18, 0.24, 0.22, 0.88)),
+        ))
+        .with_children(|slot| {
+            slot.spawn((
+                ImageNode {
+                    image: icon,
+                    ..default()
+                },
+                Node {
+                    width: Val::Px(40.0),
+                    height: Val::Px(38.0),
+                    ..default()
+                },
+                HeroWeaponSlotIcon,
+            ));
+            slot.spawn((
+                Text::new(crate::i18n::t("武器")),
+                text_font(f, 9.0),
+                TextColor(UI_ACCENT_GOLD),
+            ));
+        });
+}
+
+fn hero_weapon_button(
+    parent: &mut ChildSpawnerCommands,
+    icon: Handle<Image>,
+    weapon: HeroWeapon,
+    current: HeroWeapon,
+) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                width: Val::Px(44.0),
+                height: Val::Px(42.0),
+                margin: UiRect::all(Val::Px(2.0)),
+                padding: UiRect::all(Val::Px(4.0)),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(if weapon == current {
+                weapon.skill_color().with_alpha(0.62)
+            } else {
+                Color::srgba(0.14, 0.18, 0.17, 0.90)
+            }),
+            UiAction::SelectHeroWeapon(weapon),
+        ))
+        .with_children(|slot| {
+            slot.spawn((
+                ImageNode {
+                    image: icon,
+                    ..default()
+                },
+                Node {
+                    width: Val::Px(31.0),
+                    height: Val::Px(31.0),
+                    ..default()
+                },
+            ));
+        });
+}
+
+fn hero_gear_slot_button(
+    parent: &mut ChildSpawnerCommands,
+    f: &Handle<Font>,
+    sprites: &Sprites,
+    hero: &HeroLoadout,
+    slot_kind: HeroGearSlot,
+) {
+    let item = hero.gear[slot_kind.idx()];
+    let (icon, label, bg, color) = if let Some(item) = item {
+        let def = item.def();
+        (
+            hero_gear_icon(sprites, item),
+            crate::i18n::t(def.short),
+            def.rarity.color().with_alpha(0.44),
+            Color::WHITE,
+        )
+    } else {
+        (
+            sprites.ui["ic_gear"].clone(),
+            crate::i18n::t(slot_kind.name()),
+            Color::srgba(0.12, 0.15, 0.13, 0.86),
+            Color::srgba(0.48, 0.52, 0.48, 0.70),
+        )
+    };
+
+    parent
+        .spawn((
+            Button,
+            Node {
+                width: Val::Px(68.0),
+                height: Val::Px(72.0),
+                margin: UiRect::all(Val::Px(2.0)),
+                padding: UiRect::all(Val::Px(5.0)),
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                row_gap: Val::Px(2.0),
+                ..default()
+            },
+            BackgroundColor(bg),
+            UiAction::UnequipHeroGear(slot_kind),
+            HeroGearSlotButton { slot: slot_kind },
+        ))
+        .with_children(|slot| {
+            slot.spawn((
+                ImageNode {
+                    image: icon,
+                    color,
+                    ..default()
+                },
+                Node {
+                    width: Val::Px(38.0),
+                    height: Val::Px(38.0),
+                    ..default()
+                },
+                HeroGearSlotIcon { slot: slot_kind },
+            ));
+            slot.spawn((
+                Text::new(label),
+                text_font(f, 9.0),
+                TextColor(Color::srgb(0.86, 0.86, 0.78)),
+                HeroGearSlotLabel { slot: slot_kind },
+            ));
+        });
+}
+
 fn hero_portrait_with_race(
     parent: &mut ChildSpawnerCommands,
     hero_icon: Handle<Image>,
@@ -1365,6 +1896,7 @@ fn hero_portrait_with_race(
                     height: Val::Percent(100.0),
                     ..default()
                 },
+                HeroPaperdollPortrait,
             ));
             slot.spawn((
                 Node {
@@ -1434,6 +1966,78 @@ fn dock_icon_button(
         });
 }
 
+fn panel_close_button(parent: &mut ChildSpawnerCommands, f: &Handle<Font>, action: UiAction) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(8.0),
+                top: Val::Px(8.0),
+                width: Val::Px(34.0),
+                height: Val::Px(30.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.12, 0.16, 0.15, 0.96)),
+            GlobalZIndex(96),
+            action,
+        ))
+        .with_children(|close| {
+            close.spawn((
+                Text::new(crate::i18n::t("×")),
+                text_font(f, 18.0),
+                TextColor(Color::srgb(0.86, 0.90, 0.82)),
+            ));
+        });
+}
+
+fn roguelite_choice_card(parent: &mut ChildSpawnerCommands, f: &Handle<Font>, index: usize) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                width: Val::Percent(31.5),
+                min_height: Val::Px(132.0),
+                padding: UiRect::all(Val::Px(10.0)),
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::SpaceBetween,
+                row_gap: Val::Px(6.0),
+                overflow: Overflow::clip(),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.10, 0.15, 0.12, 0.95)),
+            UiAction::PickRogueliteTalent(index),
+            RogueliteChoiceButton { index },
+        ))
+        .with_children(|card| {
+            card.spawn((
+                Text::new(""),
+                text_font(f, 10.0),
+                TextColor(UI_ACCENT_TEAL),
+                RogueliteChoiceSource { index },
+            ));
+            card.spawn((
+                Text::new(""),
+                text_font(f, 17.0),
+                TextColor(UI_ACCENT_GOLD),
+                RogueliteChoiceTitle { index },
+            ));
+            card.spawn((
+                Text::new(""),
+                text_font(f, 11.0),
+                TextColor(Color::srgb(0.82, 0.90, 0.80)),
+                RogueliteChoiceDesc { index },
+            ));
+            card.spawn((
+                Text::new(crate::i18n::t("选择")),
+                text_font(f, 11.0),
+                TextColor(Color::srgb(0.92, 0.96, 0.86)),
+            ));
+        });
+}
+
 fn equipment_button(
     parent: &mut ChildSpawnerCommands,
     f: &Handle<Font>,
@@ -1457,6 +2061,7 @@ fn equipment_button(
             },
             BackgroundColor(bg),
             UiAction::Equip(item),
+            EquipmentBagTile { item },
         ))
         .with_children(|b| {
             b.spawn((
@@ -1473,8 +2078,8 @@ fn equipment_button(
                 EquipmentButtonIcon { item },
             ));
             b.spawn((
-                Text::new(format!("{}×0", item.short())),
-                text_font(f, 8.5),
+                Text::new(format!("{}×0", crate::i18n::t(item.short()))),
+                text_font(f, 7.0),
                 TextColor(Color::srgb(0.55, 0.55, 0.55)),
                 EquipmentButtonText { item },
             ));
@@ -1490,6 +2095,7 @@ pub fn spawn_hud(
     fonts: Res<UiFont>,
     sprites: Res<Sprites>,
     hero: Res<HeroLoadout>,
+    gear_inv: Res<HeroGearInventory>,
 ) {
     let f = &fonts.0;
     // Start every level with the collapsible panels closed so the board is clear.
@@ -1607,11 +2213,23 @@ pub fn spawn_hud(
                     });
             });
             p.spawn((
-                Text::new(crate::i18n::t("侦察：等待关卡载入")),
-                text_font(f, 12.0),
-                TextColor(Color::srgb(0.72, 0.9, 0.78)),
-                WaveIntelText,
-            ));
+                Node {
+                    width: Val::Percent(100.0),
+                    padding: UiRect::axes(Val::Px(7.0), Val::Px(6.0)),
+                    margin: UiRect::bottom(Val::Px(2.0)),
+                    overflow: Overflow::clip(),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.05, 0.08, 0.07, 0.74)),
+            ))
+            .with_children(|intel| {
+                intel.spawn((
+                    Text::new(crate::i18n::t("侦察：等待关卡载入")),
+                    text_font(f, 11.0),
+                    TextColor(Color::srgb(0.72, 0.9, 0.78)),
+                    WaveIntelText,
+                ));
+            });
 
             // (Wave/pause/speed controls moved to the pinned top-left bar so they're
             // always reachable regardless of rail scroll.)
@@ -1694,16 +2312,16 @@ pub fn spawn_hud(
             }
         });
 
-    // --- loadout dock: hero, selected unit, equipment slots, and inventory. Hidden
-    // by default (`HudPanels::dock_open`) so it never covers the board; the player
-    // opens it with the 英雄/装备 button. Works the same on desktop and touch.
+    // --- tower context dock: selected tower, upgrade controls, gem sockets, and
+    // socketable gem inventory. It appears only while a non-hero tower is selected.
+    // Hero paperdoll equipment lives in the separate [`HeroPanelRoot`] below.
     commands
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(8.0),
                 right: Val::Px(PANEL_W_UI + 8.0),
-                bottom: Val::Px(6.0),
+                bottom: Val::Px(8.0),
                 height: Val::Px(190.0),
                 display: Display::None,
                 flex_direction: FlexDirection::Column,
@@ -1727,60 +2345,29 @@ pub fn spawn_hud(
             .with_children(|top| {
                 top.spawn((
                     Node {
-                        width: Val::Px(380.0),
+                        width: Val::Px(188.0),
                         height: Val::Percent(100.0),
-                        flex_direction: FlexDirection::Row,
-                        column_gap: Val::Px(7.0),
-                        padding: UiRect::all(Val::Px(6.0)),
-                        align_items: AlignItems::Center,
+                        flex_direction: FlexDirection::Column,
+                        justify_content: JustifyContent::Center,
+                        row_gap: Val::Px(6.0),
+                        padding: UiRect::all(Val::Px(10.0)),
                         ..default()
                     },
                     BackgroundColor(UI_CARD_SOFT),
                 ))
                 .with_children(|card| {
-                    hero_portrait_with_race(
-                        card,
-                        sprites.heroes[&hero.class].clone(),
-                        sprites.races[&hero.race].clone(),
-                        58.0,
-                    );
-                    card.spawn(Node {
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(2.0),
-                        flex_grow: 1.0,
-                        ..default()
-                    })
-                    .with_children(|info| {
-                        info.spawn((
-                            Text::new(crate::i18n::t("英雄")),
-                            text_font(f, 11.0),
-                            TextColor(Color::srgb(0.84, 0.94, 1.0)),
-                            HeroInfoText,
-                        ));
-                        info.spawn(Node {
-                            flex_direction: FlexDirection::Row,
-                            flex_wrap: FlexWrap::Wrap,
-                            ..default()
-                        })
-                        .with_children(|talents| {
-                            dock_icon_button(
-                                talents,
-                                sprites.hero_skills[&hero.class].clone(),
-                                UiAction::HeroSkill,
-                                hero.class.skill_color(),
-                                (),
-                            );
-                            for i in 0..HeroLoadout::TALENT_SLOTS {
-                                dock_icon_button(
-                                    talents,
-                                    sprites.hero_talents[&(hero.class, i)].clone(),
-                                    UiAction::HeroTalent(i),
-                                    Color::srgba(0.14, 0.18, 0.24, 0.92),
-                                    (),
-                                );
-                            }
-                        });
-                    });
+                    card.spawn((
+                        Text::new(crate::i18n::t("防御塔宝石")),
+                        text_font(f, 16.0),
+                        TextColor(UI_ACCENT_GOLD),
+                    ));
+                    card.spawn((
+                        Text::new(crate::i18n::t(
+                            "选中防御塔后在这里升级、修理、设定目标并镶嵌宝石。",
+                        )),
+                        text_font(f, 11.0),
+                        TextColor(Color::srgb(0.68, 0.78, 0.68)),
+                    ));
                 });
 
                 top.spawn((
@@ -1832,8 +2419,8 @@ pub fn spawn_hud(
                             bar.spawn((
                                 Button,
                                 Node {
-                                    width: Val::Px(44.0),
-                                    height: Val::Px(44.0),
+                                    width: Val::Px(52.0),
+                                    height: Val::Px(58.0),
                                     padding: UiRect::all(Val::Px(3.0)),
                                     flex_direction: FlexDirection::Column,
                                     align_items: AlignItems::Center,
@@ -1854,15 +2441,15 @@ pub fn spawn_hud(
                                         ..default()
                                     },
                                     Node {
-                                        width: Val::Px(24.0),
-                                        height: Val::Px(24.0),
+                                        width: Val::Px(30.0),
+                                        height: Val::Px(30.0),
                                         ..default()
                                     },
                                     EquippedSlotIcon { slot },
                                 ));
                                 slot_btn.spawn((
                                     Text::new(crate::i18n::t("空")),
-                                    text_font(f, 8.5),
+                                    text_font(f, 9.0),
                                     TextColor(Color::srgb(0.45, 0.45, 0.45)),
                                     EquippedSlotText { slot },
                                 ));
@@ -1901,7 +2488,7 @@ pub fn spawn_hud(
                             dock_button(
                                 actions,
                                 f,
-                                &crate::i18n::t("卸装"),
+                                &crate::i18n::t("卸石"),
                                 UiAction::Unequip,
                                 BTN_BG,
                             );
@@ -1912,27 +2499,13 @@ pub fn spawn_hud(
                                 UiAction::Sell,
                                 Color::srgb(0.35, 0.12, 0.12),
                             );
-                            dock_button(
-                                actions,
-                                f,
-                                &crate::i18n::t("重生"),
-                                UiAction::SummonHero,
-                                BTN_BG,
-                            );
-                            dock_button(
-                                actions,
-                                f,
-                                &crate::i18n::t("重置"),
-                                UiAction::ResetHeroTalents,
-                                BTN_BG,
-                            );
                         });
                     });
                 });
             });
 
             dock.spawn(Node {
-                height: Val::Px(14.0),
+                height: Val::Px(18.0),
                 flex_direction: FlexDirection::Row,
                 align_items: AlignItems::Center,
                 column_gap: Val::Px(7.0),
@@ -1941,18 +2514,18 @@ pub fn spawn_hud(
             })
             .with_children(|row| {
                 row.spawn((
-                    Text::new(crate::i18n::t("装备栏")),
+                    Text::new(crate::i18n::t("宝石库存")),
                     text_font(f, 11.0),
                     TextColor(Color::srgb(0.92, 0.84, 0.58)),
                 ));
                 row.spawn((
-                    Text::new(crate::i18n::t("装备 0")),
+                    Text::new(crate::i18n::t("宝石 0")),
                     text_font(f, 10.0),
                     TextColor(Color::srgb(0.9, 0.7, 0.9)),
                     InvText,
                 ));
                 row.spawn((
-                    Text::new(crate::i18n::t("选中英雄或塔后点击装备；点击槽位单独卸下")),
+                    Text::new(crate::i18n::t("选中防御塔后点击宝石镶嵌；点击槽位单独卸下")),
                     text_font(f, 10.0),
                     TextColor(Color::srgb(0.58, 0.68, 0.62)),
                 ));
@@ -1979,26 +2552,341 @@ pub fn spawn_hud(
             });
         });
 
-    // --- fixed feedback banner over the board (always visible, not in panel) ---
+    // --- hero paperdoll panel: preview + 4 equipment slots + icon inventory.
     commands
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Px(12.0),
-                left: Val::Px(0.0),
-                width: Val::Px(BOARD_W),
-                justify_content: JustifyContent::Center,
+                left: Val::Px(22.0),
+                top: Val::Px(56.0),
+                width: Val::Px(756.0),
+                height: Val::Px(486.0),
+                display: Display::None,
+                flex_direction: FlexDirection::Row,
+                padding: UiRect::all(Val::Px(10.0)),
+                column_gap: Val::Px(9.0),
+                overflow: Overflow::clip(),
                 ..default()
             },
+            BackgroundColor(UI_PANEL_DARK),
+            GlobalZIndex(28),
             HudRoot,
+            HeroPanelRoot,
+        ))
+        .with_children(|panel| {
+            panel
+                .spawn((
+                    Node {
+                        width: Val::Px(184.0),
+                        height: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        row_gap: Val::Px(6.0),
+                        padding: UiRect::all(Val::Px(8.0)),
+                        ..default()
+                    },
+                    BackgroundColor(UI_CARD_SOFT),
+                ))
+                .with_children(|preview| {
+                    preview.spawn((
+                        Text::new(crate::i18n::t("纸娃娃")),
+                        text_font(f, 13.0),
+                        TextColor(UI_ACCENT_GOLD),
+                    ));
+                    preview
+                        .spawn((
+                            Node {
+                                width: Val::Px(142.0),
+                                height: Val::Px(178.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgba(0.08, 0.11, 0.10, 0.78)),
+                        ))
+                        .with_children(|frame| {
+                            frame.spawn((
+                                ImageNode {
+                                    image: sprites.heroes[&hero.weapon].clone(),
+                                    ..default()
+                                },
+                                Node {
+                                    width: Val::Px(138.0),
+                                    height: Val::Px(138.0),
+                                    ..default()
+                                },
+                                HeroPaperdollPreview,
+                            ));
+                        });
+                    preview.spawn((
+                        Text::new(crate::i18n::tf(
+                            "{}·{} Lv{}",
+                            &[
+                                &crate::i18n::t(hero.race.name()),
+                                &crate::i18n::t(hero.weapon_kind().name()),
+                                &hero.level.to_string(),
+                            ],
+                        )),
+                        text_font(f, 11.0),
+                        TextColor(Color::srgb(0.84, 0.94, 1.0)),
+                    ));
+                });
+
+            panel
+                .spawn((
+                    Node {
+                        width: Val::Px(224.0),
+                        height: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        padding: UiRect::all(Val::Px(8.0)),
+                        row_gap: Val::Px(5.0),
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },
+                    BackgroundColor(UI_CARD_SOFT),
+                ))
+                .with_children(|info| {
+                    info.spawn((
+                        Text::new(crate::i18n::t("英雄")),
+                        text_font(f, 13.0),
+                        TextColor(UI_ACCENT_GOLD),
+                    ));
+                    info.spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        column_gap: Val::Px(8.0),
+                        align_items: AlignItems::Center,
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        hero_portrait_with_race(
+                            row,
+                            sprites.heroes[&hero.weapon].clone(),
+                            sprites.races[&hero.race].clone(),
+                            58.0,
+                        );
+                        row.spawn(Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(4.0),
+                            flex_grow: 1.0,
+                            overflow: Overflow::clip(),
+                            ..default()
+                        })
+                        .with_children(|col| {
+                            col.spawn((
+                                Text::new(crate::i18n::t("英雄纸娃娃")),
+                                text_font(f, 11.0),
+                                TextColor(Color::srgb(0.84, 0.94, 1.0)),
+                                HeroInfoText,
+                            ));
+                            col.spawn(Node {
+                                flex_direction: FlexDirection::Row,
+                                flex_wrap: FlexWrap::Wrap,
+                                ..default()
+                            })
+                            .with_children(|talents| {
+                                dock_icon_button(
+                                    talents,
+                                    sprites.hero_skills[&hero.weapon].clone(),
+                                    UiAction::HeroSkill,
+                                    hero.weapon.skill_color(),
+                                    (),
+                                );
+                                for i in 0..HeroLoadout::TALENT_SLOTS {
+                                    dock_icon_button(
+                                        talents,
+                                        sprites.hero_talents[&(hero.weapon, i)].clone(),
+                                        UiAction::HeroTalent(i),
+                                        Color::srgba(0.14, 0.18, 0.24, 0.92),
+                                        (),
+                                    );
+                                }
+                            });
+                        });
+                    });
+                    info.spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        flex_wrap: FlexWrap::Wrap,
+                        column_gap: Val::Px(4.0),
+                        row_gap: Val::Px(4.0),
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        dock_button(
+                            row,
+                            f,
+                            &crate::i18n::t("召回/重生"),
+                            UiAction::SummonHero,
+                            BTN_BG,
+                        );
+                        dock_button(
+                            row,
+                            f,
+                            &crate::i18n::t("重置天赋"),
+                            UiAction::ResetHeroTalents,
+                            BTN_BG,
+                        );
+                    });
+                });
+
+            panel
+                .spawn((
+                    Node {
+                        flex_grow: 1.0,
+                        height: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        padding: UiRect::all(Val::Px(8.0)),
+                        row_gap: Val::Px(6.0),
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },
+                    BackgroundColor(UI_CARD),
+                ))
+                .with_children(|gear_panel| {
+                    gear_panel.spawn((
+                        Text::new(crate::i18n::t("英雄装备")),
+                        text_font(f, 14.0),
+                        TextColor(UI_ACCENT_GOLD),
+                    ));
+                    gear_panel
+                        .spawn(Node {
+                            flex_direction: FlexDirection::Row,
+                            flex_wrap: FlexWrap::Wrap,
+                            column_gap: Val::Px(5.0),
+                            row_gap: Val::Px(5.0),
+                            ..default()
+                        })
+                        .with_children(|slots| {
+                            hero_weapon_slot(slots, f, sprites.hero_skills[&hero.weapon].clone());
+                            for slot in HeroGearSlot::ALL {
+                                hero_gear_slot_button(slots, f, &sprites, &hero, slot);
+                            }
+                        });
+                    gear_panel.spawn((
+                        Text::new(crate::i18n::t("武器库")),
+                        text_font(f, 12.0),
+                        TextColor(Color::srgb(0.92, 0.84, 0.58)),
+                    ));
+                    gear_panel
+                        .spawn(Node {
+                            height: Val::Px(48.0),
+                            flex_direction: FlexDirection::Row,
+                            flex_wrap: FlexWrap::Wrap,
+                            align_items: AlignItems::Center,
+                            overflow: Overflow::clip(),
+                            ..default()
+                        })
+                        .with_children(|weapons| {
+                            for weapon in HeroWeapon::ALL {
+                                hero_weapon_button(
+                                    weapons,
+                                    sprites.hero_skills[&weapon].clone(),
+                                    weapon,
+                                    hero.weapon,
+                                );
+                            }
+                        });
+                    gear_panel.spawn((
+                        Text::new(crate::i18n::t("背包")),
+                        text_font(f, 12.0),
+                        TextColor(Color::srgb(0.92, 0.84, 0.58)),
+                    ));
+                    gear_panel
+                        .spawn(Node {
+                            height: Val::Px(72.0),
+                            flex_direction: FlexDirection::Row,
+                            flex_wrap: FlexWrap::Wrap,
+                            align_items: AlignItems::Center,
+                            overflow: Overflow::clip(),
+                            ..default()
+                        })
+                        .with_children(|grid| {
+                            for item in HeroGear::ALL {
+                                hero_gear_button(
+                                    grid,
+                                    f,
+                                    hero_gear_icon(&sprites, item),
+                                    item,
+                                    gear_inv.count(item),
+                                );
+                            }
+                        });
+                });
+            panel_close_button(panel, f, UiAction::ToggleHeroPanel);
+        });
+
+    // --- fixed feedback banner over the board. Hidden when empty, compact enough
+    // to avoid the top-left controls and the right rail.
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(76.0),
+                left: Val::Px(184.0),
+                width: Val::Px(560.0),
+                min_height: Val::Px(34.0),
+                display: Display::None,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
+                overflow: Overflow::clip(),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.05, 0.07, 0.055, 0.82)),
+            GlobalZIndex(23),
+            HudRoot,
+            BannerRoot,
         ))
         .with_children(|b| {
             b.spawn((
                 Text::new(""),
-                text_font(f, 22.0),
+                text_font(f, 17.0),
                 TextColor(Color::srgb(1.0, 0.95, 0.5)),
                 BannerText,
             ));
+        });
+
+    // --- roguelite draft: appears after a cleared wave and blocks the next wave
+    // until the player chooses one build talent.
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(118.0),
+                right: Val::Px(PANEL_W_UI + 26.0),
+                top: Val::Px(86.0),
+                display: Display::None,
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(Val::Px(12.0)),
+                row_gap: Val::Px(10.0),
+                overflow: Overflow::clip(),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.05, 0.07, 0.055, 0.94)),
+            GlobalZIndex(32),
+            HudRoot,
+            RogueliteDraftRoot,
+        ))
+        .with_children(|draft| {
+            draft.spawn((
+                Text::new(crate::i18n::t("构筑选择")),
+                text_font(f, 18.0),
+                TextColor(UI_ACCENT_GOLD),
+                RogueliteDraftWaveText,
+            ));
+            draft
+                .spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    justify_content: JustifyContent::SpaceBetween,
+                    align_items: AlignItems::Stretch,
+                    column_gap: Val::Px(8.0),
+                    ..default()
+                })
+                .with_children(|row| {
+                    for index in 0..3 {
+                        roguelite_choice_card(row, f, index);
+                    }
+                });
         });
 
     // --- boss pressure bar over the board, hidden until a boss is alive ---
@@ -2109,6 +2997,8 @@ pub fn spawn_hud(
             },
             BackgroundColor(UI_PANEL_DARK),
             GlobalZIndex(80),
+            Pickable::IGNORE,
+            FocusPolicy::Pass,
             TooltipBox,
             HudRoot, // tagged so it despawns with the HUD on level exit
         ))
@@ -2117,6 +3007,8 @@ pub fn spawn_hud(
                 Text::new(""),
                 text_font(f, 13.0),
                 TextColor(Color::srgb(0.95, 0.95, 0.85)),
+                Pickable::IGNORE,
+                FocusPolicy::Pass,
                 TooltipText,
             ));
         });
@@ -2176,9 +3068,9 @@ pub fn spawn_hud(
             }
             side_icon_button(
                 bar,
-                sprites.hero_skills[&hero.class].clone(),
+                sprites.hero_skills[&hero.weapon].clone(),
                 UiAction::HeroSkill,
-                hero.class.skill_color(),
+                hero.weapon.skill_color(),
             );
         });
 
@@ -2296,6 +3188,8 @@ pub fn spawn_hud(
         },
         BackgroundColor(Color::srgba(1.0, 0.1, 0.08, 0.0)),
         GlobalZIndex(50),
+        Pickable::IGNORE,
+        FocusPolicy::Pass,
         ScreenFlash { level: 0.0 },
         HudRoot,
     ));
@@ -2354,7 +3248,7 @@ pub fn spawn_hud(
     // --- settings: a floating gear button (top-right) that opens a panel holding
     // all settings (quality, fullscreen, difficulty) instead of cluttering the rail.
     // Floating hero-panel button (top-right, left of the gear): the hero portrait;
-    // tapping opens the loadout dock (hero stats / equipment / talents / summon).
+    // tapping opens the dedicated hero paperdoll panel.
     commands
         .spawn((
             Button,
@@ -2371,13 +3265,13 @@ pub fn spawn_hud(
             },
             BackgroundColor(Color::srgba(0.16, 0.22, 0.30, 0.92)),
             GlobalZIndex(60),
-            UiAction::ToggleDock,
+            UiAction::ToggleHeroPanel,
             HudRoot,
         ))
         .with_children(|b| {
             hero_portrait_with_race(
                 b,
-                sprites.heroes[&hero.class].clone(),
+                sprites.heroes[&hero.weapon].clone(),
                 sprites.races[&hero.race].clone(),
                 32.0,
             );
@@ -2453,6 +3347,21 @@ pub fn spawn_hud(
                     f,
                     &crate::i18n::t("全屏"),
                     UiAction::Fullscreen,
+                    BTN_BG,
+                );
+            });
+            s.spawn((
+                Text::new(crate::i18n::t("亮度：明亮")),
+                text_font(f, 12.0),
+                TextColor(Color::srgb(1.0, 0.88, 0.58)),
+                BrightnessLabel,
+            ));
+            s.spawn(row_node()).with_children(|row| {
+                button(
+                    row,
+                    f,
+                    &crate::i18n::t("切换亮度"),
+                    UiAction::CycleBrightness,
                     BTN_BG,
                 );
             });
@@ -2637,24 +3546,70 @@ pub fn update_mobile_controls(
     }
 }
 
-/// Show/hide the collapsible loadout dock and the settings panel per [`HudPanels`].
-/// Both stay closed by default so the board is reachable; the player opens them on
-/// demand (英雄/装备 button and the top-right gear). Disjoint `Without<>` filters
-/// keep the two `&mut Node` queries from conflicting (B0001).
-pub fn update_panel_visibility(
-    panels: Res<HudPanels>,
-    mut dock: Query<&mut Node, (With<DockRoot>, Without<SettingsRoot>)>,
-    mut settings: Query<&mut Node, (With<SettingsRoot>, Without<DockRoot>)>,
+/// Close independent HUD overlays with Escape. Tower context remains selection
+/// driven, so this does not mutate the selected tower.
+pub fn close_hud_panels_with_escape(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut panels: ResMut<HudPanels>,
 ) {
-    if !panels.is_changed() {
+    if !keys.just_pressed(KeyCode::Escape) {
         return;
     }
-    let want = if panels.dock_open {
+
+    panels.hero_open = false;
+    panels.settings_open = false;
+}
+
+/// Show/hide the collapsible tower gem dock, hero paperdoll panel, and settings
+/// panel per [`HudPanels`]. The hero/tower panels are separate so their buttons
+/// and inventories do not overlap.
+pub fn update_panel_visibility(
+    panels: Res<HudPanels>,
+    sel: Res<Selection>,
+    towers: Query<&crate::tower::Tower>,
+    mut dock: Query<
+        &mut Node,
+        (
+            With<DockRoot>,
+            Without<HeroPanelRoot>,
+            Without<SettingsRoot>,
+        ),
+    >,
+    mut hero_panel: Query<
+        &mut Node,
+        (
+            With<HeroPanelRoot>,
+            Without<DockRoot>,
+            Without<SettingsRoot>,
+        ),
+    >,
+    mut settings: Query<
+        &mut Node,
+        (
+            With<SettingsRoot>,
+            Without<DockRoot>,
+            Without<HeroPanelRoot>,
+        ),
+    >,
+) {
+    let selected_tower = sel
+        .selected
+        .and_then(|entity| towers.get(entity).ok())
+        .is_some_and(|tower| !tower.hero);
+    let want = if selected_tower {
         Display::Flex
     } else {
         Display::None
     };
     for mut node in &mut dock {
+        node.display = want;
+    }
+    let want = if panels.hero_open {
+        Display::Flex
+    } else {
+        Display::None
+    };
+    for mut node in &mut hero_panel {
         node.display = want;
     }
     let want = if panels.settings_open {
@@ -2791,26 +3746,18 @@ fn recommended_elements(species: &[&crate::monster::MonsterSpecies]) -> String {
 
 fn elite_affix_intel(wave: i32, level_index: usize) -> String {
     if wave < 4 {
-        return crate::i18n::t("精英突变：尚未侦测");
+        return crate::i18n::t("突变：未侦测");
     }
     let pool = elite_affix_pool(wave, level_index);
     if pool.is_empty() {
-        return crate::i18n::t("精英突变：低风险");
+        return crate::i18n::t("突变：低风险");
     }
     let names = pool
         .iter()
         .map(|affix| crate::i18n::t(affix.name()))
         .collect::<Vec<_>>()
         .join("、");
-    let focus = pool[0];
-    crate::i18n::tf(
-        "精英突变：{}\n重点：{} - {}",
-        &[
-            &names,
-            &crate::i18n::t(focus.name()),
-            &crate::i18n::t(focus.description()),
-        ],
-    )
+    crate::i18n::tf("突变：{}", &[&names])
 }
 
 fn boss_candidates(
@@ -2859,17 +3806,8 @@ fn wave_intel_text(run: &RunState, level_index: usize) -> String {
             });
         if let Some(boss) = boss {
             let skill = boss_skill(boss.id);
-            let resist = crate::monster::resistance_summary(boss.resist_profile());
-            let resist_text = if resist.is_empty() {
-                crate::i18n::t("抗性：无明显偏向")
-            } else {
-                crate::i18n::tf(
-                    "抗性：{}",
-                    &[&resist.into_iter().take(3).collect::<Vec<_>>().join("、")],
-                )
-            };
             return crate::i18n::tf(
-                "侦察：{}第{}波首领 {}\n技能：{} - {}\n特性：{}\n{}\n{}\n本局遭遇：{}种",
+                "{}第{}波 · 首领\n{}\n{}\n{}\n遭遇 {} 种",
                 &[
                     &if run.is_endless() {
                         crate::i18n::t("无尽")
@@ -2878,10 +3816,7 @@ fn wave_intel_text(run: &RunState, level_index: usize) -> String {
                     },
                     &wave.to_string(),
                     &crate::i18n::t(boss.name),
-                    &crate::i18n::t(skill.name()),
-                    &crate::i18n::t(skill.description()),
-                    &boss.traits(),
-                    &resist_text,
+                    &crate::i18n::tf("{} · {}", &[&crate::i18n::t(skill.name()), &boss.traits()]),
                     &recommended_elements(&[boss]),
                     &run.encountered_species.len().to_string(),
                 ],
@@ -2915,7 +3850,7 @@ fn wave_intel_text(run: &RunState, level_index: usize) -> String {
         tags.join(" / ")
     };
     crate::i18n::tf(
-        "侦察：{}第{}波 {}\n特性：{}\n{}\n{}\n本局遭遇：{}种",
+        "{}第{}波 · 侦察\n{}\n{}\n{}\n遭遇 {} 种",
         &[
             &if run.is_endless() {
                 crate::i18n::t("无尽")
@@ -3231,8 +4166,11 @@ pub fn update_hud(
     sel: Res<Selection>,
     inv: Res<EquipmentInventory>,
     hero: Res<HeroLoadout>,
+    panels: Res<HudPanels>,
+    roguelite: Res<RogueliteRun>,
     towers: Query<&crate::tower::Tower>,
     bosses: Query<(&Enemy, Option<&PendingBossCast>)>,
+    mut banner_roots: Query<&mut Node, With<BannerRoot>>,
     mut texts: ParamSet<(
         Query<&mut Text, With<GoldText>>,
         Query<&mut Text, With<LivesText>>,
@@ -3291,8 +4229,18 @@ pub fn update_hud(
     if let Ok(mut t) = texts.p3().single_mut() {
         t.0 = format!("x{}", run.game_speed as i32);
     }
+    let overlay_open = panels.hero_open || panels.settings_open || roguelite.is_waiting();
+    let banner_visible = run.message_timer > 0.0 && !run.message.is_empty() && !overlay_open;
+    let banner_display = if banner_visible {
+        Display::Flex
+    } else {
+        Display::None
+    };
+    for mut node in &mut banner_roots {
+        node.display = banner_display;
+    }
     if let Ok(mut t) = texts.p4().single_mut() {
-        t.0 = if run.message_timer > 0.0 {
+        t.0 = if banner_visible {
             run.message.clone()
         } else {
             String::new()
@@ -3300,33 +4248,17 @@ pub fn update_hud(
     }
     if let Ok(mut t) = texts.p5().single_mut() {
         t.0 = match sel.selected.and_then(|e| towers.get(e).ok()) {
-            Some(tw) if tw.hero => {
-                let skill = if hero.skill_cd > 0 {
-                    crate::i18n::tf(
-                        "{} 冷却{}波",
-                        &[
-                            &crate::i18n::t(hero.class.skill_name()),
-                            &hero.skill_cd.to_string(),
-                        ],
-                    )
-                } else {
-                    crate::i18n::tf("{} 就绪", &[&crate::i18n::t(hero.class.skill_name())])
-                };
-                crate::i18n::tf(
-                    "英雄 {}·{} Lv{}  装备 {}/3  HP {}/{}\n{}  击杀 {}  {}",
-                    &[
-                        &crate::i18n::t(hero.race.name()),
-                        &crate::i18n::t(hero.class.name()),
-                        &hero.level.to_string(),
-                        &tw.equipment_count().to_string(),
-                        &(tw.hp.max(0.0) as i32).to_string(),
-                        &(tw.max_hp as i32).to_string(),
-                        &skill,
-                        &tw.kills.to_string(),
-                        &equipment_set_bonus_summary(&tw.equipment),
-                    ],
-                )
-            }
+            Some(tw) if tw.hero => crate::i18n::tf(
+                "已选中英雄 {}·{} Lv{}\n武器、装备、天赋和纸娃娃请打开右上角英雄面板。\nHP {}/{}  击杀 {}",
+                &[
+                    &crate::i18n::t(hero.race.name()),
+                    &crate::i18n::t(hero.weapon_kind().name()),
+                    &hero.level.to_string(),
+                    &(tw.hp.max(0.0) as i32).to_string(),
+                    &(tw.max_hp as i32).to_string(),
+                    &tw.kills.to_string(),
+                ],
+            ),
             Some(tw) => {
                 let silence = if snap.tower_silenced(tw.center()) {
                     crate::i18n::t("  静默中")
@@ -3334,7 +4266,7 @@ pub fn update_hud(
                     String::new()
                 };
                 crate::i18n::tf(
-                    "{} Lv{}/3  装备 {}/3  {}{}  目标:{}\nHP {}/{}  穿甲 {}  击杀 {}  修理{}  升级{}{}  {}",
+                    "{} Lv{}/3  宝石 {}/3  {}{}  目标:{}\nHP {}/{}  穿甲 {}  击杀 {}  修理{}  升级{}{}  {}",
                     &[
                         &crate::i18n::t(tw.kind.def().name),
                         &tw.level.to_string(),
@@ -3360,7 +4292,7 @@ pub fn update_hud(
                     ],
                 )
             }
-            None => crate::i18n::t("未选择单位\n点击英雄或防御塔查看属性，并为其装配右下方装备"),
+            None => crate::i18n::t("未选择防御塔\n点击防御塔查看属性；英雄请打开右上角纸娃娃面板"),
         };
     }
     if let Ok(mut t) = texts.p6().single_mut() {
@@ -3373,6 +4305,64 @@ pub fn update_hud(
         } else {
             intel
         };
+    }
+}
+
+fn roguelite_pool_bg(choice: crate::roguelite::RogueliteTalent) -> Color {
+    match choice.pool() {
+        crate::roguelite::TalentPool::Race => Color::srgba(0.15, 0.28, 0.19, 0.96),
+        crate::roguelite::TalentPool::Weapon => Color::srgba(0.17, 0.20, 0.32, 0.96),
+        crate::roguelite::TalentPool::Common => Color::srgba(0.30, 0.22, 0.10, 0.96),
+    }
+}
+
+pub fn update_roguelite_draft_panel(
+    roguelite: Res<RogueliteRun>,
+    hero: Res<HeroLoadout>,
+    mut roots: Query<&mut Node, With<RogueliteDraftRoot>>,
+    mut texts: ParamSet<(
+        Query<&mut Text, With<RogueliteDraftWaveText>>,
+        Query<(&RogueliteChoiceSource, &mut Text)>,
+        Query<(&RogueliteChoiceTitle, &mut Text)>,
+        Query<(&RogueliteChoiceDesc, &mut Text)>,
+    )>,
+    mut buttons: Query<(&RogueliteChoiceButton, &mut BackgroundColor)>,
+) {
+    let Some(draft) = roguelite.draft.as_ref() else {
+        for mut root in &mut roots {
+            root.display = Display::None;
+        }
+        return;
+    };
+
+    for mut root in &mut roots {
+        root.display = Display::Flex;
+    }
+    for mut text in &mut texts.p0() {
+        text.0 = crate::i18n::tf(
+            "第 {} 波战利品：选择一个构筑天赋",
+            &[&draft.wave.to_string()],
+        );
+    }
+    for (marker, mut text) in &mut texts.p1() {
+        if let Some(choice) = draft.choices.get(marker.index) {
+            text.0 = choice.source(&hero);
+        }
+    }
+    for (marker, mut text) in &mut texts.p2() {
+        if let Some(choice) = draft.choices.get(marker.index) {
+            text.0 = choice.name(&hero);
+        }
+    }
+    for (marker, mut text) in &mut texts.p3() {
+        if let Some(choice) = draft.choices.get(marker.index) {
+            text.0 = choice.desc(&hero, draft.wave);
+        }
+    }
+    for (marker, mut bg) in &mut buttons {
+        if let Some(choice) = draft.choices.get(marker.index) {
+            bg.0 = roguelite_pool_bg(*choice);
+        }
     }
 }
 
@@ -3392,7 +4382,11 @@ pub fn update_unit_stats(
                 } else {
                     0.0
                 };
-                let armor = tw.armor + equipment_set_bonus(&tw.equipment).armor_add;
+                let armor = if tw.hero {
+                    tw.armor
+                } else {
+                    tw.armor + equipment_set_bonus(&tw.equipment).armor_add
+                };
                 match stat {
                     UnitStat::Damage => format!("{}", tw.damage as i32),
                     UnitStat::Range => format!("{}", tw.range as i32),
@@ -3410,38 +4404,26 @@ pub fn update_hero_info(hero: Res<HeroLoadout>, mut info: Query<&mut Text, With<
     if let Ok(mut t) = info.single_mut() {
         let skill = if hero.skill_cd > 0 {
             crate::i18n::tf(
-                "{} 冷却{}波",
+                "{} 冷却 {} 波",
                 &[
-                    &crate::i18n::t(hero.class.skill_name()),
+                    &crate::i18n::t(hero.weapon.skill_name()),
                     &hero.skill_cd.to_string(),
                 ],
             )
         } else {
-            crate::i18n::tf("{} 就绪", &[&crate::i18n::t(hero.class.skill_name())])
-        };
-        let doc = hero.class.doctrine();
-        let ult = if hero.level >= crate::hero::HeroLoadout::MAX_LEVEL {
-            crate::i18n::tf("  终极·{}✓", &[&crate::i18n::t(hero.class.ultimate_name())])
-        } else {
-            crate::i18n::tf(
-                "  终极·{}(30级)",
-                &[&crate::i18n::t(hero.class.ultimate_name())],
-            )
+            crate::i18n::tf("{} 就绪", &[&crate::i18n::t(hero.weapon.skill_name())])
         };
         t.0 = crate::i18n::tf(
-            "英雄 {}·{} Lv{}  XP {}/{}  点数 {}\n天赋【{}】{}{}\n技能：{}  本职业已投 {}",
+            "{} Lv{}\n武器：{}\nXP {}/{}\n天赋点：{}\n技能：{}\n已投：{}",
             &[
                 &crate::i18n::t(hero.race.name()),
-                &crate::i18n::t(hero.class.name()),
                 &hero.level.to_string(),
+                &crate::i18n::t(hero.weapon_kind().name()),
                 &hero.xp.to_string(),
                 &hero.xp_to_next().to_string(),
                 &hero.talent_points.to_string(),
-                &crate::i18n::t(doc.name),
-                &crate::i18n::t(doc.desc),
-                &ult,
                 &skill,
-                &hero.spent_in_current_class().to_string(),
+                &hero.spent_in_current_weapon().to_string(),
             ],
         );
     }
@@ -3449,11 +4431,19 @@ pub fn update_hero_info(hero: Res<HeroLoadout>, mut info: Query<&mut Text, With<
 
 pub fn update_equipment_button_labels(
     inv: Res<EquipmentInventory>,
+    mut tiles: Query<(&EquipmentBagTile, &mut Node)>,
     mut labels: Query<(&EquipmentButtonText, &mut Text, &mut TextColor)>,
     mut icons: Query<(&EquipmentButtonIcon, &mut ImageNode)>,
 ) {
+    for (tile, mut node) in &mut tiles {
+        node.display = if inv.owns(tile.item) {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
     for (label, mut text, mut color) in &mut labels {
-        let count = inv.counts[label.item.idx()];
+        let count = inv.count(label.item);
         text.0 = format!("{}×{}", crate::i18n::t(label.item.short()), count);
         color.0 = if count > 0 {
             Color::WHITE
@@ -3462,7 +4452,7 @@ pub fn update_equipment_button_labels(
         };
     }
     for (icon, mut image) in &mut icons {
-        let count = inv.counts[icon.item.idx()];
+        let count = inv.count(icon.item);
         image.color = if count > 0 {
             Color::WHITE
         } else {
@@ -3494,24 +4484,33 @@ pub fn update_upgrade_button_label(
 pub fn update_equipped_slot_icons(
     sel: Res<Selection>,
     sprites: Res<Sprites>,
+    _hero: Res<HeroLoadout>,
     towers: Query<&crate::tower::Tower>,
     mut frames: Query<(&EquippedSlotFrame, &mut BackgroundColor)>,
     mut icons: Query<(&EquippedSlotIcon, &mut ImageNode)>,
     mut labels: Query<(&EquippedSlotText, &mut Text, &mut TextColor)>,
 ) {
-    let slots = sel
-        .selected
-        .and_then(|entity| towers.get(entity).ok().map(|tower| tower.equipment))
+    let selected = sel.selected.and_then(|entity| towers.get(entity).ok());
+    let hero_selected = selected.is_some_and(|tower| tower.hero);
+    let tower_slots = selected
+        .map(|tower| tower.equipment)
         .unwrap_or([None, None, None]);
 
     for (frame, mut bg) in &mut frames {
-        bg.0 = match slots.get(frame.slot).copied().flatten() {
-            Some(item) => item.def().rarity.color().with_alpha(0.20),
-            None => Color::srgba(1.0, 1.0, 1.0, 0.04),
+        bg.0 = if hero_selected {
+            Color::srgba(0.20, 0.26, 0.30, 0.16)
+        } else {
+            match tower_slots.get(frame.slot).copied().flatten() {
+                Some(item) => item.def().rarity.color().with_alpha(0.20),
+                None => Color::srgba(1.0, 1.0, 1.0, 0.04),
+            }
         };
     }
     for (icon, mut image) in &mut icons {
-        if let Some(item) = slots.get(icon.slot).copied().flatten() {
+        if hero_selected {
+            image.image = sprites.equipment[&Equipment::RustySight].clone();
+            image.color = Color::srgba(1.0, 1.0, 1.0, 0.0);
+        } else if let Some(item) = tower_slots.get(icon.slot).copied().flatten() {
             image.image = sprites.equipment[&item].clone();
             image.color = Color::WHITE;
         } else {
@@ -3520,7 +4519,10 @@ pub fn update_equipped_slot_icons(
         }
     }
     for (label, mut text, mut color) in &mut labels {
-        if let Some(item) = slots.get(label.slot).copied().flatten() {
+        if hero_selected {
+            text.0 = crate::i18n::t("英雄");
+            color.0 = Color::srgb(0.48, 0.62, 0.78);
+        } else if let Some(item) = tower_slots.get(label.slot).copied().flatten() {
             let def = item.def();
             text.0 = crate::i18n::t(def.short);
             color.0 = def.rarity.color();
@@ -3544,13 +4546,14 @@ pub fn hud_buttons(
     mut talents: ResMut<Talents>,
     mut abilities: ResMut<Abilities>,
     mut inv: ResMut<EquipmentInventory>,
-    mut quality: ResMut<GraphicsQuality>,
+    mut visuals: (ResMut<GraphicsQuality>, ResMut<LightingSettings>),
     // Bundled into one tuple param to stay within Bevy's 16-param system limit.
     mut confirm_state: (
         Res<TouchMode>,
         ResMut<TalentConfirm>,
         Res<HeroLoadout>,
         ResMut<HudPanels>,
+        Res<RogueliteRun>,
     ),
     mut sfx: MessageWriter<crate::audio::SfxEvent>,
     mut vfx: MessageWriter<crate::vfx::VfxEvent>,
@@ -3574,25 +4577,48 @@ pub fn hud_buttons(
             }
         }
         match action {
-            // Build arming + drag-to-place is owned by `mouse_build` (it
-            // reads the pressed Build icon directly), so nothing here.
-            UiAction::Build(_) => {}
+            UiAction::Build(kind) => {
+                // Widget activation is the authoritative button signal. The board
+                // click/touch placement still lives in `mouse_build`, but build
+                // arming should not depend on a separate Interaction::Pressed read.
+                sel.build_kind = Some(*kind);
+                sel.selected = None;
+                sel.preview_cell = None;
+                sel.dragging = false;
+                sel.grabbed_from_palette = false;
+                confirm_state.3.dock_open = false;
+                confirm_state.3.hero_open = false;
+            }
             UiAction::StartWave => {
-                start_wave(&mut run, current.0, &mut rng);
-                sfx.write(crate::audio::SfxEvent(Sound::Wave));
+                if confirm_state.4.is_waiting() {
+                    run.show(crate::i18n::t("先选择一个本波构筑天赋"));
+                } else {
+                    start_wave(&mut run, current.0, &mut rng);
+                    sfx.write(crate::audio::SfxEvent(Sound::Wave));
+                }
             }
             UiAction::ToggleAutoWave => toggle_auto_wave(&mut run),
             UiAction::ToggleDock => {
-                confirm_state.3.dock_open = !confirm_state.3.dock_open;
+                run.show(crate::i18n::t("选中防御塔后会显示升级和宝石面板"));
+            }
+            UiAction::ToggleHeroPanel => {
+                confirm_state.3.hero_open = !confirm_state.3.hero_open;
             }
             UiAction::ToggleSettings => {
                 confirm_state.3.settings_open = !confirm_state.3.settings_open;
             }
             UiAction::CycleQuality => {
-                quality.cycle();
+                visuals.0.cycle();
                 run.show(crate::i18n::tf(
                     "画质：{}",
-                    &[&crate::i18n::t(quality.level.name())],
+                    &[&crate::i18n::t(visuals.0.level.name())],
+                ));
+            }
+            UiAction::CycleBrightness => {
+                visuals.1.cycle_brightness();
+                run.show(crate::i18n::tf(
+                    "亮度：{}",
+                    &[&crate::i18n::t(visuals.1.brightness.name())],
                 ));
             }
             UiAction::TogglePause => paused.0 = !paused.0,
@@ -3659,14 +4685,18 @@ pub fn hud_buttons(
             UiAction::Unequip => {
                 if let Some(e) = sel.selected {
                     if let Ok((_, mut t)) = towers.get_mut(e) {
+                        if t.hero && t.equipment_count() == 0 {
+                            run.show(crate::i18n::t("英雄装备已独立，请在英雄纸娃娃面板调整"));
+                            continue;
+                        }
                         let returned = unequip_all_to_inventory(&mut inv, &mut t);
                         if returned > 0 && t.hero {
                             crate::hero::apply_loadout_to_tower(&confirm_state.2, &mut t);
                         }
                         if returned > 0 {
-                            run.show(crate::i18n::tf("卸下装备 {} 件", &[&returned.to_string()]));
+                            run.show(crate::i18n::tf("卸下宝石 {} 颗", &[&returned.to_string()]));
                         } else {
-                            run.show(crate::i18n::t("没有可卸下装备"));
+                            run.show(crate::i18n::t("没有可卸下宝石"));
                         }
                     } else {
                         run.show(crate::i18n::t("先选中一座塔"));
@@ -3678,16 +4708,20 @@ pub fn hud_buttons(
             UiAction::UnequipSlot(slot) => {
                 if let Some(e) = sel.selected {
                     if let Ok((_, mut t)) = towers.get_mut(e) {
+                        if t.hero && t.equipment.get(*slot).copied().flatten().is_none() {
+                            run.show(crate::i18n::t("英雄装备已独立，请在英雄纸娃娃面板调整"));
+                            continue;
+                        }
                         if let Some(item) = unequip_slot_to_inventory(&mut inv, &mut t, *slot) {
                             if t.hero {
                                 crate::hero::apply_loadout_to_tower(&confirm_state.2, &mut t);
                             }
                             run.show(crate::i18n::tf(
-                                "卸下 {}",
+                                "卸下宝石 {}",
                                 &[&crate::i18n::t(item.def().name)],
                             ));
                         } else {
-                            run.show(crate::i18n::t("该装备槽为空"));
+                            run.show(crate::i18n::t("该宝石槽为空"));
                         }
                     } else {
                         run.show(crate::i18n::t("先选中一座塔"));
@@ -3716,7 +4750,7 @@ pub fn hud_buttons(
                         sfx.write(crate::audio::SfxEvent(Sound::Sell));
                         if returned > 0 {
                             run.show(crate::i18n::tf(
-                                "出售 +{}，返还装备 {} 件",
+                                "出售 +{}，返还宝石 {} 颗",
                                 &[&refund.to_string(), &returned.to_string()],
                             ));
                         }
@@ -3783,11 +4817,17 @@ pub fn hud_buttons(
                 if let Some(e) = sel.selected {
                     if let Ok((_, mut t)) = towers.get_mut(e) {
                         let def = item.def();
+                        if t.hero {
+                            run.show(crate::i18n::t(
+                                "塔宝石不能装到英雄；英雄装备请打开纸娃娃面板",
+                            ));
+                            continue;
+                        }
                         if t.equipment_count() >= 3 {
-                            run.show(crate::i18n::t("装备槽已满"));
+                            run.show(crate::i18n::t("宝石槽已满"));
                         } else if inv.take(*item) {
                             crate::equipment::equip_into(&mut t, *item);
-                            run.show(crate::i18n::tf("装配 {}！", &[&crate::i18n::t(def.name)]));
+                            run.show(crate::i18n::tf("镶嵌 {}！", &[&crate::i18n::t(def.name)]));
                         } else {
                             run.show(crate::i18n::tf("没有{}", &[&crate::i18n::t(def.name)]));
                         }
@@ -3815,6 +4855,7 @@ pub fn tooltip_system(
     talents: Res<Talents>,
     abilities: Res<Abilities>,
     hero: Res<HeroLoadout>,
+    gear_inv: Res<HeroGearInventory>,
     levels: Res<Levels>,
     mut hold: ResMut<TooltipHold>,
     mut box_q: Query<&mut Node, With<TooltipBox>>,
@@ -3836,7 +4877,7 @@ pub fn tooltip_system(
     // it; hover (desktop) shows it instantly and dismisses as soon as it ends.
     if let Some(s) = pressed
         .as_ref()
-        .and_then(|a| tooltip_text(a, &talents, &abilities, &hero, &levels))
+        .and_then(|a| tooltip_text(a, &talents, &abilities, &hero, &gear_inv, &levels))
     {
         text.0 = s;
         node.display = Display::Flex;
@@ -3845,7 +4886,7 @@ pub fn tooltip_system(
     }
     if let Some(s) = hovered
         .as_ref()
-        .and_then(|a| tooltip_text(a, &talents, &abilities, &hero, &levels))
+        .and_then(|a| tooltip_text(a, &talents, &abilities, &hero, &gear_inv, &levels))
     {
         text.0 = s;
         node.display = Display::Flex;
@@ -3866,6 +4907,7 @@ fn tooltip_text(
     talents: &Talents,
     abilities: &Abilities,
     hero: &HeroLoadout,
+    gear_inv: &HeroGearInventory,
     levels: &Levels,
 ) -> Option<String> {
     // Info icons carry their tooltip text directly.
@@ -3960,18 +5002,13 @@ fn tooltip_text(
                 })
                 .unwrap_or_default();
             crate::i18n::tf(
-                "{} · {}\n{}\n{}\n伤害×{} 射程×{} 冷却×{}\n穿甲+{} HP×{} 护甲+{}{}\n{}\n{}\n每塔最多 3 件，需有库存",
+                "{} · {}\n{}\n{}\n{}{}\n{}\n{}\n每座防御塔最多镶嵌 3 颗宝石，需有库存",
                 &[
                     &d.rarity.label(),
                     &crate::i18n::t(d.name),
                     &crate::i18n::t(d.desc),
                     &crate::i18n::t(equipment_visual_line(*item)),
-                    &format!("{:.2}", d.damage_mult),
-                    &format!("{:.2}", d.range_mult),
-                    &format!("{:.2}", d.cooldown_mult),
-                    &format!("{:.0}", d.armor_pierce),
-                    &format!("{:.2}", d.hp_mult),
-                    &format!("{:.0}", d.armor_add),
+                    &equipment_stat_line(d),
                     &element,
                     &crate::equipment::recommend_text(d),
                     &crate::i18n::t(drop_source_hint(d.rarity)),
@@ -3984,15 +5021,18 @@ fn tooltip_text(
             crate::i18n::t("切换选中防御塔的目标优先级（T键）：近身/前锋/强者/残血/威胁")
         }
         UiAction::Unequip => {
-            crate::i18n::t("卸下选中防御塔的全部装备（Z键）：装备返还库存并移除加成")
+            crate::i18n::t("卸下选中防御塔的全部宝石（Z键）：宝石返还库存并移除加成")
         }
-        UiAction::UnequipSlot(_) => crate::i18n::t("卸下该槽位装备：返还库存并重新计算属性与共鸣"),
+        UiAction::UnequipSlot(_) => crate::i18n::t("卸下该宝石槽：返还库存并重新计算属性与共鸣"),
         UiAction::Sell => crate::i18n::t("出售选中的防御塔（X键），返还部分金币和已装配装备"),
         UiAction::StartWave => crate::i18n::t("开始下一波敌人（空格键）"),
         UiAction::ToggleAutoWave => crate::i18n::t("自动下一波（A键）：波间保留短暂准备倒计时"),
         UiAction::CycleQuality => crate::i18n::t(
             "切换画质：流畅(无抗锯齿)/标准(2×)/精细(4×)。分辨率自适应，手机卡顿就调低画质",
         ),
+        UiAction::CycleBrightness => {
+            crate::i18n::t("切换亮度：调整地图基础亮度和 Firefly 动态灯强度")
+        }
         UiAction::TogglePause => crate::i18n::t("暂停 / 继续（P键）"),
         UiAction::CycleSpeed => crate::i18n::t("切换游戏速度 1× / 2× / 3×（F键）"),
         UiAction::Fullscreen => crate::i18n::t("切换全屏显示"),
@@ -4001,9 +5041,9 @@ fn tooltip_text(
             "英雄开局自动登场（免费）。此键可在阵亡后立即重生。\n{}·{} Lv{}：{}\n左键选中英雄，右键命令它移动（触屏点地面移动）",
             &[
                 &crate::i18n::t(hero.race.name()),
-                &crate::i18n::t(hero.class.name()),
+                &crate::i18n::t(hero.weapon_kind().name()),
                 &hero.level.to_string(),
-                &crate::i18n::t(hero.class.blurb()),
+                &crate::i18n::t(hero.weapon.blurb()),
             ],
         ),
         UiAction::HeroSkill => {
@@ -4018,9 +5058,9 @@ fn tooltip_text(
             crate::i18n::tf(
                 "{} · {}\n{}\n{}",
                 &[
-                    &crate::i18n::t(hero.class.name()),
-                    &crate::i18n::t(hero.class.skill_name()),
-                    &crate::i18n::t(hero.class.skill_desc()),
+                    &crate::i18n::t(hero.weapon_kind().name()),
+                    &crate::i18n::t(hero.weapon.skill_name()),
+                    &crate::i18n::t(hero.weapon.skill_desc()),
                     &cd,
                 ],
             )
@@ -4030,32 +5070,35 @@ fn tooltip_text(
             crate::i18n::tf(
                 "{} {}/{}\n{}\n可用天赋点：{}",
                 &[
-                    &crate::i18n::t(hero.class.talent_name(*index)),
+                    &crate::i18n::t(hero.weapon.talent_name(*index)),
                     &rank.to_string(),
                     &crate::hero::HeroLoadout::TALENT_MAX_RANK.to_string(),
-                    &crate::i18n::t(hero.class.talent_desc(*index)),
+                    &crate::i18n::t(hero.weapon.talent_desc(*index)),
                     &hero.talent_points.to_string(),
                 ],
             )
         }
         UiAction::ResetHeroTalents => crate::i18n::tf(
-            "重置{}天赋\n返还当前职业已投入的 {} 点，不影响英雄等级和其他职业",
+            "重置{}天赋\n返还当前武器已投入的 {} 点，不影响英雄等级和其他武器",
             &[
-                &crate::i18n::t(hero.class.name()),
-                &hero.spent_in_current_class().to_string(),
+                &crate::i18n::t(hero.weapon_kind().name()),
+                &hero.spent_in_current_weapon().to_string(),
             ],
         ),
+        UiAction::PickRogueliteTalent(_) => {
+            crate::i18n::t("选择这个局内构筑天赋；选择后才会进入下一波")
+        }
         UiAction::SetDifficulty(d) => match d {
             Difficulty::Easy => crate::i18n::t("难度：简单（出怪少、金币多）"),
             Difficulty::Normal => crate::i18n::t("难度：普通（标准平衡）"),
             Difficulty::Hard => crate::i18n::t("难度：噩梦（出怪强、奖励高）"),
         },
-        UiAction::SelectHeroClass(c) => {
+        UiAction::SelectHeroWeapon(c) => {
             let doc = c.doctrine();
             crate::i18n::tf(
-                "{} · {}\n◆ 天赋【{}】{}\n◆ 技能·{}：{}",
+                "{} · 武器定位：{}\n◆ 武器天赋【{}】{}\n◆ 武器技能·{}：{}",
                 &[
-                    &crate::i18n::t(c.name()),
+                    &crate::i18n::t(crate::hero_gear::HeroWeaponKind::for_weapon(*c).name()),
                     &crate::i18n::t(c.role()),
                     &crate::i18n::t(doc.name),
                     &crate::i18n::t(doc.desc),
@@ -4068,6 +5111,42 @@ fn tooltip_text(
             "种族 · {}\n{}\n三族属性不同，出击前可更换",
             &[&crate::i18n::t(r.name()), &crate::i18n::t(r.blurb())],
         ),
+        UiAction::EquipHeroGear(item) => {
+            let d = item.def();
+            let count = gear_inv.count(*item);
+            let active = if hero.gear[d.slot.idx()] == Some(*item) {
+                crate::i18n::t("已装备")
+            } else if count == 0 {
+                crate::i18n::t("未解锁：通关封印宝箱可获得")
+            } else {
+                crate::i18n::t("点击装备")
+            };
+            crate::i18n::tf(
+                "{} [{} · {}]\n{}\n{}\n{}\n拥有：{}  {}",
+                &[
+                    &crate::i18n::t(d.name),
+                    &d.rarity.label(),
+                    &crate::i18n::t(d.slot.name()),
+                    &crate::i18n::t(d.desc),
+                    &hero_gear_stat_line(d),
+                    &hero_gear_affinity_line(*item, hero.weapon),
+                    &count.to_string(),
+                    &active,
+                ],
+            )
+        }
+        UiAction::UnequipHeroGear(slot) => {
+            let status = hero.gear[slot.idx()]
+                .map(|item| crate::i18n::tf("当前：{}", &[&crate::i18n::t(item.def().name)]))
+                .unwrap_or_else(|| crate::i18n::t("当前为空"));
+            crate::i18n::tf(
+                "{}\n{}",
+                &[
+                    &crate::i18n::tf("卸下{}", &[&crate::i18n::t(slot.name())]),
+                    &status,
+                ],
+            )
+        }
         // --- navigation / screen buttons ---
         UiAction::PlayLevel(i) => {
             let lore = LEVEL_LORE.get(*i).copied().unwrap_or("");
@@ -4081,7 +5160,7 @@ fn tooltip_text(
                         &crate::i18n::t(lore),
                     ],
                 ),
-                None => crate::i18n::t("查看关卡简报、选择英雄职业与种族后出击"),
+                None => crate::i18n::t("查看关卡简报、选择英雄种族后出击"),
             }
         }
         UiAction::PlayEndless => {
@@ -4091,17 +5170,18 @@ fn tooltip_text(
         UiAction::Restart => crate::i18n::t("重新开始本关（金币/防御塔/进度重置）"),
         UiAction::NextLevel => crate::i18n::t("进入下一关"),
         UiAction::ToMenu => crate::i18n::t("返回主菜单（战术指挥室）"),
-        UiAction::OpenArmory => crate::i18n::t("打开装备库：查看已获得的装备与套装"),
+        UiAction::OpenArmory => crate::i18n::t("打开宝石图鉴：查看已获得的防御塔宝石与共鸣"),
         UiAction::OpenTowerArchive => crate::i18n::t("打开防御塔档案：查看全部塔的属性与机制"),
         UiAction::OpenMilestones => crate::i18n::t("查看封印成就与解锁进度"),
         UiAction::OpenCampaignDossier => crate::i18n::t("查看战役档案：剧情与首领情报"),
         UiAction::OpenHeroCodex => {
-            crate::i18n::t("打开英雄图鉴：浏览职业×种族，查看天赋/技能/终极并选择出战英雄")
+            crate::i18n::t("打开英雄图鉴：浏览种族×武器与英雄装备图鉴，查看天赋/技能/终极")
         }
         UiAction::RefineEquipment(_) => crate::i18n::t("精炼：消耗重复装备，合成更高品质"),
-        UiAction::ToggleDock => crate::i18n::t("打开 / 收起英雄面板（属性 · 装备 · 天赋）"),
+        UiAction::ToggleDock => crate::i18n::t("选中防御塔后显示升级与宝石镶嵌面板"),
+        UiAction::ToggleHeroPanel => crate::i18n::t("打开 / 收起英雄面板（纸娃娃 · 背包 · 天赋）"),
         UiAction::ToggleSettings => {
-            crate::i18n::t("打开 / 收起设置（画质 · 全屏 · 难度 · 重新开始 · 返回主页）")
+            crate::i18n::t("打开 / 收起设置（画质 · 亮度 · 全屏 · 难度 · 重新开始 · 返回主页）")
         }
         _ => return None,
     })
@@ -4132,7 +5212,7 @@ pub fn update_ability_buttons(
             bg.0 = if hero.skill_cd > 0 {
                 Color::srgb(0.16, 0.16, 0.18)
             } else {
-                hero.class.skill_color()
+                hero.weapon.skill_color()
             };
         }
     }
@@ -4956,7 +6036,7 @@ pub struct HeroIntroPortrait;
 #[derive(Component)]
 pub struct HeroIntroText(pub Color);
 
-/// The chosen class×race animated "living portrait" atlas under
+/// The chosen weapon×race animated "living portrait" atlas under
 /// `assets/story/combo_anim/` (4×4 grid, 16 frames, WAN i2v generated).
 fn combo_anim_path(hero: &HeroLoadout) -> String {
     let race = match hero.race {
@@ -4966,7 +6046,7 @@ fn combo_anim_path(hero: &HeroLoadout) -> String {
     };
     format!(
         "story/combo_anim/{}_{}.webp",
-        hero.class.sprite_name(),
+        hero.weapon.sprite_name(),
         race
     )
 }
@@ -4990,8 +6070,14 @@ pub fn spawn_hero_intro(
         None,
     ));
     let f = &fonts.0;
-    let doc = hero.class.doctrine();
-    let name = format!("{}·{}", hero.race.name(), hero.class.name());
+    let doc = hero.weapon.doctrine();
+    let name = crate::i18n::tf(
+        "{}·{}",
+        &[
+            &crate::i18n::t(hero.race.name()),
+            &crate::i18n::t(hero.weapon_kind().name()),
+        ],
+    );
     commands
         .spawn((
             Node {
@@ -5035,7 +6121,10 @@ pub fn spawn_hero_intro(
                 HeroIntroText(gold),
             ));
             root.spawn((
-                Text::new(format!("【{}】{}", doc.name, doc.desc)),
+                Text::new(crate::i18n::tf(
+                    "【{}】{}",
+                    &[&crate::i18n::t(doc.name), &crate::i18n::t(doc.desc)],
+                )),
                 text_font(f, 14.0),
                 TextColor(teal.with_alpha(0.0)),
                 Node {
@@ -5093,7 +6182,7 @@ pub fn update_hero_intro(
 }
 
 /// Spawn a bottom-left hover/tap tooltip overlay (TooltipBox + TooltipText) for a
-/// selection screen, so `tooltip_system` can show info there too (race/class/etc).
+/// selection screen, so `tooltip_system` can show info there too (race/weapon/etc).
 /// `root` tags it for that screen's `despawn_with` cleanup.
 fn spawn_tooltip_box(commands: &mut Commands, f: &Handle<Font>, root: impl Bundle) {
     commands
@@ -5109,6 +6198,8 @@ fn spawn_tooltip_box(commands: &mut Commands, f: &Handle<Font>, root: impl Bundl
             },
             BackgroundColor(UI_PANEL_DARK),
             GlobalZIndex(80),
+            Pickable::IGNORE,
+            FocusPolicy::Pass,
             TooltipBox,
             root,
         ))
@@ -5117,6 +6208,8 @@ fn spawn_tooltip_box(commands: &mut Commands, f: &Handle<Font>, root: impl Bundl
                 Text::new(""),
                 text_font(f, 13.0),
                 TextColor(Color::srgb(0.95, 0.95, 0.85)),
+                Pickable::IGNORE,
+                FocusPolicy::Pass,
                 TooltipText,
             ));
         });
@@ -5169,7 +6262,7 @@ pub fn spawn_level_briefing(
                 &BOSS_WAVE_INTERVAL.to_string(),
                 &crate::i18n::t(diff.0.name()),
                 &crate::i18n::t(hero.race.name()),
-                &crate::i18n::t(hero.class.name()),
+                &crate::i18n::t(hero.weapon_kind().name()),
             ],
         )
     } else {
@@ -5182,7 +6275,7 @@ pub fn spawn_level_briefing(
                 &level.enemies.count.to_string(),
                 &crate::i18n::t(diff.0.name()),
                 &crate::i18n::t(hero.race.name()),
-                &crate::i18n::t(hero.class.name()),
+                &crate::i18n::t(hero.weapon_kind().name()),
             ],
         )
     };
@@ -5231,7 +6324,7 @@ pub fn spawn_level_briefing(
                     flex_direction: FlexDirection::Column,
                     padding: UiRect::all(Val::Px(16.0)),
                     row_gap: Val::Px(10.0),
-                    // Scrollable: the hero class/race picker makes this column tall.
+                    // Scrollable: the hero weapon/race picker makes this column tall.
                     overflow: Overflow::scroll_y(),
                     ..default()
                 },
@@ -5338,9 +6431,9 @@ pub fn spawn_level_briefing(
                     ));
                 });
 
-                // --- hero selection: pick class + race before deploying ---
+                // --- hero selection: pick race before deploying ---
                 left.spawn((
-                    Text::new(crate::i18n::t("选择英雄职业（出击前可更换）")),
+                    Text::new(crate::i18n::t("选择英雄种族")),
                     text_font(f, 14.0),
                     TextColor(UI_ACCENT_GOLD),
                     Node {
@@ -5354,27 +6447,6 @@ pub fn spawn_level_briefing(
                     TextColor(Color::srgb(0.85, 0.9, 1.0)),
                     HeroLabel,
                 ));
-                left.spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    flex_wrap: FlexWrap::Wrap,
-                    ..default()
-                })
-                .with_children(|row| {
-                    for class in Class::ALL {
-                        let col = if class == hero.class {
-                            Color::srgb(0.30, 0.52, 0.32)
-                        } else {
-                            BTN_BG
-                        };
-                        icon_button(
-                            row,
-                            sprites.heroes[&class].clone(),
-                            UiAction::SelectHeroClass(class),
-                            col,
-                            (),
-                        );
-                    }
-                });
                 left.spawn(Node {
                     flex_direction: FlexDirection::Row,
                     flex_wrap: FlexWrap::Wrap,
@@ -5671,7 +6743,7 @@ pub fn spawn_level_briefing(
                     });
             });
         });
-    // Hover/tap tooltips for the class/race pickers on this screen.
+    // Hover/tap tooltips for the weapon/race pickers on this screen.
     spawn_tooltip_box(&mut commands, f, BriefingRoot);
 }
 
@@ -5726,22 +6798,22 @@ pub fn briefing_buttons(
         match &event.action {
             UiAction::BeginMission => next.set(GameState::HeroIntro),
             UiAction::ToMenu => next.set(GameState::Menu),
-            UiAction::SelectHeroClass(c) => hero.set_class(*c),
             UiAction::SelectHeroRace(r) => hero.set_race(*r),
             _ => {}
         }
     }
 }
 
-/// Highlight the currently-selected hero class/race buttons on the briefing screen.
+/// Highlight the currently-selected hero weapon/race buttons on the briefing screen.
 pub fn update_hero_select_buttons(
     hero: Res<HeroLoadout>,
+    gear_inv: Res<HeroGearInventory>,
     mut q: Query<(&UiAction, &mut BackgroundColor)>,
 ) {
     for (action, mut bg) in &mut q {
         match action {
-            UiAction::SelectHeroClass(c) => {
-                bg.0 = if *c == hero.class {
+            UiAction::SelectHeroWeapon(c) => {
+                bg.0 = if *c == hero.weapon {
                     Color::srgb(0.30, 0.52, 0.32)
                 } else {
                     BTN_BG
@@ -5754,8 +6826,102 @@ pub fn update_hero_select_buttons(
                     BTN_BG
                 };
             }
+            UiAction::EquipHeroGear(item) => {
+                let def = item.def();
+                bg.0 = if !gear_inv.owns(*item) {
+                    Color::srgba(0.12, 0.12, 0.12, 0.62)
+                } else if hero.gear[def.slot.idx()] == Some(*item) {
+                    def.rarity.color().with_alpha(0.72)
+                } else {
+                    def.rarity.color().with_alpha(0.24)
+                };
+            }
+            UiAction::UnequipHeroGear(slot) => {
+                bg.0 = if hero.gear[slot.idx()].is_some() {
+                    Color::srgb(0.25, 0.34, 0.27)
+                } else {
+                    Color::srgb(0.11, 0.16, 0.13)
+                };
+            }
             _ => {}
         }
+    }
+}
+
+pub fn update_hero_paperdoll_panel(
+    hero: Res<HeroLoadout>,
+    gear_inv: Res<HeroGearInventory>,
+    sprites: Res<Sprites>,
+    paperdoll: Option<Res<crate::hero_paperdoll::HeroPaperdollRuntime>>,
+    mut previews: Query<&mut ImageNode, With<HeroPaperdollPreview>>,
+    mut portraits: Query<
+        &mut ImageNode,
+        (
+            With<HeroPaperdollPortrait>,
+            Without<HeroPaperdollPreview>,
+            Without<HeroWeaponSlotIcon>,
+            Without<HeroGearSlotIcon>,
+        ),
+    >,
+    mut weapon_icons: Query<
+        &mut ImageNode,
+        (With<HeroWeaponSlotIcon>, Without<HeroPaperdollPreview>),
+    >,
+    mut slot_icons: Query<
+        (&HeroGearSlotIcon, &mut ImageNode),
+        (Without<HeroWeaponSlotIcon>, Without<HeroPaperdollPreview>),
+    >,
+    mut slot_labels: Query<(&HeroGearSlotLabel, &mut Text)>,
+    mut slot_buttons: Query<(&HeroGearSlotButton, &mut BackgroundColor)>,
+    mut bag_tiles: Query<(&HeroGearBagTile, &mut Node)>,
+) {
+    let preview = paperdoll
+        .as_ref()
+        .and_then(|runtime| runtime.image())
+        .unwrap_or_else(|| sprites.heroes[&hero.weapon].clone());
+    for mut image in &mut previews {
+        image.image = preview.clone();
+        image.color = Color::WHITE;
+    }
+    for mut image in &mut portraits {
+        image.image = preview.clone();
+        image.color = Color::WHITE;
+    }
+
+    let weapon = sprites.hero_skills[&hero.weapon].clone();
+    for mut image in &mut weapon_icons {
+        image.image = weapon.clone();
+        image.color = Color::WHITE;
+    }
+
+    for (slot, mut image) in &mut slot_icons {
+        if let Some(item) = hero.gear[slot.slot.idx()] {
+            image.image = hero_gear_icon(&sprites, item);
+            image.color = Color::WHITE;
+        } else {
+            image.image = sprites.ui["ic_gear"].clone();
+            image.color = Color::srgba(0.48, 0.52, 0.48, 0.70);
+        }
+    }
+
+    for (slot, mut text) in &mut slot_labels {
+        text.0 = hero.gear[slot.slot.idx()]
+            .map(|item| crate::i18n::t(item.def().short))
+            .unwrap_or_else(|| crate::i18n::t(slot.slot.name()));
+    }
+
+    for (slot, mut bg) in &mut slot_buttons {
+        bg.0 = hero.gear[slot.slot.idx()]
+            .map(|item| item.def().rarity.color().with_alpha(0.44))
+            .unwrap_or_else(|| Color::srgba(0.12, 0.15, 0.13, 0.86));
+    }
+
+    for (tile, mut node) in &mut bag_tiles {
+        node.display = if gear_inv.owns(tile.item) {
+            Display::Flex
+        } else {
+            Display::None
+        };
     }
 }
 
@@ -5770,6 +6936,7 @@ pub fn spawn_menu(
     assets: Res<AssetServer>,
     lang: Res<Language>,
     audio: Res<AudioSettings>,
+    lighting: Res<LightingSettings>,
     mut dirty: ResMut<MenuDirty>,
 ) {
     dirty.0 = false;
@@ -5879,6 +7046,20 @@ pub fn spawn_menu(
                 s.spawn(row_node()).with_children(|row| {
                     button(row, f, &tr("切换画质"), UiAction::CycleQuality, BTN_BG);
                     button(row, f, &tr("全屏"), UiAction::Fullscreen, BTN_BG);
+                });
+                // 亮度
+                s.spawn((
+                    Text::new(format!(
+                        "{}：{}",
+                        tr("亮度"),
+                        tr(lighting.brightness.name())
+                    )),
+                    text_font(f, 13.0),
+                    TextColor(Color::srgb(1.0, 0.88, 0.58)),
+                    BrightnessLabel,
+                ));
+                s.spawn(row_node()).with_children(|row| {
+                    button(row, f, &tr("切换亮度"), UiAction::CycleBrightness, BTN_BG);
                 });
                 // 音量
                 s.spawn((
@@ -6422,16 +7603,54 @@ pub fn in_joystick(screen: Vec2, win: &Window) -> bool {
     screen.x >= 56.0 && screen.x <= win.width() * 0.60 && screen.y >= 96.0
 }
 
-/// Keep the menu hero label in sync with the chosen race + class.
+/// Keep the menu hero label in sync with the chosen race + weapon.
 pub fn update_hero_label(hero: Res<HeroLoadout>, mut q: Query<&mut Text, With<HeroLabel>>) {
     for mut t in &mut q {
         // Compact: portraits/icons carry the visuals; talents are managed in-game.
         t.0 = format!(
             "{}·{} Lv{}\n{}",
             hero.race.name(),
-            hero.class.name(),
+            hero.weapon_kind().name(),
             hero.level,
-            hero.class.role(),
+            hero.weapon.role(),
+        );
+    }
+}
+
+/// In-game summon button for the unique hero (kept out of `hud_buttons` to stay
+/// within the system-param limit).
+pub fn roguelite_buttons(
+    mut actions: MessageReader<UiActionActivated>,
+    mut roguelite: ResMut<RogueliteRun>,
+    mut run: ResMut<RunState>,
+    mut loadout: ResMut<HeroLoadout>,
+    mut talents: ResMut<Talents>,
+    mut towers: Query<(Entity, &mut crate::tower::Tower)>,
+    mut sfx: MessageWriter<crate::audio::SfxEvent>,
+    mut vfx: MessageWriter<crate::vfx::VfxEvent>,
+) {
+    for event in actions.read() {
+        let UiAction::PickRogueliteTalent(index) = event.action else {
+            continue;
+        };
+        let Some(picked) = roguelite.pick(index, &mut loadout, &mut talents, &mut run, &mut towers)
+        else {
+            run.show(crate::i18n::t("当前没有可选择的构筑天赋"));
+            continue;
+        };
+        let pos = towers
+            .iter_mut()
+            .find_map(|(_, tower)| tower.hero.then_some(tower.center()))
+            .unwrap_or(Vec2::ZERO);
+        vfx.write(crate::vfx::VfxEvent::Burst {
+            pos,
+            radius: 72.0,
+            color: Color::srgb(0.86, 0.95, 0.48),
+        });
+        sfx.write(crate::audio::SfxEvent(crate::audio::Sound::Upgrade));
+        run.show_for(
+            crate::i18n::tf("获得构筑天赋：{}", &[&picked.name(&loadout)]),
+            2.4,
         );
     }
 }
@@ -6443,9 +7662,11 @@ pub fn hero_buttons(
     mut actions: MessageReader<UiActionActivated>,
     mut run: ResMut<RunState>,
     mut loadout: ResMut<HeroLoadout>,
+    gear_inv: Res<HeroGearInventory>,
     mut towers: Query<(Entity, &mut crate::tower::Tower)>,
     enemies: Query<(Entity, &Enemy, &Transform)>,
     sprites: Res<Sprites>,
+    creatures: Res<crate::creatures::Creatures>,
     walks: Res<crate::build::HeroWalks>,
     mut sfx: MessageWriter<crate::audio::SfxEvent>,
     mut dmg: MessageWriter<Damage>,
@@ -6470,7 +7691,7 @@ pub fn hero_buttons(
                     tower,
                     &sprites,
                     &walks,
-                    loadout.class,
+                    loadout.weapon,
                     loadout.race,
                 );
                 loadout.alive = true;
@@ -6478,7 +7699,7 @@ pub fn hero_buttons(
                     "英雄降临：{}·{}（点击英雄选中，再点地面移动）",
                     &[
                         &crate::i18n::t(loadout.race.name()),
-                        &crate::i18n::t(loadout.class.name()),
+                        &crate::i18n::t(loadout.weapon_kind().name()),
                     ],
                 ));
                 sfx.write(crate::audio::SfxEvent(crate::audio::Sound::Raise));
@@ -6500,7 +7721,7 @@ pub fn hero_buttons(
                     run.show(crate::i18n::tf(
                         "{} +1（{}/{}）",
                         &[
-                            &crate::i18n::t(loadout.class.talent_name(*index)),
+                            &crate::i18n::t(loadout.weapon.talent_name(*index)),
                             &loadout.talent_rank(*index).to_string(),
                             &crate::hero::HeroLoadout::TALENT_MAX_RANK.to_string(),
                         ],
@@ -6512,7 +7733,7 @@ pub fn hero_buttons(
                 Err(msg) => run.show(crate::i18n::t(msg)),
             },
             UiAction::ResetHeroTalents => {
-                let refunded = loadout.respec_current_class();
+                let refunded = loadout.respec_current_weapon();
                 if refunded > 0 {
                     for (_, mut tower) in &mut towers {
                         if tower.hero {
@@ -6521,10 +7742,69 @@ pub fn hero_buttons(
                     }
                     run.show(crate::i18n::tf(
                         "重置{}天赋，返还 {} 点",
-                        &[&crate::i18n::t(loadout.class.name()), &refunded.to_string()],
+                        &[
+                            &crate::i18n::t(loadout.weapon_kind().name()),
+                            &refunded.to_string(),
+                        ],
                     ));
                 } else {
-                    run.show(crate::i18n::t("当前职业没有已投入天赋"));
+                    run.show(crate::i18n::t("当前武器没有已投入天赋"));
+                }
+            }
+            UiAction::SelectHeroWeapon(weapon) => {
+                if loadout.weapon == *weapon {
+                    run.show(crate::i18n::tf(
+                        "已装备武器：{}",
+                        &[&crate::i18n::t(loadout.weapon_kind().name())],
+                    ));
+                    continue;
+                }
+                loadout.set_weapon(*weapon);
+                for (_, mut tower) in &mut towers {
+                    if tower.hero {
+                        crate::hero::apply_loadout_to_tower(&loadout, &mut tower);
+                        tower.hp = tower.hp.min(tower.max_hp).max(tower.max_hp * 0.35);
+                        tower.cooldown_timer = 0.0;
+                    }
+                }
+                run.show(crate::i18n::tf(
+                    "切换武器：{}",
+                    &[&crate::i18n::t(loadout.weapon_kind().name())],
+                ));
+                sfx.write(crate::audio::SfxEvent(crate::audio::Sound::Upgrade));
+            }
+            UiAction::EquipHeroGear(item) => {
+                if !gear_inv.owns(*item) {
+                    run.show(crate::i18n::t("尚未解锁这件英雄装备"));
+                    continue;
+                }
+                let def = item.def();
+                loadout.equip_gear(*item);
+                for (_, mut tower) in &mut towers {
+                    if tower.hero {
+                        crate::hero::apply_loadout_to_tower(&loadout, &mut tower);
+                    }
+                }
+                run.show(crate::i18n::tf(
+                    "英雄穿戴：{}",
+                    &[&crate::i18n::t(def.name)],
+                ));
+                sfx.write(crate::audio::SfxEvent(crate::audio::Sound::Upgrade));
+            }
+            UiAction::UnequipHeroGear(slot) => {
+                if let Some(item) = loadout.unequip_gear_slot(*slot) {
+                    for (_, mut tower) in &mut towers {
+                        if tower.hero {
+                            crate::hero::apply_loadout_to_tower(&loadout, &mut tower);
+                        }
+                    }
+                    run.show(crate::i18n::tf(
+                        "卸下英雄装备：{}",
+                        &[&crate::i18n::t(item.def().name)],
+                    ));
+                    sfx.write(crate::audio::SfxEvent(crate::audio::Sound::Click));
+                } else {
+                    run.show(crate::i18n::t("该英雄装备槽为空"));
                 }
             }
             UiAction::HeroSkill => {
@@ -6540,6 +7820,11 @@ pub fn hero_buttons(
                         .iter_mut()
                         .find(|(_, tower)| tower.hero)
                         .map(|(hero_entity, hero)| {
+                            let facing = hero
+                                .move_target
+                                .map(|target| (target - hero.center()).normalize_or_zero())
+                                .filter(|dir| dir.length_squared() > 0.01)
+                                .unwrap_or_else(|| Vec2::from_angle(hero.angle));
                             (
                                 hero_entity,
                                 HeroSkillSource {
@@ -6547,6 +7832,7 @@ pub fn hero_buttons(
                                     damage: hero.damage,
                                     element: hero.element,
                                     max_hp: hero.max_hp,
+                                    facing,
                                 },
                             )
                         });
@@ -6555,11 +7841,14 @@ pub fn hero_buttons(
                     continue;
                 };
                 if cast_hero_skill(
+                    &mut commands,
                     hero_entity,
                     source,
                     &mut loadout,
                     &mut towers,
                     &enemies,
+                    &sprites,
+                    &creatures,
                     &mut dmg,
                     &mut status,
                     &mut buff,
@@ -6567,16 +7856,16 @@ pub fn hero_buttons(
                     &mut run,
                 ) {
                     loadout.skill_cd = loadout.skill_cooldown_max();
-                    sfx.write(crate::audio::SfxEvent(match loadout.class {
-                        crate::hero::Class::Warrior => crate::audio::Sound::Boss,
-                        crate::hero::Class::Mage => crate::audio::Sound::Meteor,
-                        crate::hero::Class::Ranger => crate::audio::Sound::Chain,
-                        crate::hero::Class::Guardian => crate::audio::Sound::Raise,
-                        crate::hero::Class::Stormcaller => crate::audio::Sound::Chain,
-                        crate::hero::Class::Warden => crate::audio::Sound::Upgrade,
-                        crate::hero::Class::Assassin => crate::audio::Sound::Chain,
-                        crate::hero::Class::Priest => crate::audio::Sound::Raise,
-                        crate::hero::Class::Engineer => crate::audio::Sound::Upgrade,
+                    sfx.write(crate::audio::SfxEvent(match loadout.weapon {
+                        crate::hero::HeroWeapon::BannerSword => crate::audio::Sound::Boss,
+                        crate::hero::HeroWeapon::StarfireStaff => crate::audio::Sound::Meteor,
+                        crate::hero::HeroWeapon::ShadowBow => crate::audio::Sound::Chain,
+                        crate::hero::HeroWeapon::OathShield => crate::audio::Sound::Raise,
+                        crate::hero::HeroWeapon::StormOrb => crate::audio::Sound::Chain,
+                        crate::hero::HeroWeapon::SentryCrossbow => crate::audio::Sound::Upgrade,
+                        crate::hero::HeroWeapon::NightDagger => crate::audio::Sound::Chain,
+                        crate::hero::HeroWeapon::SummonStaff => crate::audio::Sound::Raise,
+                        crate::hero::HeroWeapon::ForgeHammer => crate::audio::Sound::Upgrade,
                     }));
                 }
             }
@@ -6591,14 +7880,18 @@ struct HeroSkillSource {
     damage: f32,
     element: Element,
     max_hp: f32,
+    facing: Vec2,
 }
 
 fn cast_hero_skill(
+    commands: &mut Commands,
     hero_entity: Entity,
     source: HeroSkillSource,
     loadout: &mut HeroLoadout,
     towers: &mut Query<(Entity, &mut crate::tower::Tower)>,
     enemies: &Query<(Entity, &Enemy, &Transform)>,
+    sprites: &Sprites,
+    creatures: &crate::creatures::Creatures,
     dmg: &mut MessageWriter<Damage>,
     status: &mut MessageWriter<Status>,
     buff: &mut MessageWriter<BuffTower>,
@@ -6607,8 +7900,8 @@ fn cast_hero_skill(
 ) -> bool {
     let hero_pos = source.pos;
     let mult = loadout.skill_damage_mult();
-    match loadout.class {
-        crate::hero::Class::Warrior => {
+    match loadout.weapon {
+        crate::hero::HeroWeapon::BannerSword => {
             let radius = 108.0 + loadout.talent_rank(0) as f32 * 10.0;
             let amount = (190.0 + source.damage * 1.25) * mult;
             let mut hits = 0;
@@ -6641,18 +7934,18 @@ fn cast_hero_skill(
             vfx.write(crate::vfx::VfxEvent::Burst {
                 pos: hero_pos,
                 radius,
-                color: loadout.class.skill_color(),
+                color: loadout.weapon.skill_color(),
             });
             run.show(crate::i18n::tf(
                 "{}命中 {} 个敌人",
                 &[
-                    &crate::i18n::t(loadout.class.skill_name()),
+                    &crate::i18n::t(loadout.weapon.skill_name()),
                     &hits.to_string(),
                 ],
             ));
             true
         }
-        crate::hero::Class::Mage => {
+        crate::hero::HeroWeapon::StarfireStaff => {
             let target = enemies
                 .iter()
                 .max_by(|a, b| a.1.hp.total_cmp(&b.1.hp))
@@ -6686,18 +7979,18 @@ fn cast_hero_skill(
             vfx.write(crate::vfx::VfxEvent::Explosion {
                 pos: center,
                 radius,
-                color: loadout.class.skill_color(),
+                color: loadout.weapon.skill_color(),
             });
             run.show(crate::i18n::tf(
                 "{}席卷 {} 个敌人",
                 &[
-                    &crate::i18n::t(loadout.class.skill_name()),
+                    &crate::i18n::t(loadout.weapon.skill_name()),
                     &hits.to_string(),
                 ],
             ));
             true
         }
-        crate::hero::Class::Ranger => {
+        crate::hero::HeroWeapon::ShadowBow => {
             let mut targets = enemies
                 .iter()
                 .map(|(entity, enemy, tf)| (entity, enemy.path_index, tf.translation.truncate()))
@@ -6736,19 +8029,19 @@ fn cast_hero_skill(
                 vfx.write(crate::vfx::VfxEvent::Muzzle {
                     pos: hero_pos,
                     dir: (pos - hero_pos).normalize_or_zero(),
-                    color: loadout.class.skill_color(),
+                    color: loadout.weapon.skill_color(),
                 });
             }
             run.show(crate::i18n::tf(
                 "{}锁定 {} 个目标",
                 &[
-                    &crate::i18n::t(loadout.class.skill_name()),
+                    &crate::i18n::t(loadout.weapon.skill_name()),
                     &selected.len().to_string(),
                 ],
             ));
             true
         }
-        crate::hero::Class::Guardian => {
+        crate::hero::HeroWeapon::OathShield => {
             let radius =
                 132.0 + loadout.talent_rank(1) as f32 * 18.0 + loadout.talent_rank(5) as f32 * 10.0;
             let repaired = repair_and_buff_towers(
@@ -6760,7 +8053,7 @@ fn cast_hero_skill(
                 towers,
                 buff,
                 vfx,
-                loadout.class.skill_color(),
+                loadout.weapon.skill_color(),
             );
             let hero_healed = heal_hero(
                 hero_entity,
@@ -6796,19 +8089,19 @@ fn cast_hero_skill(
             vfx.write(crate::vfx::VfxEvent::Burst {
                 pos: hero_pos,
                 radius,
-                color: loadout.class.skill_color(),
+                color: loadout.weapon.skill_color(),
             });
             run.show(crate::i18n::tf(
                 "{}鼓舞 {} 座塔，压制 {} 个敌人",
                 &[
-                    &crate::i18n::t(loadout.class.skill_name()),
+                    &crate::i18n::t(loadout.weapon.skill_name()),
                     &repaired.to_string(),
                     &hits.to_string(),
                 ],
             ));
             true
         }
-        crate::hero::Class::Stormcaller => {
+        crate::hero::HeroWeapon::StormOrb => {
             let tower_hits = if loadout.talent_rank(4) > 0 {
                 repair_and_buff_towers(
                     hero_entity,
@@ -6819,7 +8112,7 @@ fn cast_hero_skill(
                     towers,
                     buff,
                     vfx,
-                    loadout.class.skill_color(),
+                    loadout.weapon.skill_color(),
                 )
             } else {
                 0
@@ -6833,7 +8126,7 @@ fn cast_hero_skill(
                     run.show(crate::i18n::tf(
                         "{}超频 {} 座塔",
                         &[
-                            &crate::i18n::t(loadout.class.skill_name()),
+                            &crate::i18n::t(loadout.weapon.skill_name()),
                             &tower_hits.to_string(),
                         ],
                     ));
@@ -6868,19 +8161,19 @@ fn cast_hero_skill(
             vfx.write(crate::vfx::VfxEvent::Explosion {
                 pos: center,
                 radius,
-                color: loadout.class.skill_color(),
+                color: loadout.weapon.skill_color(),
             });
             run.show(crate::i18n::tf(
                 "{}轰击 {} 个敌人，超频 {} 座塔",
                 &[
-                    &crate::i18n::t(loadout.class.skill_name()),
+                    &crate::i18n::t(loadout.weapon.skill_name()),
                     &hits.to_string(),
                     &tower_hits.to_string(),
                 ],
             ));
             true
         }
-        crate::hero::Class::Warden => {
+        crate::hero::HeroWeapon::SentryCrossbow => {
             let radius =
                 140.0 + loadout.talent_rank(1) as f32 * 18.0 + loadout.talent_rank(5) as f32 * 10.0;
             let tower_hits = repair_and_buff_towers(
@@ -6892,7 +8185,7 @@ fn cast_hero_skill(
                 towers,
                 buff,
                 vfx,
-                loadout.class.skill_color(),
+                loadout.weapon.skill_color(),
             );
             let mut hits = 0;
             for (enemy, _, tf) in enemies {
@@ -6930,19 +8223,19 @@ fn cast_hero_skill(
             vfx.write(crate::vfx::VfxEvent::Burst {
                 pos: hero_pos,
                 radius,
-                color: loadout.class.skill_color(),
+                color: loadout.weapon.skill_color(),
             });
             run.show(crate::i18n::tf(
                 "{}强化 {} 座塔，缠绕 {} 个敌人",
                 &[
-                    &crate::i18n::t(loadout.class.skill_name()),
+                    &crate::i18n::t(loadout.weapon.skill_name()),
                     &tower_hits.to_string(),
                     &hits.to_string(),
                 ],
             ));
             true
         }
-        crate::hero::Class::Assassin => {
+        crate::hero::HeroWeapon::NightDagger => {
             let mut targets = enemies
                 .iter()
                 .map(|(entity, enemy, tf)| {
@@ -6990,45 +8283,58 @@ fn cast_hero_skill(
                 vfx.write(crate::vfx::VfxEvent::Muzzle {
                     pos: hero_pos,
                     dir: (pos - hero_pos).normalize_or_zero(),
-                    color: loadout.class.skill_color(),
+                    color: loadout.weapon.skill_color(),
                 });
             }
             run.show(crate::i18n::tf(
                 "{}标记 {} 个目标",
                 &[
-                    &crate::i18n::t(loadout.class.skill_name()),
+                    &crate::i18n::t(loadout.weapon.skill_name()),
                     &selected.len().to_string(),
                 ],
             ));
             true
         }
-        crate::hero::Class::Priest => {
+        crate::hero::HeroWeapon::SummonStaff => {
             let radius =
-                145.0 + loadout.talent_rank(1) as f32 * 20.0 + loadout.talent_rank(4) as f32 * 10.0;
-            let tower_hits = repair_and_buff_towers(
-                hero_entity,
-                hero_pos,
-                radius,
-                0.07 + loadout.talent_rank(4) as f32 * 0.025,
-                1 + (loadout.talent_rank(1) / 2) as usize + (loadout.talent_rank(5) / 3) as usize,
-                towers,
-                buff,
-                vfx,
-                loadout.class.skill_color(),
-            );
-            let hero_healed = heal_hero(
-                hero_entity,
-                towers,
-                source.max_hp * (0.12 + loadout.talent_rank(0) as f32 * 0.025),
-            );
-            let mut hits = 0;
+                150.0 + loadout.talent_rank(3) as f32 * 18.0 + loadout.talent_rank(5) as f32 * 10.0;
+            let summon_count = 1
+                + (loadout.talent_rank(4) / 3) as usize
+                + usize::from(loadout.level >= HeroLoadout::MAX_LEVEL);
+            let summon_hp =
+                (source.max_hp * (0.24 + loadout.talent_rank(2) as f32 * 0.035)).max(220.0);
+            let summon_damage = ((52.0 + source.damage * 0.42) * mult).max(55.0);
+            let summon_speed = 74.0 + loadout.talent_rank(4) as f32 * 8.0;
+            let lifetime = 13.0
+                + loadout.talent_rank(4) as f32 * 1.4
+                + if loadout.level >= HeroLoadout::MAX_LEVEL {
+                    8.0
+                } else {
+                    0.0
+                };
+            for i in 0..summon_count {
+                let angle = (i as f32 / summon_count as f32) * std::f32::consts::TAU
+                    + std::f32::consts::FRAC_PI_4;
+                let offset = Vec2::from_angle(angle) * (TILE_SIZE * 0.72);
+                crate::tower::spawn_mythic_ally(
+                    commands,
+                    sprites.mythic_summon.clone(),
+                    hero_pos + offset,
+                    summon_hp,
+                    summon_damage,
+                    summon_speed,
+                    lifetime,
+                    hero_entity,
+                );
+            }
+            let mut weakened = 0;
             for (enemy, _, tf) in enemies {
                 if tf.translation.truncate().distance(hero_pos) <= radius {
-                    hits += 1;
+                    weakened += 1;
                     dmg.write(Damage {
                         source_tower: Some(hero_entity),
                         target: enemy,
-                        amount: (92.0 + source.damage * 0.45) * mult,
+                        amount: (56.0 + source.damage * 0.22) * mult,
                         magic: true,
                         element: Element::Arcane,
                         armor_pierce: 0.0,
@@ -7044,30 +8350,28 @@ fn cast_hero_skill(
                     status.write(Status {
                         source_tower: Some(hero_entity),
                         target: enemy,
-                        kind: StatusKind::Slow { duration: 1.0 },
+                        kind: StatusKind::Slow {
+                            duration: 1.0 + loadout.talent_rank(3) as f32 * 0.12,
+                        },
                     });
                 }
-            }
-            if tower_hits == 0 && hits == 0 && !hero_healed {
-                run.show(crate::i18n::t("圣辉祷言没有覆盖目标"));
-                return false;
             }
             vfx.write(crate::vfx::VfxEvent::Burst {
                 pos: hero_pos,
                 radius,
-                color: loadout.class.skill_color(),
+                color: loadout.weapon.skill_color(),
             });
             run.show(crate::i18n::tf(
-                "{}祝福 {} 座塔，虚弱 {} 个敌人",
+                "{}召唤 {} 只神话眷属，裂界削弱 {} 个敌人",
                 &[
-                    &crate::i18n::t(loadout.class.skill_name()),
-                    &tower_hits.to_string(),
-                    &hits.to_string(),
+                    &crate::i18n::t(loadout.weapon.skill_name()),
+                    &summon_count.to_string(),
+                    &weakened.to_string(),
                 ],
             ));
             true
         }
-        crate::hero::Class::Engineer => {
+        crate::hero::HeroWeapon::ForgeHammer => {
             let radius =
                 135.0 + loadout.talent_rank(2) as f32 * 18.0 + loadout.talent_rank(5) as f32 * 10.0;
             let tower_hits = repair_and_buff_towers(
@@ -7079,8 +8383,51 @@ fn cast_hero_skill(
                 towers,
                 buff,
                 vfx,
-                loadout.class.skill_color(),
+                loadout.weapon.skill_color(),
             );
+            let guard_count = 2
+                + (loadout.talent_rank(1) / 3) as usize
+                + usize::from(loadout.level >= HeroLoadout::MAX_LEVEL);
+            let guard_hp =
+                (source.max_hp * (0.20 + loadout.talent_rank(2) as f32 * 0.025)).max(180.0);
+            let guard_damage =
+                (source.damage * (0.46 + loadout.talent_rank(0) as f32 * 0.035) * mult).max(36.0);
+            let guard_lifetime =
+                10.0 + loadout.talent_rank(2) as f32 * 0.8 + loadout.talent_rank(5) as f32 * 0.55;
+            let guard_positions =
+                forge_guard_positions(hero_pos, source.facing, guard_count, radius, enemies);
+            let guard_home_range = (TILE_SIZE
+                * (2.0
+                    + loadout.talent_rank(2) as f32 * 0.12
+                    + loadout.talent_rank(5) as f32 * 0.10))
+                .min(radius * 0.68)
+                .max(TILE_SIZE * 1.55);
+            for pos in guard_positions {
+                let guard = crate::tower::spawn_ally(
+                    commands,
+                    creatures,
+                    crate::data::EnemyKind::Shielded,
+                    pos,
+                    guard_hp,
+                    guard_damage,
+                    52.0,
+                    guard_lifetime,
+                    0.72,
+                    hero_entity,
+                );
+                commands.entity(guard).insert((
+                    TemporaryGuard,
+                    FixedSummonHome {
+                        pos,
+                        range: guard_home_range,
+                    },
+                ));
+                vfx.write(crate::vfx::VfxEvent::ElementPulse {
+                    pos,
+                    color: loadout.weapon.skill_color(),
+                    strong: false,
+                });
+            }
             let mut hits = 0;
             for (enemy, _, tf) in enemies {
                 if tf.translation.truncate().distance(hero_pos) <= radius {
@@ -7102,19 +8449,16 @@ fn cast_hero_skill(
                     });
                 }
             }
-            if tower_hits == 0 && hits == 0 {
-                run.show(crate::i18n::t("过载装置没有覆盖目标"));
-                return false;
-            }
             vfx.write(crate::vfx::VfxEvent::Burst {
                 pos: hero_pos,
                 radius,
-                color: loadout.class.skill_color(),
+                color: loadout.weapon.skill_color(),
             });
             run.show(crate::i18n::tf(
-                "{}超频 {} 座塔，脉冲 {} 个敌人",
+                "{}组装 {} 个临时守卫，超频 {} 座塔，脉冲 {} 个敌人",
                 &[
-                    &crate::i18n::t(loadout.class.skill_name()),
+                    &crate::i18n::t(loadout.weapon.skill_name()),
+                    &guard_count.to_string(),
                     &tower_hits.to_string(),
                     &hits.to_string(),
                 ],
@@ -7122,6 +8466,71 @@ fn cast_hero_skill(
             true
         }
     }
+}
+
+fn forge_guard_positions(
+    hero_pos: Vec2,
+    fallback_facing: Vec2,
+    count: usize,
+    skill_radius: f32,
+    enemies: &Query<(Entity, &Enemy, &Transform)>,
+) -> Vec<Vec2> {
+    let dir = forge_guard_direction(hero_pos, fallback_facing, skill_radius, enemies);
+    let side = Vec2::new(-dir.y, dir.x);
+    let per_row = if count <= 3 { count.max(1) } else { 2 };
+    let mut out = Vec::with_capacity(count);
+    for i in 0..count {
+        let row = i / per_row;
+        let col = i % per_row;
+        let row_count = (count - row * per_row).min(per_row);
+        let lateral = (col as f32 - (row_count as f32 - 1.0) * 0.5) * TILE_SIZE * 0.58;
+        let forward = TILE_SIZE * (0.78 - row as f32 * 0.50);
+        let pos = hero_pos + dir * forward + side * lateral;
+        out.push(clamp_guard_pos(pos));
+    }
+    out
+}
+
+fn forge_guard_direction(
+    hero_pos: Vec2,
+    fallback_facing: Vec2,
+    skill_radius: f32,
+    enemies: &Query<(Entity, &Enemy, &Transform)>,
+) -> Vec2 {
+    let fallback = if fallback_facing.length_squared() > 0.01 {
+        fallback_facing.normalize()
+    } else {
+        Vec2::X
+    };
+    let scan_radius = (skill_radius * 1.35).max(TILE_SIZE * 3.0);
+    let mut best: Option<(usize, f32, Vec2)> = None;
+    for (_, enemy, tf) in enemies {
+        let pos = tf.translation.truncate();
+        let dist = hero_pos.distance(pos);
+        if dist > scan_radius {
+            continue;
+        }
+        let better = best
+            .map(|(path_index, best_dist, _)| {
+                enemy.path_index > path_index
+                    || (enemy.path_index == path_index && dist < best_dist)
+            })
+            .unwrap_or(true);
+        if better {
+            best = Some((enemy.path_index, dist, pos));
+        }
+    }
+    best.map(|(_, _, pos)| (pos - hero_pos).normalize_or_zero())
+        .filter(|dir| dir.length_squared() > 0.01)
+        .unwrap_or(fallback)
+}
+
+fn clamp_guard_pos(pos: Vec2) -> Vec2 {
+    let margin = TILE_SIZE * 0.35;
+    Vec2::new(
+        pos.x.clamp(-BOARD_W * 0.5 + margin, BOARD_W * 0.5 - margin),
+        pos.y.clamp(-BOARD_H * 0.5 + margin, BOARD_H * 0.5 - margin),
+    )
 }
 
 fn heal_hero(
@@ -7188,6 +8597,17 @@ pub fn update_quality_label(
     }
 }
 
+pub fn update_brightness_label(
+    lighting: Res<LightingSettings>,
+    lang: Res<Language>,
+    mut q: Query<&mut Text, With<BrightnessLabel>>,
+) {
+    let l = lang.lang;
+    for mut t in &mut q {
+        t.0 = format!("{}：{}", tr(l, "亮度"), tr(l, lighting.brightness.name()));
+    }
+}
+
 pub fn update_volume_label(
     audio: Res<AudioSettings>,
     lang: Res<Language>,
@@ -7211,6 +8631,7 @@ pub fn menu_buttons(
     mut current: ResMut<CurrentLevel>,
     mut diff: ResMut<GameDifficulty>,
     mut quality: ResMut<GraphicsQuality>,
+    mut lighting: ResMut<LightingSettings>,
     mut audio: ResMut<AudioSettings>,
     mut lang: ResMut<Language>,
     mut dirty: ResMut<MenuDirty>,
@@ -7223,6 +8644,7 @@ pub fn menu_buttons(
     for event in actions.read() {
         match &event.action {
             UiAction::CycleQuality => quality.cycle(),
+            UiAction::CycleBrightness => lighting.cycle_brightness(),
             UiAction::CycleVolume => audio.cycle(),
             UiAction::CycleLanguage => {
                 lang.cycle();
@@ -7242,7 +8664,7 @@ pub fn menu_buttons(
                 }
             }
             UiAction::SelectHeroRace(r) => hero.set_race(*r),
-            UiAction::SelectHeroClass(c) => hero.set_class(*c),
+            UiAction::SelectHeroWeapon(c) => hero.set_weapon(*c),
             UiAction::PlayLevel(i) => {
                 mode.0 = RunMode::Campaign;
                 current.0 = *i;
@@ -7638,9 +9060,15 @@ pub struct HeroCodexRoot;
 #[derive(Component)]
 pub struct HeroCodexInfo;
 
-/// The hero codex: browse every class × race, pick the deploy hero, and read its
-/// role / doctrine / skill / ultimate. Replaces the cluttered menu hero card.
-pub fn spawn_hero_codex(mut commands: Commands, fonts: Res<UiFont>, sprites: Res<Sprites>) {
+/// Hero codex: browse race × weapon loadouts, pick the deployed build, and read
+/// the weapon's doctrine / skill / ultimate. The weapon enum is now the
+/// internal combat profile, but the player-facing UI treats it as a weapon.
+pub fn spawn_hero_codex(
+    mut commands: Commands,
+    fonts: Res<UiFont>,
+    sprites: Res<Sprites>,
+    gear_inv: Res<HeroGearInventory>,
+) {
     let f = &fonts.0;
     commands
         .spawn((
@@ -7666,7 +9094,7 @@ pub fn spawn_hero_codex(mut commands: Commands, fonts: Res<UiFont>, sprites: Res
             ));
             p.spawn((
                 Text::new(crate::i18n::t(
-                    "选择出战英雄 · 种族 × 职业（悬停查看天赋与技能；三族属性不同）",
+                    "浏览种族 × 武器图鉴；英雄装备只显示已发现条目",
                 )),
                 text_font(f, 13.0),
                 TextColor(UI_ACCENT_TEAL),
@@ -7689,7 +9117,8 @@ pub fn spawn_hero_codex(mut commands: Commands, fonts: Res<UiFont>, sprites: Res
                     );
                 }
             });
-            // Class portrait grid.
+            // Weapon grid. These are combat profiles internally, but the UI shows
+            // weapon icons so the player does not read them as separate professions.
             p.spawn(Node {
                 width: Val::Px(660.0),
                 flex_direction: FlexDirection::Row,
@@ -7698,11 +9127,11 @@ pub fn spawn_hero_codex(mut commands: Commands, fonts: Res<UiFont>, sprites: Res
                 ..default()
             })
             .with_children(|grid| {
-                for class in Class::ALL {
+                for weapon in HeroWeapon::ALL {
                     icon_button(
                         grid,
-                        sprites.heroes[&class].clone(),
-                        UiAction::SelectHeroClass(class),
+                        sprites.hero_skills[&weapon].clone(),
+                        UiAction::SelectHeroWeapon(weapon),
                         BTN_BG,
                         (),
                     );
@@ -7727,6 +9156,53 @@ pub fn spawn_hero_codex(mut commands: Commands, fonts: Res<UiFont>, sprites: Res
                     HeroCodexInfo,
                 ));
             });
+            p.spawn((
+                Text::new(crate::i18n::tf(
+                    "英雄装备图鉴 {}/{}",
+                    &[
+                        &HeroGear::ALL
+                            .iter()
+                            .filter(|item| gear_inv.owns(**item))
+                            .count()
+                            .to_string(),
+                        &HeroGear::ALL.len().to_string(),
+                    ],
+                )),
+                text_font(f, 18.0),
+                TextColor(UI_ACCENT_GOLD),
+            ));
+            p.spawn(Node {
+                width: Val::Px(660.0),
+                flex_direction: FlexDirection::Row,
+                flex_wrap: FlexWrap::Wrap,
+                justify_content: JustifyContent::Center,
+                ..default()
+            })
+            .with_children(|grid| {
+                let owned = HeroGear::ALL
+                    .into_iter()
+                    .filter(|item| gear_inv.owns(*item))
+                    .collect::<Vec<_>>();
+                if owned.is_empty() {
+                    grid.spawn((
+                        Text::new(crate::i18n::t(
+                            "尚未发现英雄装备。通关封印宝箱后会在这里出现。",
+                        )),
+                        text_font(f, 14.0),
+                        TextColor(Color::srgb(0.62, 0.66, 0.58)),
+                    ));
+                    return;
+                }
+                for item in owned {
+                    hero_gear_codex_card(
+                        grid,
+                        f,
+                        hero_gear_icon(&sprites, item),
+                        item,
+                        gear_inv.count(item),
+                    );
+                }
+            });
             p.spawn(Node {
                 margin: UiRect::top(Val::Px(8.0)),
                 ..default()
@@ -7735,7 +9211,7 @@ pub fn spawn_hero_codex(mut commands: Commands, fonts: Res<UiFont>, sprites: Res
                 button(row, f, &crate::i18n::t("返回"), UiAction::ToMenu, BTN_BG);
             });
         });
-    // Hover/tap tooltips for the class/race buttons.
+    // Hover/tap tooltips for the weapon/race buttons.
     spawn_tooltip_box(&mut commands, f, HeroCodexRoot);
 }
 
@@ -7746,7 +9222,7 @@ pub fn hero_codex_buttons(
 ) {
     for event in actions.read() {
         match &event.action {
-            UiAction::SelectHeroClass(c) => hero.set_class(*c),
+            UiAction::SelectHeroWeapon(c) => hero.set_weapon(*c),
             UiAction::SelectHeroRace(r) => hero.set_race(*r),
             UiAction::ToMenu => next.set(GameState::Menu),
             _ => {}
@@ -7759,20 +9235,21 @@ pub fn update_hero_codex_info(
     mut q: Query<&mut Text, With<HeroCodexInfo>>,
 ) {
     if let Ok(mut t) = q.single_mut() {
-        let doc = hero.class.doctrine();
+        let doc = hero.weapon.doctrine();
         t.0 = crate::i18n::tf(
-            "{}·{}  Lv{}  ·  {}\n天赋【{}】{}\n技能·{}：{}\n终极·{}：{}",
+            "{}·{}  Lv{}  ·  武器定位：{}\n装备：{}\n武器天赋【{}】{}\n武器技能·{}：{}\n终极·{}：{}",
             &[
                 &crate::i18n::t(hero.race.name()),
-                &crate::i18n::t(hero.class.name()),
+                &crate::i18n::t(hero.weapon_kind().name()),
                 &hero.level.to_string(),
-                &crate::i18n::t(hero.class.role()),
+                &crate::i18n::t(hero.weapon.role()),
+                &hero.gear_summary(),
                 &crate::i18n::t(doc.name),
                 &crate::i18n::t(doc.desc),
-                &crate::i18n::t(hero.class.skill_name()),
-                &crate::i18n::t(hero.class.skill_desc()),
-                &crate::i18n::t(hero.class.ultimate_name()),
-                &crate::i18n::t(hero.class.ultimate_desc()),
+                &crate::i18n::t(hero.weapon.skill_name()),
+                &crate::i18n::t(hero.weapon.skill_desc()),
+                &crate::i18n::t(hero.weapon.ultimate_name()),
+                &crate::i18n::t(hero.weapon.ultimate_desc()),
             ],
         );
     }
@@ -8086,13 +9563,13 @@ fn spawn_armory_contents(
         ))
         .with_children(|p| {
             p.spawn((
-                Text::new(crate::i18n::t("装备库")),
+                Text::new(crate::i18n::t("宝石图鉴")),
                 text_font(f, 30.0),
                 TextColor(Color::srgb(1.0, 0.74, 0.32)),
             ));
             p.spawn((
                 Text::new(crate::i18n::tf(
-                    "库存 {} 件   已获得 {}/{} 种   每座塔最多装配 3 件",
+                    "库存 {} 件   已发现 {}/{} 种   未发现条目保持隐藏",
                     &[&inv.total().to_string(), &owned_kinds.to_string(), &Equipment::ALL.len().to_string()],
                 )),
                 text_font(f, 14.0),
@@ -8124,25 +9601,22 @@ fn spawn_armory_contents(
                 ..default()
             })
             .with_children(|grid| {
-                for item in Equipment::ALL {
+                if owned_kinds == 0 {
+                    grid.spawn((
+                        Text::new(crate::i18n::t(
+                            "尚未发现任何宝石。通关、首领和精英怪会掉落新的宝石。",
+                        )),
+                        text_font(f, 14.0),
+                        TextColor(Color::srgb(0.62, 0.66, 0.58)),
+                    ));
+                    return;
+                }
+                for item in Equipment::ALL.into_iter().filter(|item| inv.owns(*item)) {
                     let d = item.def();
-                    let count = inv.counts[item.idx()];
-                    let owned = count > 0;
-                    let panel_color = if owned {
-                        d.rarity.color().with_alpha(0.18)
-                    } else {
-                        Color::srgba(1.0, 1.0, 1.0, 0.04)
-                    };
-                    let name_color = if owned {
-                        d.rarity.color()
-                    } else {
-                        Color::srgb(0.38, 0.36, 0.34)
-                    };
-                    let body_color = if owned {
-                        Color::srgb(0.82, 0.82, 0.74)
-                    } else {
-                        Color::srgb(0.46, 0.45, 0.42)
-                    };
+                    let count = inv.count(item);
+                    let panel_color = d.rarity.color().with_alpha(0.18);
+                    let name_color = d.rarity.color();
+                    let body_color = Color::srgb(0.82, 0.82, 0.74);
                     grid.spawn((
                         Node {
                             width: Val::Px(240.0),
@@ -8160,11 +9634,7 @@ fn spawn_armory_contents(
                         cell.spawn((
                             ImageNode {
                                 image: sprites.equipment[&item].clone(),
-                                color: if owned {
-                                    Color::WHITE
-                                } else {
-                                    Color::srgba(0.42, 0.42, 0.42, 0.55)
-                                },
+                                color: Color::WHITE,
                                 ..default()
                             },
                             Node {
@@ -8183,17 +9653,12 @@ fn spawn_armory_contents(
                             TextColor(name_color),
                         ));
                         cell.spawn((
-                            Text::new(if owned {
-                                crate::i18n::tf("库存 {}   短名 {}", &[&count.to_string(), &crate::i18n::t(d.short)])
-                            } else {
-                                crate::i18n::tf("未获得   短名 {}", &[&crate::i18n::t(d.short)])
-                            }),
+                            Text::new(crate::i18n::tf(
+                                "库存 {}   短名 {}",
+                                &[&count.to_string(), &crate::i18n::t(d.short)],
+                            )),
                             text_font(f, 11.0),
-                            TextColor(if owned {
-                                Color::srgb(1.0, 0.9, 0.45)
-                            } else {
-                                Color::srgb(0.42, 0.40, 0.36)
-                            }),
+                            TextColor(Color::srgb(1.0, 0.9, 0.45)),
                         ));
                         cell.spawn((
                             Text::new(equipment_stat_line(d)),
@@ -8203,11 +9668,7 @@ fn spawn_armory_contents(
                         cell.spawn((
                             Text::new(crate::i18n::t(equipment_visual_line(item))),
                             text_font(f, 9.0),
-                            TextColor(if owned {
-                                Color::srgb(0.68, 0.78, 0.86)
-                            } else {
-                                Color::srgb(0.42, 0.44, 0.45)
-                            }),
+                            TextColor(Color::srgb(0.68, 0.78, 0.86)),
                         ));
                         cell.spawn((
                             Text::new(crate::i18n::t(d.desc)),
@@ -8364,6 +9825,8 @@ pub fn spawn_victory(
     sfx: Res<crate::audio::Sfx>,
     audio: Res<crate::audio::AudioSettings>,
     mut inv: ResMut<EquipmentInventory>,
+    mut hero_gear_inv: ResMut<HeroGearInventory>,
+    hero: Res<HeroLoadout>,
     mut rng: ResMut<Rng>,
     mut towers: Query<&mut crate::tower::Tower>,
 ) {
@@ -8397,11 +9860,17 @@ pub fn spawn_victory(
         }
     }
     let best_stars = progress.stars[current.0];
-    let rewards = roll_clear_rewards(&mut rng, stars, clear_reward_bonus(diff.0), current.0);
+    let reward_bonus = clear_reward_bonus(diff.0);
+    let rewards = roll_clear_rewards(&mut rng, stars, reward_bonus, current.0);
     for item in &rewards {
         inv.add(*item);
     }
-    let reward_cards = rewards
+    let hero_reward =
+        crate::hero_gear::roll_clear_reward(&mut rng, stars, reward_bonus, current.0, hero.weapon);
+    if let Some(item) = hero_reward {
+        hero_gear_inv.add(item);
+    }
+    let mut reward_cards = rewards
         .iter()
         .map(|item| {
             let d = item.def();
@@ -8413,6 +9882,20 @@ pub fn spawn_victory(
             }
         })
         .collect::<Vec<_>>();
+    if let Some(item) = hero_reward {
+        let d = item.def();
+        let affinity_note = if item.has_weapon_affinity(hero.weapon) {
+            crate::i18n::t(" · 适配当前武器")
+        } else {
+            String::new()
+        };
+        reward_cards.push(RewardCard {
+            image: hero_gear_icon(&sprites, item),
+            color: d.rarity.color(),
+            title: crate::i18n::t(d.name),
+            subtitle: crate::i18n::tf("英雄装 · {}{}", &[&d.rarity.label(), &affinity_note]),
+        });
+    }
     let mut subtitle = if has_next {
         if newly_unlocked {
             crate::i18n::tf(
@@ -8448,6 +9931,15 @@ pub fn spawn_victory(
     subtitle.push_str(&crate::i18n::tf(
         "\n封印宝箱：{}",
         &[&equipment_reward_summary(&rewards)],
+    ));
+    subtitle.push_str(&crate::i18n::tf(
+        "\n英雄装备：{}",
+        &[&hero_reward
+            .map(|item| {
+                let d = item.def();
+                crate::i18n::tf("{}·{}", &[&d.rarity.label(), &crate::i18n::t(d.name)])
+            })
+            .unwrap_or_else(|| crate::i18n::t("无"))],
     ));
     if returned > 0 {
         subtitle.push_str(&crate::i18n::tf(

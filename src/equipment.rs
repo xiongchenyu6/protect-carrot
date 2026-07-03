@@ -230,6 +230,18 @@ pub struct EquipmentDef {
     pub armor_pierce: f32,
     pub hp_mult: f32,
     pub armor_add: f32,
+    pub aoe_radius_add: f32,
+    pub chain_count_add: i32,
+    pub chain_range_add: f32,
+    pub control_duration_mult: f32,
+    pub dot_damage_mult: f32,
+    pub dot_duration_mult: f32,
+    pub armor_reduce_add: f32,
+    pub summon_hp_mult: f32,
+    pub summon_speed_mult: f32,
+    pub max_summons_add: i32,
+    pub heal_amount_mult: f32,
+    pub buff_range_add: f32,
     pub desc: &'static str,
 }
 
@@ -251,6 +263,18 @@ const fn base(
         armor_pierce: 0.0,
         hp_mult: 1.0,
         armor_add: 0.0,
+        aoe_radius_add: 0.0,
+        chain_count_add: 0,
+        chain_range_add: 0.0,
+        control_duration_mult: 1.0,
+        dot_damage_mult: 1.0,
+        dot_duration_mult: 1.0,
+        armor_reduce_add: 0.0,
+        summon_hp_mult: 1.0,
+        summon_speed_mult: 1.0,
+        max_summons_add: 0,
+        heal_amount_mult: 1.0,
+        buff_range_add: 0.0,
         desc: "",
     }
 }
@@ -275,6 +299,7 @@ pub static EQUIPMENT_DEFS: &[EquipmentDef] = &[
     EquipmentDef {
         damage_mult: 1.10,
         range_mult: 1.05,
+        chain_range_add: 12.0,
         desc: "骨质尾羽，适合远程塔。",
         ..base(
             Equipment::BoneFletching,
@@ -287,6 +312,7 @@ pub static EQUIPMENT_DEFS: &[EquipmentDef] = &[
         damage_mult: 1.15,
         element: Some(Element::Physical),
         armor_pierce: 4.0,
+        aoe_radius_add: 8.0,
         desc: "黑火药桶，提升爆破与穿甲。",
         ..base(
             Equipment::SaltpeterKeg,
@@ -299,6 +325,8 @@ pub static EQUIPMENT_DEFS: &[EquipmentDef] = &[
         damage_mult: 1.10,
         element: Some(Element::Arcane),
         range_mult: 1.08,
+        chain_count_add: 1,
+        chain_range_add: 18.0,
         desc: "把攻击折射为秘法能量。",
         ..base(Equipment::PrismShard, "裂光棱晶", "棱晶", Rarity::Uncommon)
     },
@@ -306,12 +334,16 @@ pub static EQUIPMENT_DEFS: &[EquipmentDef] = &[
         damage_mult: 1.08,
         element: Some(Element::Frost),
         cooldown_mult: 0.94,
+        control_duration_mult: 1.18,
         desc: "附加冰霜属性并略微加速。",
         ..base(Equipment::FrostLens, "寒雾透镜", "寒镜", Rarity::Uncommon)
     },
     EquipmentDef {
         damage_mult: 1.14,
         element: Some(Element::Fire),
+        aoe_radius_add: 6.0,
+        dot_damage_mult: 1.14,
+        dot_duration_mult: 1.12,
         desc: "让攻击带上火焰属性。",
         ..base(Equipment::EmberCore, "余烬核心", "余烬", Rarity::Rare)
     },
@@ -319,6 +351,9 @@ pub static EQUIPMENT_DEFS: &[EquipmentDef] = &[
         damage_mult: 1.12,
         element: Some(Element::Toxic),
         armor_pierce: 6.0,
+        dot_damage_mult: 1.22,
+        dot_duration_mult: 1.18,
+        armor_reduce_add: 2.0,
         desc: "毒囊改造，克制再生与血肉怪。",
         ..base(Equipment::VenomVial, "深渊毒瓶", "毒瓶", Rarity::Rare)
     },
@@ -326,12 +361,16 @@ pub static EQUIPMENT_DEFS: &[EquipmentDef] = &[
         damage_mult: 1.10,
         element: Some(Element::Storm),
         cooldown_mult: 0.88,
+        chain_count_add: 1,
+        chain_range_add: 24.0,
         desc: "雷风线圈，明显提升攻速。",
         ..base(Equipment::ThunderCoil, "雷鸣线圈", "雷圈", Rarity::Rare)
     },
     EquipmentDef {
         damage_mult: 1.16,
         element: Some(Element::Shadow),
+        control_duration_mult: 1.12,
+        armor_reduce_add: 3.0,
         desc: "把弹道染成暗影，压制施法怪。",
         ..base(Equipment::ShadowSeal, "暗影蜡印", "蜡印", Rarity::Rare)
     },
@@ -344,6 +383,7 @@ pub static EQUIPMENT_DEFS: &[EquipmentDef] = &[
     EquipmentDef {
         cooldown_mult: 0.78,
         damage_mult: 1.06,
+        summon_speed_mult: 1.16,
         desc: "危险但高效的机械扳机。",
         ..base(
             Equipment::ClockworkTrigger,
@@ -355,6 +395,7 @@ pub static EQUIPMENT_DEFS: &[EquipmentDef] = &[
     EquipmentDef {
         damage_mult: 1.18,
         armor_pierce: 12.0,
+        armor_reduce_add: 4.0,
         desc: "驱邪盐晶，打穿重甲与护盾。",
         ..base(Equipment::WitchSalt, "女巫盐晶", "盐晶", Rarity::Epic)
     },
@@ -362,6 +403,8 @@ pub static EQUIPMENT_DEFS: &[EquipmentDef] = &[
         hp_mult: 1.25,
         armor_add: 5.0,
         element: Some(Element::Frost),
+        control_duration_mult: 1.22,
+        summon_hp_mult: 1.12,
         desc: "深潜者鳞片，提供冰冷护甲。",
         ..base(Equipment::DeepOneScale, "深潜者鳞片", "鳞片", Rarity::Epic)
     },
@@ -369,6 +412,8 @@ pub static EQUIPMENT_DEFS: &[EquipmentDef] = &[
         damage_mult: 1.22,
         element: Some(Element::Shadow),
         range_mult: 1.10,
+        control_duration_mult: 1.26,
+        armor_reduce_add: 6.0,
         desc: "邪教手册，扩大射程并转为暗影。",
         ..base(
             Equipment::CultistManual,
@@ -380,6 +425,8 @@ pub static EQUIPMENT_DEFS: &[EquipmentDef] = &[
     EquipmentDef {
         damage_mult: 1.28,
         armor_pierce: 18.0,
+        aoe_radius_add: 10.0,
+        chain_range_add: 16.0,
         desc: "星金炮管，大幅提升穿透火力。",
         ..base(
             Equipment::StarMetalBarrel,
@@ -392,6 +439,8 @@ pub static EQUIPMENT_DEFS: &[EquipmentDef] = &[
         damage_mult: 1.20,
         cooldown_mult: 0.82,
         element: Some(Element::Arcane),
+        chain_count_add: 2,
+        chain_range_add: 32.0,
         desc: "虚空电容，让高频塔质变。",
         ..base(
             Equipment::VoidCapacitor,
@@ -405,6 +454,8 @@ pub static EQUIPMENT_DEFS: &[EquipmentDef] = &[
         hp_mult: 1.30,
         armor_add: 6.0,
         element: Some(Element::Arcane),
+        heal_amount_mult: 1.30,
+        buff_range_add: 24.0,
         desc: "圣齿轮，兼顾输出与生存。",
         ..base(
             Equipment::SaintedGear,
@@ -418,6 +469,10 @@ pub static EQUIPMENT_DEFS: &[EquipmentDef] = &[
         hp_mult: 1.35,
         armor_add: 10.0,
         element: Some(Element::Toxic),
+        dot_damage_mult: 1.28,
+        dot_duration_mult: 1.24,
+        summon_hp_mult: 1.35,
+        max_summons_add: 1,
         desc: "克拉肯心脏，血肉与毒性一起增殖。",
         ..base(Equipment::KrakenHeart, "克拉肯心脏", "海心", Rarity::Mythic)
     },
@@ -427,6 +482,15 @@ pub static EQUIPMENT_DEFS: &[EquipmentDef] = &[
         cooldown_mult: 0.86,
         element: Some(Element::Arcane),
         armor_pierce: 16.0,
+        aoe_radius_add: 14.0,
+        chain_count_add: 1,
+        chain_range_add: 28.0,
+        control_duration_mult: 1.12,
+        dot_damage_mult: 1.12,
+        dot_duration_mult: 1.12,
+        summon_hp_mult: 1.15,
+        heal_amount_mult: 1.15,
+        buff_range_add: 16.0,
         desc: "阿撒托斯之眼，终局级全能遗物。",
         ..base(
             Equipment::AzathothEye,
@@ -451,6 +515,20 @@ impl Default for EquipmentInventory {
 }
 
 impl EquipmentInventory {
+    pub fn count(&self, item: Equipment) -> u32 {
+        self.counts[item.idx()]
+    }
+
+    pub fn owns(&self, item: Equipment) -> bool {
+        self.count(item) > 0
+    }
+
+    /// Set a count without persisting it. Used by deterministic capture harnesses
+    /// that need a known inventory surface.
+    pub fn set_runtime_count(&mut self, item: Equipment, count: u32) {
+        self.counts[item.idx()] = count;
+    }
+
     pub fn add(&mut self, item: Equipment) {
         self.counts[item.idx()] += 1;
         save_inventory_counts(&self.counts);
@@ -564,7 +642,20 @@ fn save_inventory_counts(counts: &[u32; 20]) {
 /// Per-item "best used on" hint, derived from the item's dominant stat so it stays
 /// accurate if stats are tuned. Also nudges toward elemental resonance synergy.
 pub fn recommend_text(d: &EquipmentDef) -> String {
-    let mut tip = if d.range_mult >= 1.06 {
+    let mut tip = if d.max_summons_add > 0 || d.summon_hp_mult > 1.01 || d.summon_speed_mult > 1.01
+    {
+        crate::i18n::t("推荐：召唤塔 / 死灵塔，强化前线召唤物")
+    } else if d.heal_amount_mult > 1.01 || d.buff_range_add > 0.0 {
+        crate::i18n::t("推荐：圣光塔 / 光环支援塔，扩大治疗和增益覆盖")
+    } else if d.chain_count_add > 0 || d.chain_range_add >= 18.0 {
+        crate::i18n::t("推荐：雷塔 / 连锁类塔，增加弹射覆盖")
+    } else if d.aoe_radius_add >= 6.0 {
+        crate::i18n::t("推荐：炮塔 / 火塔 / 导弹 / 要塞，扩大范围命中")
+    } else if d.control_duration_mult > 1.01 || d.armor_reduce_add > 0.0 {
+        crate::i18n::t("推荐：冰塔 / 暗影塔 / 控制塔，延长控场和破甲窗口")
+    } else if d.dot_damage_mult > 1.01 || d.dot_duration_mult > 1.01 {
+        crate::i18n::t("推荐：毒塔 / 火塔，强化持续伤害")
+    } else if d.range_mult >= 1.06 {
         crate::i18n::t("推荐：狙击塔 / 弓箭塔等远程高伤塔")
     } else if d.cooldown_mult <= 0.93 {
         crate::i18n::t("推荐：激光 / 闪电 / 连射等高频塔")
@@ -591,6 +682,88 @@ pub fn recommend_text(d: &EquipmentDef) -> String {
         ));
     }
     tip
+}
+
+pub fn equipment_mechanic_summary(d: &EquipmentDef) -> String {
+    let mut parts = Vec::new();
+    if d.aoe_radius_add > 0.0 {
+        parts.push(crate::i18n::tf(
+            "范围半径+{}",
+            &[&format!("{:.0}", d.aoe_radius_add)],
+        ));
+    }
+    if d.chain_count_add > 0 {
+        parts.push(crate::i18n::tf(
+            "连锁+{}",
+            &[&d.chain_count_add.to_string()],
+        ));
+    }
+    if d.chain_range_add > 0.0 {
+        parts.push(crate::i18n::tf(
+            "跳跃距离+{}",
+            &[&format!("{:.0}", d.chain_range_add)],
+        ));
+    }
+    if d.control_duration_mult > 1.001 {
+        parts.push(crate::i18n::tf(
+            "控制时长×{}",
+            &[&format!("{:.2}", d.control_duration_mult)],
+        ));
+    }
+    if d.dot_damage_mult > 1.001 {
+        parts.push(crate::i18n::tf(
+            "持续伤害×{}",
+            &[&format!("{:.2}", d.dot_damage_mult)],
+        ));
+    }
+    if d.dot_duration_mult > 1.001 {
+        parts.push(crate::i18n::tf(
+            "燃烧/中毒时长×{}",
+            &[&format!("{:.2}", d.dot_duration_mult)],
+        ));
+    }
+    if d.armor_reduce_add > 0.0 {
+        parts.push(crate::i18n::tf(
+            "破防+{}",
+            &[&format!("{:.0}", d.armor_reduce_add)],
+        ));
+    }
+    if d.summon_hp_mult > 1.001 {
+        parts.push(crate::i18n::tf(
+            "召唤生命×{}",
+            &[&format!("{:.2}", d.summon_hp_mult)],
+        ));
+    }
+    if d.summon_speed_mult > 1.001 {
+        parts.push(crate::i18n::tf(
+            "召唤移速×{}",
+            &[&format!("{:.2}", d.summon_speed_mult)],
+        ));
+    }
+    if d.max_summons_add > 0 {
+        parts.push(crate::i18n::tf(
+            "召唤上限+{}",
+            &[&d.max_summons_add.to_string()],
+        ));
+    }
+    if d.heal_amount_mult > 1.001 {
+        parts.push(crate::i18n::tf(
+            "治疗×{}",
+            &[&format!("{:.2}", d.heal_amount_mult)],
+        ));
+    }
+    if d.buff_range_add > 0.0 {
+        parts.push(crate::i18n::tf(
+            "光环半径+{}",
+            &[&format!("{:.0}", d.buff_range_add)],
+        ));
+    }
+
+    if parts.is_empty() {
+        String::new()
+    } else {
+        crate::i18n::tf("机制：{}", &[&parts.join("  ")])
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -758,6 +931,18 @@ fn remove_equipment_effects(tower: &mut crate::tower::Tower, removed: &[Equipmen
     let mut hp_mult = 1.0;
     let mut armor_pierce = 0.0;
     let mut armor_add = 0.0;
+    let mut aoe_radius_add = 0.0;
+    let mut chain_count_add = 0;
+    let mut chain_range_add = 0.0;
+    let mut control_duration_mult = 1.0;
+    let mut dot_damage_mult = 1.0;
+    let mut dot_duration_mult = 1.0;
+    let mut armor_reduce_add = 0.0;
+    let mut summon_hp_mult = 1.0;
+    let mut summon_speed_mult = 1.0;
+    let mut max_summons_add = 0;
+    let mut heal_amount_mult = 1.0;
+    let mut buff_range_add = 0.0;
 
     for item in removed {
         let d = item.def();
@@ -767,6 +952,18 @@ fn remove_equipment_effects(tower: &mut crate::tower::Tower, removed: &[Equipmen
         hp_mult *= d.hp_mult;
         armor_pierce += d.armor_pierce;
         armor_add += d.armor_add;
+        aoe_radius_add += d.aoe_radius_add;
+        chain_count_add += d.chain_count_add;
+        chain_range_add += d.chain_range_add;
+        control_duration_mult *= d.control_duration_mult;
+        dot_damage_mult *= d.dot_damage_mult;
+        dot_duration_mult *= d.dot_duration_mult;
+        armor_reduce_add += d.armor_reduce_add;
+        summon_hp_mult *= d.summon_hp_mult;
+        summon_speed_mult *= d.summon_speed_mult;
+        max_summons_add += d.max_summons_add;
+        heal_amount_mult *= d.heal_amount_mult;
+        buff_range_add += d.buff_range_add;
     }
 
     tower.base_damage = (tower.base_damage / damage_mult).max(1.0).floor();
@@ -779,12 +976,34 @@ fn remove_equipment_effects(tower: &mut crate::tower::Tower, removed: &[Equipmen
         tower.max_hp = (tower.max_hp / hp_mult).max(1.0).floor();
         tower.hp = (tower.max_hp * hp_frac).clamp(1.0, tower.max_hp);
     }
+    tower.aoe_radius = (tower.aoe_radius - aoe_radius_add).max(0.0);
+    tower.chain_count = (tower.chain_count - chain_count_add).max(0);
+    tower.chain_range = (tower.chain_range - chain_range_add).max(0.0);
+    tower.slow_duration = (tower.slow_duration / control_duration_mult.max(0.01)).max(0.0);
+    tower.stun_duration = (tower.stun_duration / control_duration_mult.max(0.01)).max(0.0);
+    tower.freeze_duration = (tower.freeze_duration / control_duration_mult.max(0.01)).max(0.0);
+    tower.curse_duration = (tower.curse_duration / control_duration_mult.max(0.01)).max(0.0);
+    tower.armor_reduce = (tower.armor_reduce - armor_reduce_add).max(0.0);
     if tower.dot_damage > 0.0 {
-        tower.dot_damage = (tower.dot_damage / damage_mult.sqrt()).max(1.0).floor();
+        tower.dot_damage = (tower.dot_damage / (damage_mult.sqrt() * dot_damage_mult))
+            .max(1.0)
+            .floor();
     }
+    tower.poison_duration = (tower.poison_duration / dot_duration_mult.max(0.01)).max(0.0);
+    tower.fire_duration = (tower.fire_duration / dot_duration_mult.max(0.01)).max(0.0);
     if tower.summon_hp > 0.0 {
-        tower.summon_hp = (tower.summon_hp / hp_mult.max(1.0)).max(1.0).floor();
+        tower.summon_hp = (tower.summon_hp / (hp_mult.max(1.0) * summon_hp_mult))
+            .max(1.0)
+            .floor();
     }
+    tower.summon_speed = (tower.summon_speed / summon_speed_mult.max(0.01)).max(0.1);
+    tower.max_summons = (tower.max_summons - max_summons_add).max(0);
+    if tower.heal_amount > 0.0 {
+        tower.heal_amount = (tower.heal_amount / heal_amount_mult.max(0.01))
+            .max(0.0)
+            .floor();
+    }
+    tower.buff_range = (tower.buff_range - buff_range_add).max(0.0);
 }
 
 fn recompute_tower_element(tower: &mut crate::tower::Tower) {
@@ -827,17 +1046,33 @@ fn apply_item_stats(tower: &mut crate::tower::Tower, item: Equipment) {
     tower.cooldown = (tower.cooldown * d.cooldown_mult).max(0.03);
     tower.armor_pierce += d.armor_pierce;
     tower.armor += d.armor_add;
+    tower.aoe_radius += d.aoe_radius_add;
+    tower.chain_count += d.chain_count_add;
+    tower.chain_range += d.chain_range_add;
+    tower.slow_duration *= d.control_duration_mult;
+    tower.stun_duration *= d.control_duration_mult;
+    tower.freeze_duration *= d.control_duration_mult;
+    tower.curse_duration *= d.control_duration_mult;
+    tower.armor_reduce += d.armor_reduce_add;
     if d.hp_mult > 1.0 {
         let old = tower.max_hp;
         tower.max_hp = (tower.max_hp * d.hp_mult).ceil();
         tower.hp += tower.max_hp - old;
     }
     if tower.dot_damage > 0.0 {
-        tower.dot_damage = (tower.dot_damage * d.damage_mult.sqrt()).ceil();
+        tower.dot_damage = (tower.dot_damage * d.damage_mult.sqrt() * d.dot_damage_mult).ceil();
     }
+    tower.poison_duration *= d.dot_duration_mult;
+    tower.fire_duration *= d.dot_duration_mult;
     if tower.summon_hp > 0.0 {
-        tower.summon_hp = (tower.summon_hp * d.hp_mult.max(1.0)).ceil();
+        tower.summon_hp = (tower.summon_hp * d.hp_mult.max(1.0) * d.summon_hp_mult).ceil();
     }
+    tower.summon_speed *= d.summon_speed_mult;
+    tower.max_summons += d.max_summons_add;
+    if tower.heal_amount > 0.0 {
+        tower.heal_amount = (tower.heal_amount * d.heal_amount_mult).ceil();
+    }
+    tower.buff_range += d.buff_range_add;
     if let Some(element) = d.element {
         tower.element = element;
         tower.magic = element != Element::Physical;
@@ -1003,5 +1238,67 @@ fn roll_rarity(p: f32, boss: bool, elite: bool, wave: i32) -> Rarity {
         Rarity::Uncommon
     } else {
         Rarity::Common
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::TowerKind;
+    use crate::tower::Tower;
+
+    fn approx_eq(a: f32, b: f32) {
+        assert!(
+            (a - b).abs() <= 0.01,
+            "expected {a:.3} to be close to {b:.3}"
+        );
+    }
+
+    #[test]
+    fn equipment_mechanics_apply_and_remove_from_chain_tower() {
+        let mut tower = Tower::from_def(TowerKind::Thunder.def(), 0, 0);
+        let base_count = tower.chain_count;
+        let base_range = tower.chain_range;
+
+        apply_item_stats(&mut tower, Equipment::ThunderCoil);
+        assert_eq!(tower.chain_count, base_count + 1);
+        approx_eq(
+            tower.chain_range,
+            base_range + Equipment::ThunderCoil.def().chain_range_add,
+        );
+
+        remove_equipment_effects(&mut tower, &[Equipment::ThunderCoil]);
+        assert_eq!(tower.chain_count, base_count);
+        approx_eq(tower.chain_range, base_range);
+    }
+
+    #[test]
+    fn equipment_mechanics_apply_and_remove_from_control_tower() {
+        let mut tower = Tower::from_def(TowerKind::Ice.def(), 0, 0);
+        let base_slow = tower.slow_duration;
+
+        apply_item_stats(&mut tower, Equipment::FrostLens);
+        approx_eq(
+            tower.slow_duration,
+            base_slow * Equipment::FrostLens.def().control_duration_mult,
+        );
+
+        remove_equipment_effects(&mut tower, &[Equipment::FrostLens]);
+        approx_eq(tower.slow_duration, base_slow);
+    }
+
+    #[test]
+    fn equipment_mechanics_apply_and_remove_from_summon_tower() {
+        let mut tower = Tower::from_def(TowerKind::Summon.def(), 0, 0);
+        let base_hp = tower.summon_hp;
+        let base_cap = tower.max_summons;
+
+        apply_item_stats(&mut tower, Equipment::KrakenHeart);
+        assert_eq!(tower.max_summons, base_cap + 1);
+        assert!(tower.summon_hp > base_hp * 1.8);
+
+        remove_equipment_effects(&mut tower, &[Equipment::KrakenHeart]);
+        assert_eq!(tower.max_summons, base_cap);
+        approx_eq(tower.summon_hp, base_hp);
     }
 }

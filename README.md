@@ -9,6 +9,15 @@ idiomatic ECS version you can read alongside it.
 
 ---
 
+## Player guide
+
+The core gameplay guide lives in [`docs/GAMEPLAY_GUIDE.md`](docs/GAMEPLAY_GUIDE.md).
+It covers the current player-facing systems: race + weapon selection, hero control,
+tower roles, tower gems, hero paperdoll equipment, per-wave roguelite talents,
+enemy counters, fog-of-war lighting, and recommended first-clear builds.
+
+---
+
 ## Quick start
 
 All commands run inside the Nix dev shell (provides Rust, the wasm toolchain, and

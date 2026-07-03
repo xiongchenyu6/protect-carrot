@@ -17,11 +17,16 @@ use bevy::window::{CursorIcon, MonitorSelection, WindowMode};
 use bevy_asset_loader::prelude::{ConfigureLoadingState, LoadingState, LoadingStateAppExt};
 use bevy_common_assets::ron::RonAssetPlugin;
 use bevy_cursor_kit::prelude::{CursorAssetPlugin, CustomCursorImageBuilder, StaticCursor};
+use bevy_fog_of_war::prelude::FogOfWarCamera;
+use bevy_paperdoll::PaperdollPlugin;
+use bevy_sequential_actions::SequentialActionsPlugin;
+use bevy_spritesheet_animation::prelude::SpritesheetAnimationPlugin;
 use iyes_progress::ProgressPlugin;
 
 use protect_carrot::{
     Levels, audio, bestiary, build, creatures, data, enemy, equipment, fluent_i18n, game, hero,
-    i18n, meta, quality, sprites, states, tower, tuning, tutorial, ui, vfx,
+    hero_gear, hero_paperdoll, i18n, lighting, meta, quality, roguelite, sprites, states, tower,
+    tuning, tutorial, ui, vfx,
 };
 
 // Web-only: a retrying HTTP asset reader, installed before AssetPlugin so a
@@ -74,6 +79,29 @@ fn carrot_game_ready() {}
 #[derive(Resource)]
 struct CarrotCursor {
     handle: Handle<StaticCursor>,
+}
+
+#[derive(Resource, Default)]
+struct AutostartLevel(Option<usize>);
+
+impl AutostartLevel {
+    fn from_env() -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let index = std::env::var("CARROT_AUTOSTART_LEVEL")
+                .ok()
+                .and_then(|raw| raw.trim().parse::<usize>().ok())
+                // User-facing level numbers are 1-based; keep 0 as level 0 for
+                // scripted edge-case tests.
+                .map(|level| level.saturating_sub(1));
+            return Self(index);
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            Self(None)
+        }
+    }
 }
 
 /// Signal the JS loading overlay to fade once the menu has rendered a few frames and
@@ -134,12 +162,32 @@ fn apply_carrot_cursor(
     *done = true;
 }
 
+fn autostart_level(
+    autostart: Res<AutostartLevel>,
+    levels: Res<Levels>,
+    mut current: ResMut<CurrentLevel>,
+    mut next: ResMut<NextState<GameState>>,
+    mut done: Local<bool>,
+) {
+    if *done {
+        return;
+    }
+    let Some(level) = autostart.0 else {
+        return;
+    };
+    let max_index = levels.0.len().saturating_sub(1);
+    current.0 = level.min(max_index);
+    next.set(GameState::Playing);
+    *done = true;
+}
+
 fn main() {
     // Resolution is adaptive: native device-pixel-ratio + `fit_canvas_to_parent`
     // let the canvas track the screen. The player-adjustable graphics quality
     // (流畅/标准/精细) controls anti-aliasing via `quality::apply_quality`, not
     // resolution. Load it here only to persist/seed the resource.
     let quality = quality::GraphicsQuality::load();
+    let lighting_settings = lighting::LightingSettings::load();
     let language = i18n::Language::load();
     let fluent_locale = fluent_i18n::locale_for(language.lang);
     let resolution: bevy::window::WindowResolution =
@@ -202,6 +250,11 @@ fn main() {
             }),
     )
     .add_plugins(CursorAssetPlugin)
+    .add_plugins(PaperdollPlugin)
+    .add_plugins(hero_paperdoll::HeroPaperdollPlugin)
+    .add_plugins(lighting::LightingPlugin)
+    .add_plugins(SequentialActionsPlugin)
+    .add_plugins(SpritesheetAnimationPlugin)
     .add_plugins(fluent_i18n::fluent_plugin())
     .add_plugins(RonAssetPlugin::<tuning::FocusBeamTuningAsset>::new(&[
         "focus.ron",
@@ -216,12 +269,14 @@ fn main() {
     )
     .insert_resource(ClearColor(hex(0x1e2a1e)))
     .insert_resource(quality)
+    .insert_resource(lighting_settings)
     .insert_resource(language)
     .insert_resource(fluent_locale)
     .init_resource::<audio::AudioSettings>()
     .init_resource::<ui::MenuDirty>()
     .init_resource::<fluent_i18n::FluentStatus>()
     .insert_resource(Levels(levels()))
+    .insert_resource(AutostartLevel::from_env())
     .init_resource::<CurrentLevel>()
     .init_resource::<Paused>()
     .init_resource::<game::GameMode>()
@@ -238,9 +293,11 @@ fn main() {
     .init_resource::<ui::StoryTimeline>()
     .init_resource::<ui::BriefingTimeline>()
     .init_resource::<hero::HeroLoadout>()
+    .init_resource::<hero_gear::HeroGearInventory>()
     .init_resource::<ui::TooltipHold>()
     .init_resource::<meta::Talents>()
     .init_resource::<meta::Abilities>()
+    .init_resource::<roguelite::RogueliteRun>()
     .init_resource::<equipment::EquipmentInventory>()
     .init_resource::<bestiary::Bestiary>()
     .init_resource::<vfx::ScreenShake>()
@@ -279,6 +336,8 @@ fn main() {
             toggle_fullscreen,
             audio::play_sfx,
             ui::attach_widget_buttons,
+            hero::validate_hero_gear_inventory,
+            ui::passthrough_button_children,
             ui::ui_button_visuals,
             creatures::animate_creatures,
             vfx::update_camera_shake,
@@ -293,10 +352,12 @@ fn main() {
             menu_buttons,
             ui::update_menu_diff,
             ui::update_quality_label,
+            ui::update_brightness_label,
             ui::update_volume_label,
             ui::update_language_label,
             ui::update_hero_label,
             ui::update_hero_select_buttons,
+            autostart_level,
         )
             .run_if(in_state(GameState::Menu)),
     )
@@ -351,9 +412,11 @@ fn main() {
         Update,
         (
             ui::update_quality_label,
+            ui::update_brightness_label,
             ui::update_screen_flash,
             ui::tick_talent_confirm,
             ui::hero_buttons,
+            ui::roguelite_buttons,
             ui::settings_nav_buttons,
             ui::hero_joystick,
             build::hero_move,
@@ -368,6 +431,7 @@ fn main() {
         OnEnter(GameState::Playing),
         (
             load_level,
+            roguelite::reset_run,
             spawn_hud,
             build::auto_spawn_hero,
             tutorial::maybe_start_tutorial,
@@ -393,6 +457,7 @@ fn main() {
             tower::update_projectiles,
             tower::update_shot_fx,
             tower::update_summons,
+            tower::tick_attack_actions,
             tower::apply_buffs,
             tower::apply_heal,
             tower::apply_status,
@@ -406,8 +471,7 @@ fn main() {
             tower::necromancer_raise,
             // 嵌套成二元组以绕开单个 add_systems 最多 20 个系统的上限。
             (enemy::heal_auras, enemy::incubation),
-            tick_auto_wave,
-            tick_message,
+            (tick_auto_wave, tick_message),
         )
             .chain()
             .run_if(in_state(GameState::Playing).and_then(not_paused)),
@@ -428,12 +492,12 @@ fn main() {
             enemy::draw_boss_cast_telegraphs,
             tower::draw_tower_raider_threats,
             tower::draw_equipment_resonance,
-            build::summon_god_tower,
             build::hero_afterimage,
             build::animate_hero_walk,
             build::rotate_towers,
             build::update_hero_race_badges,
             build::tint_silenced_towers,
+            build::update_tower_upgrade_visuals.after(build::tint_silenced_towers),
             build::update_tower_hp_bars,
         )
             .run_if(in_state(GameState::Playing)),
@@ -485,8 +549,12 @@ fn main() {
             ui::update_equipment_button_labels,
             ui::update_upgrade_button_label,
             ui::update_equipped_slot_icons,
+            ui::update_hero_select_buttons,
+            ui::update_hero_paperdoll_panel,
+            ui::update_roguelite_draft_panel,
             ui::detect_touch_mode,
             ui::update_mobile_controls,
+            ui::close_hud_panels_with_escape,
             ui::update_panel_visibility,
             hud_buttons,
         )
@@ -501,7 +569,7 @@ fn main() {
         Update,
         ui::update_ability_buttons.run_if(in_state(GameState::Playing)),
     )
-    // tooltips also run on the selection screens (menu/briefing) so the race/class/
+    // tooltips also run on the selection screens (menu/briefing) so the race/weapon/
     // difficulty pickers show their info. Harmless where no TooltipBox exists.
     .add_systems(
         Update,
@@ -642,6 +710,8 @@ fn setup(mut commands: Commands) {
         Msaa::default(),
         Projection::Orthographic(projection),
         Transform::from_xyz(PANEL_W / 2.0, 0.0, 0.0),
+        lighting::camera_config(0),
+        FogOfWarCamera,
         vfx::ShakeCamera {
             base: Vec3::new(PANEL_W / 2.0, 0.0, 0.0),
         },

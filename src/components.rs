@@ -107,7 +107,7 @@ pub struct Enemy {
     pub incubate_timer: f32,
     pub incubate_stacks: i32,
     /// Normalized movement direction, updated as the enemy walks. Used to detect
-    /// the assassin's 背击 (backstab): a hit landed from behind this facing.
+    /// the night dagger's 背击 (backstab): a hit landed from behind this facing.
     pub facing: Vec2,
 }
 
@@ -189,6 +189,11 @@ pub struct CarrotSealBar {
 /// Marker for anything tied to the current level, so a level reload can despawn it all.
 #[derive(Component)]
 pub struct LevelEntity;
+
+/// Enemy is currently hidden by fog of war. Combat snapshots also skip it so
+/// towers do not target enemies that are not lit by local light sources.
+#[derive(Component)]
+pub struct FogHidden;
 
 /// The foreground (green) quad of an enemy's HP bar; its x-scale tracks hp fraction.
 #[derive(Component)]

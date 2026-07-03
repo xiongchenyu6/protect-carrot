@@ -10,7 +10,7 @@
 //!   -> apply_status -> apply_damage   (then enemy::update_enemies handles death)
 
 use crate::board::Board;
-use crate::components::{Enemy, LevelEntity, Particle, SummonHpBarFg};
+use crate::components::{Enemy, FogHidden, LevelEntity, Particle, SummonHpBarFg};
 use crate::data::{
     Behavior, Category, Element, MOSS_TOWER_SENSE, TILE_SIZE, TOWER_RAIDER_ENGAGE,
     TOWER_RAIDER_SENSE, TowerDef, TowerKind, cell_center,
@@ -20,9 +20,12 @@ use crate::equipment::{
     return_equipment_to_inventory,
 };
 use crate::game::RunState;
-use crate::hero::Class;
+use crate::hero::HeroWeapon;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
+use bevy_sequential_actions::{
+    Action, ActionQueue, ActionsProxy, CurrentAction, ManageActions, SequentialActions, StopReason,
+};
 use std::collections::{HashMap, HashSet};
 
 // ============================ Components ============================
@@ -109,7 +112,7 @@ pub struct Tower {
     /// when no hero is in range, so they never permanently compound.
     pub aura_damage: f32,
     pub aura_haste: f32,
-    /// +range fraction from a nearby Warden hero's 戍卫结界 doctrine (applied at
+    /// +range fraction from a nearby Sentry Crossbow hero's 戍卫结界 doctrine (applied at
     /// targeting time in `Snapshot::target`). Reset to 0 each frame when out of aura.
     pub aura_range: f32,
     pub range: f32,
@@ -128,9 +131,9 @@ pub struct Tower {
     pub hero_attack_timer: f32,
     /// True for the unique movable hero tower (see `hero.rs`).
     pub hero: bool,
-    /// Exact hero class for class-specific combat presentation. Ordinary towers are `None`.
-    pub hero_class: Option<Class>,
-    /// Reveals invisible enemies in range (detection towers, and the Warden hero's
+    /// Exact hero weapon for weapon-specific combat presentation. Ordinary towers are `None`.
+    pub hero_weapon: Option<HeroWeapon>,
+    /// Reveals invisible enemies in range (detection towers, and the Sentry Crossbow hero's
     /// built-in 反隐形). Used to build `Snapshot::detectors`.
     pub detector: bool,
     /// Hero's free-floating world position (ignored for grid towers).
@@ -198,7 +201,7 @@ impl Tower {
             recoil: Vec2::ZERO,
             hero_attack_timer: 0.0,
             hero: false,
-            hero_class: None,
+            hero_weapon: None,
             hero_pos: Vec2::ZERO,
             move_target: None,
             laser_charge: 0.0,
@@ -350,9 +353,23 @@ pub struct Summon {
     pub kind: crate::data::EnemyKind,
     /// Seconds before the unit crumbles (f32::INFINITY = permanent skeletons).
     pub lifetime: f32,
-    /// Transient +damage fraction from the Priest's 圣疗领域 doctrine (召唤物联动),
-    /// refreshed each frame by `hero::hero_doctrine`. 0 when no Priest hero is alive.
+    /// Transient +damage fraction from the Summon Staff's 异界契约 doctrine (召唤物联动),
+    /// refreshed each frame by `hero::hero_doctrine`. 0 when no summon-staff hero is alive.
     pub buff: f32,
+}
+
+#[derive(Component)]
+pub struct MythicSummonSprite;
+
+/// Temporary engineer guard: it is built at a fixed field position and should not
+/// chase the hero after the hero relocates.
+#[derive(Component)]
+pub struct TemporaryGuard;
+
+#[derive(Component, Clone, Copy)]
+pub struct FixedSummonHome {
+    pub pos: Vec2,
+    pub range: f32,
 }
 
 /// Minion archetype a summon tower conjures at a given level. Stronger tiers
@@ -365,11 +382,6 @@ pub fn summon_minion_kind(level: i32) -> crate::data::EnemyKind {
         _ => Tank,        // mimic — beefy bruiser
     }
 }
-
-/// The Engineer's level-30 ultimate: a single summoned 神之塔 (god tower) that fuses
-/// every tower attribute. Marker so only one is ever spawned per run.
-#[derive(Component)]
-pub struct GodTower;
 
 /// Emitted when an enemy dies, so necromancer towers can raise it.
 #[derive(Message)]
@@ -391,7 +403,7 @@ pub struct Damage {
     pub armor_pierce: f32,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum StatusKind {
     Slow {
         duration: f32,
@@ -463,13 +475,16 @@ pub struct Snapshot {
 
 pub fn build_snapshot(
     mut snap: ResMut<Snapshot>,
-    enemies: Query<(Entity, &Enemy, &Transform)>,
+    enemies: Query<(Entity, &Enemy, &Transform, Option<&FogHidden>)>,
     towers: Query<(Entity, &Tower, &Transform)>,
     summons: Query<&Summon>,
 ) {
     snap.enemies.clear();
     snap.silencers.clear();
-    for (e, enemy, tf) in &enemies {
+    for (e, enemy, tf, fog_hidden) in &enemies {
+        if fog_hidden.is_some() {
+            continue;
+        }
         let pos = tf.translation.truncate();
         snap.enemies.push(EnemySnap {
             entity: e,
@@ -636,26 +651,32 @@ fn fireball_color() -> Color {
     Color::srgb(1.0, 0.34, 0.08)
 }
 
-fn is_mage_fireball_attack(tower: &Tower) -> bool {
+fn is_staff_fireball_attack(tower: &Tower) -> bool {
     tower.hero && tower.behavior == Behavior::Aoe && tower.element == Element::Arcane
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum HeroShotStyle {
-    Warden,
-    Priest,
-    Engineer,
+    Ranger,
+    Sentry,
+    SummonStaff,
+    Hammer,
 }
 
 fn is_close_combat_hero(tower: &Tower) -> bool {
     matches!(
-        tower.hero_class,
-        Some(Class::Warrior | Class::Guardian | Class::Assassin | Class::Engineer)
+        tower.hero_weapon,
+        Some(
+            HeroWeapon::BannerSword
+                | HeroWeapon::OathShield
+                | HeroWeapon::NightDagger
+                | HeroWeapon::ForgeHammer
+        )
     ) || (tower.hero && tower.range < 100.0)
 }
 
-fn is_engineer_hammer_hero(tower: &Tower) -> bool {
-    tower.hero_class == Some(Class::Engineer)
+fn is_forge_hammer_hero(tower: &Tower) -> bool {
+    tower.hero_weapon == Some(HeroWeapon::ForgeHammer)
 }
 
 fn effective_attack_range(tower: &Tower) -> f32 {
@@ -671,32 +692,367 @@ fn hero_shot_style(tower: &Tower) -> Option<HeroShotStyle> {
     if !tower.hero || is_close_combat_hero(tower) {
         return None;
     }
-    if tower.detector && tower.behavior == Behavior::Slow && tower.element == Element::Frost {
-        Some(HeroShotStyle::Warden)
-    } else if tower.behavior == Behavior::Curse && tower.element == Element::Arcane {
-        Some(HeroShotStyle::Priest)
+    if tower.hero_weapon == Some(HeroWeapon::ShadowBow)
+        && matches!(tower.behavior, Behavior::Single | Behavior::Poison)
+    {
+        Some(HeroShotStyle::Ranger)
+    } else if tower.detector && tower.behavior == Behavior::Slow && tower.element == Element::Frost
+    {
+        Some(HeroShotStyle::Sentry)
+    } else if tower.hero_weapon == Some(HeroWeapon::SummonStaff)
+        && tower.behavior == Behavior::Curse
+        && tower.element == Element::Arcane
+    {
+        Some(HeroShotStyle::SummonStaff)
     } else if matches!(tower.behavior, Behavior::Single | Behavior::Slow)
         && tower.element == Element::Storm
         && tower.buff_range > 0.0
     {
-        Some(HeroShotStyle::Engineer)
+        Some(HeroShotStyle::Hammer)
     } else {
         None
     }
 }
 
 fn attack_muzzle_color(tower: &Tower) -> Color {
-    if is_mage_fireball_attack(tower) {
+    if is_staff_fireball_attack(tower) {
         fireball_color().mix(&Color::WHITE, 0.12)
-    } else if hero_shot_style(tower) == Some(HeroShotStyle::Warden) {
+    } else if hero_shot_style(tower) == Some(HeroShotStyle::Ranger) {
+        Color::srgb(0.45, 1.0, 0.52)
+    } else if hero_shot_style(tower) == Some(HeroShotStyle::Sentry) {
         Color::srgb(0.48, 1.0, 0.74)
-    } else if hero_shot_style(tower) == Some(HeroShotStyle::Priest) {
-        Color::srgb(1.0, 0.93, 0.62)
-    } else if hero_shot_style(tower) == Some(HeroShotStyle::Engineer) {
+    } else if hero_shot_style(tower) == Some(HeroShotStyle::SummonStaff) {
+        Color::srgb(0.64, 1.0, 0.86)
+    } else if hero_shot_style(tower) == Some(HeroShotStyle::Hammer) {
         Color::srgb(0.55, 1.0, 0.92)
     } else {
         tower.element.color().mix(&Color::WHITE, 0.2)
     }
+}
+
+#[derive(Component)]
+pub struct AttackActionTimer {
+    remaining: f32,
+}
+
+pub fn tick_attack_actions(
+    time: Res<Time>,
+    run: Res<RunState>,
+    mut timers: Query<&mut AttackActionTimer>,
+) {
+    let dt = time.delta_secs() * run.game_speed;
+    for mut timer in &mut timers {
+        timer.remaining -= dt;
+    }
+}
+
+#[derive(Clone, Copy)]
+enum AttackMotionPhase {
+    Windup,
+    Strike,
+    Recovery,
+}
+
+struct FaceTargetAction {
+    target_pos: Vec2,
+}
+
+impl Action for FaceTargetAction {
+    fn is_finished(&self, _agent: Entity, _world: &World) -> bool {
+        true
+    }
+
+    fn on_start(&mut self, agent: Entity, world: &mut World) -> bool {
+        set_attack_facing(agent, world, self.target_pos);
+        true
+    }
+
+    fn on_stop(&mut self, _agent: Option<Entity>, _world: &mut World, _reason: StopReason) {}
+}
+
+struct TimedAttackAction {
+    target_pos: Vec2,
+    duration: f32,
+    phase: AttackMotionPhase,
+}
+
+impl Action for TimedAttackAction {
+    fn is_finished(&self, agent: Entity, world: &World) -> bool {
+        world
+            .get::<AttackActionTimer>(agent)
+            .is_none_or(|timer| timer.remaining <= 0.0)
+    }
+
+    fn on_start(&mut self, agent: Entity, world: &mut World) -> bool {
+        let dir = set_attack_facing(agent, world, self.target_pos);
+        if matches!(self.phase, AttackMotionPhase::Strike) {
+            if let Some(mut tower) = world.get_mut::<Tower>(agent) {
+                tower.hero_attack_timer = HERO_MELEE_ATTACK_TIME;
+                tower.recoil = dir * 10.0;
+            }
+            if let Some(mut summon) = world.get_mut::<Summon>(agent) {
+                summon.attack_timer = (self.duration + 0.18).max(0.28);
+            }
+        }
+        world.entity_mut(agent).insert(AttackActionTimer {
+            remaining: self.duration,
+        });
+        self.is_finished(agent, world)
+    }
+
+    fn on_stop(&mut self, agent: Option<Entity>, world: &mut World, _reason: StopReason) {
+        let Some(agent) = agent else {
+            return;
+        };
+        if let Ok(mut entity) = world.get_entity_mut(agent) {
+            entity.remove::<AttackActionTimer>();
+        }
+    }
+}
+
+struct ImpactAction {
+    impact: QueuedImpact,
+}
+
+impl Action for ImpactAction {
+    fn is_finished(&self, _agent: Entity, _world: &World) -> bool {
+        true
+    }
+
+    fn on_start(&mut self, agent: Entity, world: &mut World) -> bool {
+        match &self.impact {
+            QueuedImpact::HeroSingle(hit) => hit.apply(world),
+            QueuedImpact::HeroArea(hit) => hit.apply(world),
+            QueuedImpact::Summon(hit) => hit.apply(agent, world),
+        }
+        true
+    }
+
+    fn on_stop(&mut self, _agent: Option<Entity>, _world: &mut World, _reason: StopReason) {}
+}
+
+enum QueuedImpact {
+    HeroSingle(QueuedHeroSingleImpact),
+    HeroArea(QueuedHeroAreaImpact),
+    Summon(QueuedSummonImpact),
+}
+
+#[derive(Clone, Copy)]
+enum HeroMeleeVfx {
+    Slash { poison: bool, color: Color },
+    Hammer { color: Color },
+}
+
+struct QueuedHitText {
+    key: &'static str,
+    color: Color,
+    size: f32,
+    life: f32,
+}
+
+struct QueuedHeroSingleImpact {
+    source_tower: Entity,
+    target: Entity,
+    target_pos: Vec2,
+    angle: f32,
+    amount: f32,
+    magic: bool,
+    element: Element,
+    armor_pierce: f32,
+    vfx: HeroMeleeVfx,
+    statuses: Vec<StatusKind>,
+    text: Option<QueuedHitText>,
+}
+
+impl QueuedHeroSingleImpact {
+    fn apply(&self, world: &mut World) {
+        let Some(target_pos) = current_enemy_pos(world, self.target, self.target_pos) else {
+            return;
+        };
+        match self.vfx {
+            HeroMeleeVfx::Slash { poison, color } => {
+                world.write_message(crate::vfx::VfxEvent::Slash {
+                    pos: target_pos,
+                    angle: self.angle,
+                    color,
+                    poison,
+                });
+            }
+            HeroMeleeVfx::Hammer { color } => {
+                world.write_message(crate::vfx::VfxEvent::HammerImpact {
+                    pos: target_pos,
+                    angle: self.angle,
+                    color,
+                });
+            }
+        }
+        if let Some(text) = &self.text {
+            world.write_message(crate::vfx::VfxEvent::Text {
+                pos: target_pos + Vec2::new(0.0, 26.0),
+                text: crate::i18n::t(text.key),
+                color: text.color,
+                size: text.size,
+                life: text.life,
+            });
+        }
+        world.write_message(Damage {
+            source_tower: Some(self.source_tower),
+            target: self.target,
+            amount: self.amount,
+            magic: self.magic,
+            element: self.element,
+            armor_pierce: self.armor_pierce,
+        });
+        for kind in &self.statuses {
+            world.write_message(Status {
+                source_tower: Some(self.source_tower),
+                target: self.target,
+                kind: *kind,
+            });
+        }
+    }
+}
+
+struct QueuedHeroAreaImpact {
+    source_tower: Entity,
+    target_pos: Vec2,
+    targets: Vec<Entity>,
+    amount: f32,
+    magic: bool,
+    element: Element,
+    armor_pierce: f32,
+    radius: f32,
+    color: Color,
+    statuses: Vec<StatusKind>,
+}
+
+impl QueuedHeroAreaImpact {
+    fn apply(&self, world: &mut World) {
+        world.write_message(crate::vfx::VfxEvent::MeleeCleave {
+            pos: self.target_pos,
+            radius: self.radius,
+            color: self.color,
+        });
+        for target in &self.targets {
+            if world.get::<Enemy>(*target).is_none() {
+                continue;
+            }
+            world.write_message(Damage {
+                source_tower: Some(self.source_tower),
+                target: *target,
+                amount: self.amount,
+                magic: self.magic,
+                element: self.element,
+                armor_pierce: self.armor_pierce,
+            });
+            for kind in &self.statuses {
+                world.write_message(Status {
+                    source_tower: Some(self.source_tower),
+                    target: *target,
+                    kind: *kind,
+                });
+            }
+        }
+    }
+}
+
+struct QueuedSummonImpact {
+    source_tower: Entity,
+    target: Entity,
+    target_pos: Vec2,
+    amount: f32,
+    kind: crate::data::EnemyKind,
+}
+
+impl QueuedSummonImpact {
+    fn apply(&self, agent: Entity, world: &mut World) {
+        let Some(target_pos) = current_enemy_pos(world, self.target, self.target_pos) else {
+            return;
+        };
+        let origin = world
+            .get::<Transform>(agent)
+            .map(|tf| tf.translation.truncate())
+            .unwrap_or(target_pos);
+        let dir = (target_pos - origin).normalize_or_zero();
+        world.write_message(Damage {
+            source_tower: Some(self.source_tower),
+            target: self.target,
+            amount: self.amount,
+            magic: false,
+            element: Element::Physical,
+            armor_pierce: 0.0,
+        });
+        world.write_message(crate::vfx::VfxEvent::Slash {
+            pos: origin + dir * (TILE_SIZE * 0.28),
+            angle: dir.to_angle(),
+            color: summon_tint(self.kind).mix(&Color::WHITE, 0.22),
+            poison: false,
+        });
+    }
+}
+
+fn current_enemy_pos(world: &World, target: Entity, fallback: Vec2) -> Option<Vec2> {
+    world.get::<Enemy>(target)?;
+    Some(
+        world
+            .get::<Transform>(target)
+            .map(|tf| tf.translation.truncate())
+            .unwrap_or(fallback),
+    )
+}
+
+fn set_attack_facing(agent: Entity, world: &mut World, target_pos: Vec2) -> Vec2 {
+    let origin = world
+        .get::<Tower>(agent)
+        .map(Tower::center)
+        .or_else(|| {
+            world
+                .get::<Transform>(agent)
+                .map(|tf| tf.translation.truncate())
+        })
+        .unwrap_or(target_pos);
+    let dir = (target_pos - origin).normalize_or_zero();
+    if dir.length_squared() <= 0.001 {
+        return Vec2::X;
+    }
+    if let Some(mut tower) = world.get_mut::<Tower>(agent) {
+        tower.angle = dir.to_angle();
+    }
+    if let Some(mut summon) = world.get_mut::<Summon>(agent) {
+        summon.facing = dir;
+    }
+    dir
+}
+
+fn combat_action_busy(current: Option<&CurrentAction>, queue: Option<&ActionQueue>) -> bool {
+    current.is_some_and(|current| current.is_some()) || queue.is_some_and(|queue| !queue.is_empty())
+}
+
+fn queue_attack_sequence(
+    commands: &mut Commands,
+    agent: Entity,
+    target_pos: Vec2,
+    impact: QueuedImpact,
+) {
+    commands.actions(agent).add((
+        FaceTargetAction { target_pos },
+        TimedAttackAction {
+            target_pos,
+            duration: 0.08,
+            phase: AttackMotionPhase::Windup,
+        },
+        TimedAttackAction {
+            target_pos,
+            duration: 0.10,
+            phase: AttackMotionPhase::Strike,
+        },
+        ImpactAction { impact },
+        TimedAttackAction {
+            target_pos,
+            duration: 0.16,
+            phase: AttackMotionPhase::Recovery,
+        },
+    ));
 }
 
 fn fire_wall_angle(target: EnemySnap, board: &Board, fallback_from: Vec2) -> f32 {
@@ -1100,7 +1456,13 @@ pub fn update_towers(
     snap: Res<Snapshot>,
     run: Res<RunState>,
     board: Res<Board>,
-    mut towers: Query<(Entity, &mut Tower, &Transform)>,
+    mut towers: Query<(
+        Entity,
+        &mut Tower,
+        &Transform,
+        Option<&CurrentAction>,
+        Option<&ActionQueue>,
+    )>,
     mut dmg: MessageWriter<Damage>,
     mut status: MessageWriter<Status>,
     mut buff: MessageWriter<BuffTower>,
@@ -1115,12 +1477,14 @@ pub fn update_towers(
     let dt = time.delta_secs() * run.game_speed;
 
     // Precompute tower entity+pos for the holy buff (read from snapshot-free list).
-    let buff_positions: Vec<(Entity, Vec2)> =
-        towers.iter().map(|(e, t, _)| (e, t.center())).collect();
+    let buff_positions: Vec<(Entity, Vec2)> = towers
+        .iter()
+        .map(|(e, t, _, _, _)| (e, t.center()))
+        .collect();
 
-    for (entity, mut tower, _) in &mut towers {
+    for (entity, mut tower, _, current_action, action_queue) in &mut towers {
         if tower.cooldown_timer > 0.0 {
-            // Engineer/Warden doctrine haste speeds the cooldown tick (= faster attacks).
+            // Forge Hammer/Sentry Crossbow doctrine haste speeds the cooldown tick (= faster attacks).
             tower.cooldown_timer -= dt * (1.0 + tower.aura_haste);
         }
         let c = tower.center();
@@ -1294,7 +1658,12 @@ pub fn update_towers(
             continue;
         };
         tower.angle = (target.pos - c).to_angle();
+        let action_busy =
+            is_close_combat_hero(&tower) && combat_action_busy(current_action, action_queue);
         if tower.cooldown_timer > 0.0 {
+            continue;
+        }
+        if action_busy {
             continue;
         }
         tower.cooldown_timer = tower.cooldown;
@@ -1302,12 +1671,7 @@ pub fn update_towers(
         // Attack flourish (skip non-attacking support behaviors).
         if !matches!(tower.behavior, Behavior::Heal | Behavior::Detect) {
             let dir = Vec2::from_angle(tower.angle);
-            if is_close_combat_hero(&tower) {
-                // Melee class (warrior/guardian/assassin/engineer): use the hero's own
-                // attack frames and a body lunge instead of a detached sword wave.
-                tower.hero_attack_timer = HERO_MELEE_ATTACK_TIME;
-                tower.recoil = dir * 10.0;
-            } else {
+            if !is_close_combat_hero(&tower) {
                 let muzzle = c + dir * (TILE_SIZE * (0.34 + 0.22 * tower.footprint as f32));
                 vfx.write(crate::vfx::VfxEvent::Muzzle {
                     pos: muzzle,
@@ -1319,16 +1683,17 @@ pub fn update_towers(
         }
 
         // Melee heroes strike instantly (no projectile) — the close-combat VFX is the hit.
-        // Warrior(Aoe)/Fire already hit directly; only single-target/poison melee
-        // classes (guardian/assassin/engineer) would otherwise fire a visible bullet.
+        // Banner Sword AoE and fire attacks already hit directly; only single-target/poison
+        // melee weapons (Oath Shield, Night Dagger, Forge Hammer) would otherwise fire a bullet.
         if is_close_combat_hero(&tower)
             && matches!(tower.behavior, Behavior::Single | Behavior::Poison)
         {
-            // 背击 (backstab): the assassin (toxic melee hero) deals bonus damage when
+            // 背击 (backstab): the night dagger (toxic melee hero) deals bonus damage when
             // striking an enemy from behind its facing — strongest against bosses, who
             // walk in a straight line, so it rewards repositioning the hero. This is the
-            // assassin's signature anti-boss play.
+            // night dagger's signature anti-boss play.
             let mut amount = tower.damage;
+            let mut hit_text = None;
             if tower.element == Element::Toxic {
                 let to_attacker = c - target.pos;
                 // Hero is behind when the enemy faces away from it.
@@ -1337,72 +1702,108 @@ pub fn update_towers(
                     && target.facing.dot(to_attacker.normalize()) < -0.2
                 {
                     amount *= if target.boss { 2.6 } else { 1.8 };
-                    vfx.write(crate::vfx::VfxEvent::Text {
-                        pos: target.pos + Vec2::new(0.0, 26.0),
-                        text: crate::i18n::t(if target.boss {
+                    hit_text = Some(QueuedHitText {
+                        key: if target.boss {
                             "背击 致命!"
                         } else {
                             "背击!"
-                        }),
+                        },
                         color: Color::srgb(1.0, 0.35, 0.85),
                         size: if target.boss { 18.0 } else { 14.0 },
                         life: 0.7,
                     });
                 }
             }
-            if is_engineer_hammer_hero(&tower) {
-                vfx.write(crate::vfx::VfxEvent::HammerImpact {
-                    pos: target.pos,
-                    angle: tower.angle,
+            let melee_vfx = if is_forge_hammer_hero(&tower) {
+                HeroMeleeVfx::Hammer {
                     color: Color::srgb(1.0, 0.68, 0.30),
-                });
+                }
             } else {
-                vfx.write(crate::vfx::VfxEvent::Slash {
-                    pos: target.pos,
-                    angle: tower.angle,
+                HeroMeleeVfx::Slash {
                     color: tower.element.color().mix(&tower.color, 0.35),
                     poison: tower.behavior == Behavior::Poison || tower.element == Element::Toxic,
-                });
-            }
-            dmg.write(Damage {
-                source_tower: Some(entity),
-                target: target.entity,
-                amount,
-                magic: tower.magic,
-                element: tower.element,
-                armor_pierce: tower.armor_pierce,
-            });
-            if is_engineer_hammer_hero(&tower) && tower.slow_duration > 0.0 {
-                status.write(Status {
-                    source_tower: Some(entity),
-                    target: target.entity,
-                    kind: StatusKind::Slow {
-                        duration: tower.slow_duration,
-                    },
+                }
+            };
+            let mut statuses = Vec::new();
+            if is_forge_hammer_hero(&tower) && tower.slow_duration > 0.0 {
+                statuses.push(StatusKind::Slow {
+                    duration: tower.slow_duration,
                 });
             }
             if tower.behavior == Behavior::Poison {
                 if tower.poison_duration > 0.0 {
-                    status.write(Status {
-                        source_tower: Some(entity),
-                        target: target.entity,
-                        kind: StatusKind::Poison {
-                            dmg: tower.dot_damage,
-                            duration: tower.poison_duration,
-                        },
+                    statuses.push(StatusKind::Poison {
+                        dmg: tower.dot_damage,
+                        duration: tower.poison_duration,
                     });
                 }
                 if tower.armor_reduce > 0.0 && tower.curse_duration > 0.0 {
-                    status.write(Status {
-                        source_tower: Some(entity),
-                        target: target.entity,
-                        kind: StatusKind::Curse {
-                            reduce: tower.armor_reduce,
-                            duration: tower.curse_duration,
-                        },
+                    statuses.push(StatusKind::Curse {
+                        reduce: tower.armor_reduce,
+                        duration: tower.curse_duration,
                     });
                 }
             }
+            queue_attack_sequence(
+                &mut commands,
+                entity,
+                target.pos,
+                QueuedImpact::HeroSingle(QueuedHeroSingleImpact {
+                    source_tower: entity,
+                    target: target.entity,
+                    target_pos: target.pos,
+                    angle: tower.angle,
+                    amount,
+                    magic: tower.magic,
+                    element: tower.element,
+                    armor_pierce: tower.armor_pierce,
+                    vfx: melee_vfx,
+                    statuses,
+                    text: hit_text,
+                }),
+            );
+            continue;
+        }
+
+        if is_close_combat_hero(&tower) && tower.behavior == Behavior::Aoe {
+            let mut targets = Vec::new();
+            for e in &snap.enemies {
+                if e.invisible && !snap.is_detected(e) {
+                    continue;
+                }
+                if e.pos.distance(target.pos) <= tower.aoe_radius {
+                    targets.push(e.entity);
+                }
+            }
+            let mut statuses = Vec::new();
+            if tower.slow_duration > 0.0 {
+                statuses.push(StatusKind::Slow {
+                    duration: tower.slow_duration,
+                });
+            }
+            if tower.dot_damage > 0.0 && tower.poison_duration > 0.0 {
+                statuses.push(StatusKind::Poison {
+                    dmg: tower.dot_damage,
+                    duration: tower.poison_duration,
+                });
+            }
+            queue_attack_sequence(
+                &mut commands,
+                entity,
+                target.pos,
+                QueuedImpact::HeroArea(QueuedHeroAreaImpact {
+                    source_tower: entity,
+                    target_pos: target.pos,
+                    targets,
+                    amount: tower.damage,
+                    magic: false,
+                    element: tower.element,
+                    armor_pierce: tower.armor_pierce,
+                    radius: tower.aoe_radius,
+                    color: tower.element.color(),
+                    statuses,
+                }),
+            );
             continue;
         }
 
@@ -1421,11 +1822,11 @@ pub fn update_towers(
 
         match tower.behavior {
             Behavior::Aoe => {
-                // A melee cleave hero (warrior) hits the group around the target with
-                // its slash arc; the mage throws a visible fireball that explodes on
+                // A melee cleave hero (banner sword) hits the group around the target with
+                // its slash arc; the staff throws a visible fireball that explodes on
                 // impact; other ranged AoE towers keep their direct blast beam.
                 let melee_hero = tower.hero && tower.range < 100.0;
-                if is_mage_fireball_attack(&tower) {
+                if is_staff_fireball_attack(&tower) {
                     spawn_projectile(
                         &mut commands,
                         c,
@@ -1443,10 +1844,10 @@ pub fn update_towers(
                             aoe_radius: tower.aoe_radius,
                             slow_duration: 0.0,
                             freeze_duration: tower.freeze_duration,
-                            dot_damage: 0.0,
-                            poison_duration: 0.0,
-                            armor_reduce: 0.0,
-                            curse_duration: 0.0,
+                            dot_damage: tower.dot_damage,
+                            poison_duration: tower.fire_duration,
+                            armor_reduce: tower.armor_reduce,
+                            curse_duration: tower.curse_duration,
                             knock_dist: 0.0,
                             stun_duration: 0.0,
                         },
@@ -1498,8 +1899,8 @@ pub fn update_towers(
                                 element: tower.element,
                                 armor_pierce: tower.armor_pierce,
                             });
-                            // AoE towers carrying extra attributes (notably the 神之塔)
-                            // also apply slow/poison to everything caught in the blast.
+                            // AoE towers carrying extra attributes also apply slow/poison
+                            // to everything caught in the blast.
                             if tower.slow_duration > 0.0 {
                                 status.write(Status {
                                     source_tower: Some(entity),
@@ -1904,8 +2305,8 @@ fn hero_special_attack(
     vfx: &mut MessageWriter<crate::vfx::VfxEvent>,
 ) -> bool {
     match hero_shot_style(tower) {
-        Some(HeroShotStyle::Warden) => {
-            hero_warden_shot(
+        Some(HeroShotStyle::Ranger) => {
+            hero_ranger_shot(
                 source_tower,
                 tower,
                 target,
@@ -1917,12 +2318,25 @@ fn hero_special_attack(
             );
             true
         }
-        Some(HeroShotStyle::Priest) => {
-            hero_priest_shot(source_tower, tower, target, snap, dmg, status, vfx);
+        Some(HeroShotStyle::Sentry) => {
+            hero_sentry_shot(
+                source_tower,
+                tower,
+                target,
+                snap,
+                dmg,
+                status,
+                commands,
+                vfx,
+            );
             true
         }
-        Some(HeroShotStyle::Engineer) => {
-            hero_engineer_shot(
+        Some(HeroShotStyle::SummonStaff) => {
+            hero_summon_staff_shot(source_tower, tower, target, snap, dmg, status, vfx);
+            true
+        }
+        Some(HeroShotStyle::Hammer) => {
+            hero_hammer_shot(
                 source_tower,
                 tower,
                 target,
@@ -1938,7 +2352,84 @@ fn hero_special_attack(
     }
 }
 
-fn hero_warden_shot(
+fn hero_ranger_shot(
+    source_tower: Entity,
+    tower: &Tower,
+    target: EnemySnap,
+    snap: &Snapshot,
+    dmg: &mut MessageWriter<Damage>,
+    status: &mut MessageWriter<Status>,
+    commands: &mut Commands,
+    vfx: &mut MessageWriter<crate::vfx::VfxEvent>,
+) {
+    let origin = tower.center();
+    let color = Color::srgb(0.45, 1.0, 0.52).mix(&tower.element.color(), 0.18);
+    spawn_layered_beam(commands, origin, target.pos, color, 3.0, 0.12, 10.4, true);
+    vfx.write(crate::vfx::VfxEvent::ElementPulse {
+        pos: target.pos,
+        color,
+        strong: false,
+    });
+
+    let range = tower.range * (1.0 + tower.aura_range);
+    let dir = (target.pos - origin).normalize_or_zero();
+    let width = TILE_SIZE * 0.36;
+    let mut hits: Vec<(f32, EnemySnap)> = snap
+        .enemies
+        .iter()
+        .filter(|e| {
+            snap.can_target(tower, e)
+                && origin.distance(e.pos) <= range + TILE_SIZE * 0.25
+                && (e.pos - origin).dot(dir) >= -4.0
+                && seg_dist(origin, target.pos, e.pos) <= width
+        })
+        .map(|e| (origin.distance(e.pos), *e))
+        .collect();
+    if !hits.iter().any(|(_, e)| e.entity == target.entity) {
+        hits.push((origin.distance(target.pos), target));
+    }
+    hits.sort_by(|a, b| a.0.total_cmp(&b.0));
+    hits.dedup_by_key(|(_, e)| e.entity);
+
+    let max_hits = if tower.behavior == Behavior::Poison {
+        5
+    } else {
+        4
+    };
+    for (i, (_, e)) in hits.into_iter().take(max_hits).enumerate() {
+        let main = e.entity == target.entity;
+        let falloff = if main { 1.0 } else { 0.64 - i as f32 * 0.04 };
+        dmg.write(Damage {
+            source_tower: Some(source_tower),
+            target: e.entity,
+            amount: tower.damage * falloff.max(0.48),
+            magic: tower.magic,
+            element: tower.element,
+            armor_pierce: tower.armor_pierce,
+        });
+        if tower.behavior == Behavior::Poison && tower.dot_damage > 0.0 {
+            status.write(Status {
+                source_tower: Some(source_tower),
+                target: e.entity,
+                kind: StatusKind::Poison {
+                    dmg: tower.dot_damage,
+                    duration: tower.poison_duration.max(1.8),
+                },
+            });
+        }
+        if tower.slow_duration > 0.0 {
+            status.write(Status {
+                source_tower: Some(source_tower),
+                target: e.entity,
+                kind: StatusKind::Slow {
+                    duration: tower.slow_duration.max(0.45),
+                },
+            });
+        }
+    }
+}
+
+fn hero_sentry_shot(
     source_tower: Entity,
     tower: &Tower,
     target: EnemySnap,
@@ -2001,7 +2492,7 @@ fn hero_warden_shot(
     }
 }
 
-fn hero_priest_shot(
+fn hero_summon_staff_shot(
     source_tower: Entity,
     tower: &Tower,
     target: EnemySnap,
@@ -2050,7 +2541,7 @@ fn hero_priest_shot(
     }
 }
 
-fn hero_engineer_shot(
+fn hero_hammer_shot(
     source_tower: Entity,
     tower: &Tower,
     target: EnemySnap,
@@ -2193,7 +2684,16 @@ pub fn update_projectiles(
         };
 
         if dist < hit_radius {
-            on_hit(&p, pos, target_pos, &snap, &mut dmg, &mut status, &mut vfx);
+            on_hit(
+                &mut commands,
+                &p,
+                pos,
+                target_pos,
+                &snap,
+                &mut dmg,
+                &mut status,
+                &mut vfx,
+            );
             commands.entity(entity).despawn();
         } else {
             let step = delta / dist * p.speed * dt;
@@ -2213,6 +2713,7 @@ pub fn update_projectiles(
 }
 
 fn on_hit(
+    commands: &mut Commands,
     p: &Projectile,
     pos: Vec2,
     target_pos: Vec2,
@@ -2229,6 +2730,34 @@ fn on_hit(
                 radius: p.aoe_radius,
                 color: fireball_color(),
             });
+            if p.dot_damage > 0.0 && p.poison_duration > 0.0 {
+                let life = p.poison_duration.max(1.2);
+                let scorch_radius = (p.aoe_radius * 0.55).clamp(TILE_SIZE * 0.65, TILE_SIZE * 1.45);
+                commands.spawn((
+                    Sprite {
+                        color: p
+                            .element
+                            .color()
+                            .mix(&fireball_color(), 0.35)
+                            .with_alpha(0.34),
+                        custom_size: Some(Vec2::splat(scorch_radius * 2.0)),
+                        ..default()
+                    },
+                    Transform::from_translation(impact.extend(3.55)),
+                    crate::components::FireGround {
+                        half_len: scorch_radius,
+                        half_width: scorch_radius,
+                        angle: 0.0,
+                        dps: p.dot_damage * 0.45,
+                        element: p.element,
+                        source_tower: p.source_tower,
+                        life,
+                        max_life: life,
+                        ember_timer: 0.0,
+                    },
+                    LevelEntity,
+                ));
+            }
             for e in &snap.enemies {
                 if e.invisible && !snap.is_detected(e) {
                     continue;
@@ -2248,6 +2777,27 @@ fn on_hit(
                             target: e.entity,
                             kind: StatusKind::Freeze {
                                 duration: p.freeze_duration,
+                            },
+                        });
+                    }
+                    if p.dot_damage > 0.0 {
+                        status.write(Status {
+                            source_tower: p.source_tower,
+                            target: e.entity,
+                            kind: StatusKind::Fire {
+                                dmg: p.dot_damage,
+                                duration: p.poison_duration.max(1.0),
+                                element: p.element,
+                            },
+                        });
+                    }
+                    if p.armor_reduce > 0.0 && p.curse_duration > 0.0 {
+                        status.write(Status {
+                            source_tower: p.source_tower,
+                            target: e.entity,
+                            kind: StatusKind::Curse {
+                                reduce: p.armor_reduce,
+                                duration: p.curse_duration,
                             },
                         });
                     }
@@ -2419,12 +2969,73 @@ pub fn spawn_ally(
     lifetime: f32,
     visual_scale: f32,
     owner: Entity,
-) {
+) -> Entity {
     let px = ally_visual_px(kind, visual_scale);
     let bar_w = (px * 0.62).max(16.0);
     let bar_y = px * 0.5 + 1.5;
-    let (mut sprite, anim) = creatures.sprite(kind, px);
+    let (mut sprite, anim, sheet_anim) = creatures.sprite(kind, px);
     sprite.color = summon_tint(kind);
+    let mut entity_commands = commands.spawn((
+        Summon {
+            hp,
+            max_hp: hp,
+            damage,
+            speed,
+            target: None,
+            facing: Vec2::X,
+            attack_timer: 0.0,
+            owner,
+            kind,
+            lifetime,
+            buff: 0.0,
+        },
+        sprite,
+        anim,
+        sheet_anim,
+        Transform::from_translation(pos.extend(5.5)),
+        SequentialActions,
+        LevelEntity,
+    ));
+    let entity = entity_commands.id();
+    entity_commands.with_children(|p| {
+        p.spawn((
+            Sprite {
+                color: Color::srgb(0.05, 0.08, 0.14),
+                custom_size: Some(Vec2::new(bar_w, 3.0)),
+                ..default()
+            },
+            Transform::from_xyz(0.0, bar_y, 0.1),
+        ));
+        p.spawn((
+            Sprite {
+                color: Color::srgb(0.42, 0.8, 1.0),
+                custom_size: Some(Vec2::new(bar_w, 3.0)),
+                ..default()
+            },
+            Anchor::CENTER_LEFT,
+            Transform::from_xyz(-bar_w / 2.0, bar_y, 0.2),
+            SummonHpBarFg,
+        ));
+    });
+    entity
+}
+
+/// Spawn the summon-staff's custom mythic ally. It uses the same movement and
+/// melee AI as tower summons, but a dedicated generated sprite instead of an
+/// enemy archetype sheet so it reads as a weapon-specific creature.
+pub fn spawn_mythic_ally(
+    commands: &mut Commands,
+    image: Handle<Image>,
+    pos: Vec2,
+    hp: f32,
+    damage: f32,
+    speed: f32,
+    lifetime: f32,
+    owner: Entity,
+) {
+    let px = TILE_SIZE * 1.85;
+    let bar_w = (px * 0.62).max(20.0);
+    let bar_y = px * 0.5 + 1.5;
     commands
         .spawn((
             Summon {
@@ -2436,13 +3047,18 @@ pub fn spawn_ally(
                 facing: Vec2::X,
                 attack_timer: 0.0,
                 owner,
-                kind,
+                kind: crate::data::EnemyKind::Boss,
                 lifetime,
                 buff: 0.0,
             },
-            sprite,
-            anim,
-            Transform::from_translation(pos.extend(5.5)),
+            Sprite {
+                image,
+                custom_size: Some(Vec2::splat(px)),
+                ..default()
+            },
+            MythicSummonSprite,
+            Transform::from_translation(pos.extend(5.7)),
+            SequentialActions,
             LevelEntity,
         ))
         .with_children(|p| {
@@ -2456,7 +3072,7 @@ pub fn spawn_ally(
             ));
             p.spawn((
                 Sprite {
-                    color: Color::srgb(0.42, 0.8, 1.0),
+                    color: Color::srgb(0.46, 1.0, 0.84),
                     custom_size: Some(Vec2::new(bar_w, 3.0)),
                     ..default()
                 },
@@ -2491,13 +3107,23 @@ pub fn update_summons(
     time: Res<Time>,
     run: Res<RunState>,
     snap: Res<Snapshot>,
-    mut summons: Query<(Entity, &mut Summon, &mut Transform)>,
-    mut dmg: MessageWriter<Damage>,
+    mut summons: Query<(
+        Entity,
+        &mut Summon,
+        &mut Transform,
+        Option<&mut Sprite>,
+        Option<&MythicSummonSprite>,
+        Option<&FixedSummonHome>,
+        Option<&CurrentAction>,
+        Option<&ActionQueue>,
+    )>,
     mut vfx: MessageWriter<crate::vfx::VfxEvent>,
 ) {
     let dt = time.delta_secs() * run.game_speed;
 
-    for (entity, mut s, mut tf) in &mut summons {
+    for (entity, mut s, mut tf, sprite, mythic, fixed_home, current_action, action_queue) in
+        &mut summons
+    {
         if s.lifetime.is_finite() {
             s.lifetime -= dt;
         }
@@ -2515,7 +3141,8 @@ pub fn update_summons(
             continue;
         }
 
-        let Some((home_pos, home_range)) = snap.tower_zones.get(&s.owner).copied() else {
+        let owner_zone = snap.tower_zones.get(&s.owner).copied();
+        if owner_zone.is_none() {
             vfx.write(crate::vfx::VfxEvent::Death {
                 pos,
                 color: summon_tint(s.kind),
@@ -2524,6 +3151,9 @@ pub fn update_summons(
             commands.entity(entity).despawn();
             continue;
         };
+        let (home_pos, home_range) = fixed_home
+            .map(|home| (home.pos, home.range))
+            .unwrap_or_else(|| owner_zone.expect("owner zone checked above"));
         let home_delta = home_pos - pos;
         let home_dist = home_delta.length();
         if home_dist > home_range {
@@ -2572,23 +3202,20 @@ pub fn update_summons(
                     let step = s.facing * step_len;
                     tf.translation.x += step.x;
                     tf.translation.y += step.y;
-                } else if s.attack_timer <= 0.0 {
-                    s.attack_timer = 0.6;
-                    dmg.write(Damage {
-                        source_tower: Some(s.owner),
-                        target,
-                        amount: s.damage * (1.0 + s.buff),
-                        magic: false,
-                        element: Element::Physical,
-                        armor_pierce: 0.0,
-                    });
-                    let dir = if dist > 1.0 { s.facing } else { Vec2::X };
-                    vfx.write(crate::vfx::VfxEvent::Slash {
-                        pos: pos + dir * (TILE_SIZE * 0.28),
-                        angle: dir.to_angle(),
-                        color: summon_tint(s.kind).mix(&Color::WHITE, 0.22),
-                        poison: false,
-                    });
+                } else if s.attack_timer <= 0.0 && !combat_action_busy(current_action, action_queue)
+                {
+                    queue_attack_sequence(
+                        &mut commands,
+                        entity,
+                        te.pos,
+                        QueuedImpact::Summon(QueuedSummonImpact {
+                            source_tower: s.owner,
+                            target,
+                            target_pos: te.pos,
+                            amount: s.damage * (1.0 + s.buff),
+                            kind: s.kind,
+                        }),
+                    );
                 }
             }
         } else if home_dist > TILE_SIZE * 0.35 {
@@ -2596,6 +3223,11 @@ pub fn update_summons(
             let step = s.facing * (s.speed * dt).min(home_dist);
             tf.translation.x += step.x;
             tf.translation.y += step.y;
+        }
+        if mythic.is_some() && s.facing.x.abs() > 0.05 {
+            if let Some(mut sprite) = sprite {
+                sprite.flip_x = s.facing.x < 0.0;
+            }
         }
     }
 }
@@ -2630,6 +3262,12 @@ pub fn enemy_vs_ally(
     let mut hero_dmg = 0.0;
     for (mut enemy, etf) in &mut enemies {
         enemy.blocked = false;
+        // Stealthed enemies should not be body-blocked by the hero or summons.
+        // Otherwise an undetected invisible unit can be pinned outside detector
+        // coverage forever: towers cannot target it, but it also cannot advance.
+        if enemy.invisible {
+            continue;
+        }
         let pos = etf.translation.truncate();
         let mut best: Option<(Entity, Vec2)> = None;
         let mut bd = engage;
@@ -3432,6 +4070,9 @@ pub fn enemy_vs_tower(
         if enemy.ranged_timer > 0.0 {
             enemy.ranged_timer -= dt;
         }
+        if enemy.invisible {
+            continue;
+        }
 
         if enemy.ranged_tower && enemy.ranged_damage > 0.0 && enemy.ranged_timer <= 0.0 {
             let mut best: Option<(Entity, Vec2)> = None;
@@ -3550,7 +4191,7 @@ pub fn enemy_vs_tower(
                 pos: feedback_pos,
                 amount: actual.max(1.0),
                 color: color.mix(&Color::WHITE, 0.22),
-                label,
+                label: crate::i18n::t(label),
             });
         }
         if tower.hp > 0.0 && hp_frac <= 0.3 && !tower.low_hp_warned {
@@ -3917,7 +4558,7 @@ pub fn apply_damage(
                     pos,
                     amount: dealt,
                     color,
-                    label,
+                    label: crate::i18n::t(label),
                 });
                 vfx.write(crate::vfx::VfxEvent::ElementPulse {
                     pos,
