@@ -73,8 +73,8 @@ impl BrightnessLevel {
 
     fn ambient_mult(self) -> f32 {
         match self {
-            BrightnessLevel::Standard => 0.78,
-            BrightnessLevel::Bright => 1.0,
+            BrightnessLevel::Standard => 0.92,
+            BrightnessLevel::Bright => 1.12,
             BrightnessLevel::High => 1.34,
         }
     }
@@ -217,8 +217,10 @@ fn default_fog_settings() -> FogMapSettings {
         // tower light circles instead of opening giant rectangular blocks.
         chunk_size: UVec2::splat(96),
         texture_resolution_per_chunk: UVec2::splat(192),
-        fog_color_unexplored: Color::srgba(0.0, 0.0, 0.0, 0.86),
-        fog_color_explored: Color::srgba(0.01, 0.018, 0.016, 0.54),
+        // 未探索区压暗但不全黑（带一点冷色氛围），已探索区只轻微降亮——
+        // 精美的关卡美术图应保持可见，迷雾是氛围而非黑幕。
+        fog_color_unexplored: Color::srgba(0.01, 0.02, 0.035, 0.58),
+        fog_color_explored: Color::srgba(0.01, 0.018, 0.016, 0.30),
         vision_clear_color: Color::NONE,
         ..default()
     }
@@ -237,14 +239,16 @@ fn fog_source(radius: f32) -> VisionSource {
 }
 
 fn weather_ambient(weather: LevelWeather, _theme: LevelTheme) -> (Color, f32, Option<f32>, f32) {
+    // 环境光基准整体上调：AI 手绘关卡图是画面主角，白天关卡要清晰明快，
+    // 夜晚/风暴关卡保留氛围压暗但绝不能糊成一团。
     match weather {
-        LevelWeather::DeepNight => (Color::WHITE, 0.32, None, 0.94),
-        LevelWeather::BloodRain => (Color::WHITE, 0.38, None, 0.90),
+        LevelWeather::DeepNight => (Color::WHITE, 0.46, None, 0.94),
+        LevelWeather::BloodRain => (Color::WHITE, 0.52, None, 0.90),
         LevelWeather::Starfall | LevelWeather::MoonlitGorge | LevelWeather::ThunderRift => {
-            (Color::WHITE, 0.40, None, 0.92)
+            (Color::WHITE, 0.54, None, 0.92)
         }
-        LevelWeather::Sandstorm | LevelWeather::Blizzard => (Color::WHITE, 0.46, None, 0.92),
-        _ => (Color::WHITE, 0.42, None, 0.90),
+        LevelWeather::Sandstorm | LevelWeather::Blizzard => (Color::WHITE, 0.62, None, 0.92),
+        _ => (Color::WHITE, 0.66, None, 0.90),
     }
 }
 

@@ -343,11 +343,8 @@ pub fn load_level(
         run.message_timer = 8.0;
     }
 
-    const BG_NAMES: [&str; 6] = ["swamp", "abyss", "cosmic", "ruins", "snow", "blood"];
-    let bg = assets.load(format!(
-        "sprites/backgrounds/{}.webp",
-        BG_NAMES[current.0 % BG_NAMES.len()]
-    ));
+    // 每关专属的 AI 手绘地图背景（assets/sprites/levels/lvl_XX.webp，20 张全齐）。
+    let bg = assets.load(format!("sprites/levels/lvl_{:02}.webp", current.0 % 20));
     draw_board(
         &mut commands,
         &board,
@@ -392,12 +389,12 @@ fn draw_board(
         Transform::from_translation(Vec3::new(0.0, 0.0, -4.0)),
         LevelEntity,
     ));
-    // Themed AI background image over the playfield (dimmed so units pop). The
-    // grid tiles below are drawn slightly translucent so this texture shows.
+    // 每关的 AI 手绘地图背景：接近全亮显示——这是画面的主角，棋盘格只做
+    // 极淡的引导覆盖（见下）。
     commands.spawn((
         Sprite {
             image: bg,
-            color: Color::srgb(0.62, 0.62, 0.62),
+            color: Color::srgb(0.94, 0.94, 0.94),
             custom_size: Some(Vec2::new(BOARD_W, BOARD_H)),
             ..default()
         },
@@ -420,11 +417,13 @@ fn draw_board(
             } else {
                 theme.path
             };
+            // 可建造格只留极淡的提示（建造模式有幽灵高亮兜底）；行进路径要
+            // 明显强于美术图里的装饰性道路——真正的路由这层标出，不能让玩家
+            // 误把画出来的路当行进路线。
+            let alpha = if buildable { 0.12 } else { 0.66 };
             commands.spawn((
                 Sprite {
-                    // Slightly translucent so the themed background texture shows
-                    // through while path/buildable colors stay readable.
-                    color: color.with_alpha(0.82),
+                    color: color.with_alpha(alpha),
                     custom_size: Some(Vec2::splat(TILE_SIZE - 2.0)),
                     ..default()
                 },
