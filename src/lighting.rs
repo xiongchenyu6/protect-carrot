@@ -21,7 +21,16 @@ pub struct LightingPlugin;
 impl Plugin for LightingPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(default_fog_settings())
-            .add_plugins((FireflyPlugin, FogOfWarPlugin))
+            .add_plugins(FireflyPlugin);
+        // 战争迷雾的 compute shader 用 r8unorm 做 read_write 存储纹理，WebGPU
+        // 标准不支持（原生 Vulkan 才有），在浏览器里会触发渲染校验错误直接退出。
+        // wasm 上跳过插件：FogMapSettings 资源与 ResetFogOfWar 消息仍注册，
+        // 相关系统照常运行但无渲染管线，雾效自然不生效。
+        #[cfg(not(target_arch = "wasm32"))]
+        app.add_plugins(FogOfWarPlugin);
+        #[cfg(target_arch = "wasm32")]
+        app.add_message::<ResetFogOfWar>();
+        app
             .add_systems(
                 Update,
                 (
@@ -302,6 +311,10 @@ fn configure_fog_of_war(
     mut last: Local<Option<(usize, bool)>>,
 ) {
     let enabled = matches!(game_state.get(), GameState::Playing) && fog_of_war_level(current.0);
+    // wasm 上无雾渲染管线（见 LightingPlugin::build），必须保持禁用，否则
+    // update_enemy_fog_visibility 会把"雾外"敌人隐藏而屏幕上又没有雾。
+    #[cfg(target_arch = "wasm32")]
+    let enabled = false;
     let state = (current.0, enabled);
     if *last == Some(state) && !current.is_changed() && !game_state.is_changed() {
         return;
