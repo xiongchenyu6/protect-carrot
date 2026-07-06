@@ -44,6 +44,20 @@ WEAPONS = [
     (108, "hammer", "weapon_hammer.png"),
 ]
 
+# 高级武器辉光变体：Lv20+ 英雄的武器带元素光晕（fragment id = 基础 id + 50）。
+# 光晕颜色按武器的元素气质配色。
+GLOW_WEAPONS = [
+    (150, "sword_glow", "weapon_sword_glow.png", "weapon_sword.png", "#7fd4ff"),
+    (151, "staff_glow", "weapon_staff_glow.png", "weapon_staff.png", "#ff9a4d"),
+    (152, "bow_glow", "weapon_bow_glow.png", "weapon_bow.png", "#8dff7a"),
+    (153, "shield_glow", "weapon_shield_glow.png", "weapon_shield.png", "#ffd45e"),
+    (154, "storm_orb_glow", "weapon_storm_orb_glow.png", "weapon_storm_orb.png", "#66c7ff"),
+    (155, "sentry_bow_glow", "weapon_sentry_bow_glow.png", "weapon_sentry_bow.png", "#ffc46b"),
+    (156, "dagger_glow", "weapon_dagger_glow.png", "weapon_dagger.png", "#c98bff"),
+    (157, "censer_glow", "weapon_censer_glow.png", "weapon_censer.png", "#ffe9a3"),
+    (158, "hammer_glow", "weapon_hammer_glow.png", "weapon_hammer.png", "#ff8a5c"),
+]
+
 GEAR = [
     (200, "vow_plate", "gear_vow_plate.png", 20),
     (201, "starweave_robe", "gear_starweave_robe.png", 20),
@@ -124,7 +138,8 @@ def manifest() -> str:
         "  constrainted: false",
         f"  positions: [{point()}]",
         f"  anchor: {point()}",
-        "  candidates: [100, 101, 102, 103, 104, 105, 106, 107, 108]",
+        "  candidates: [100, 101, 102, 103, 104, 105, 106, 107, 108, "
+        "150, 151, 152, 153, 154, 155, 156, 157, 158]",
         "- id: 20",
         "  desc: armor",
         "  required: false",
@@ -156,6 +171,8 @@ def manifest() -> str:
         "fragments:",
     ]
     for frag_id, name, path in WEAPONS:
+        lines += [f"- id: {frag_id}", f"  desc: {name}", f"  pivot: {point()}", f"  path: {path}"]
+    for frag_id, name, path, _base, _color in GLOW_WEAPONS:
         lines += [f"- id: {frag_id}", f"  desc: {name}", f"  pivot: {point()}", f"  path: {path}"]
     for frag_id, name, path, _slot in GEAR:
         lines += [f"- id: {frag_id}", f"  desc: {name}", f"  pivot: {point()}", f"  path: {path}"]
@@ -207,6 +224,44 @@ def place_item(path: Path, cx: float, cy: float, scale: float,
     args += ["PNG32:-"]
     out = subprocess.run(args, capture_output=True, check=True)
     return out.stdout
+
+
+def add_glow(placed_png: bytes, color: str) -> bytes:
+    """Element-colored halo under an already-placed weapon layer.
+
+    Halo = the weapon's alpha silhouette, dilated + blurred + tinted, composited
+    UNDER the weapon so the blade itself stays crisp while radiating light.
+    """
+    halo = subprocess.run(
+        [
+            "magick",
+            "(", "-size", f"{SIZE}x{SIZE}", f"xc:{color}", ")",
+            "(", "png:-", "-alpha", "extract",
+            "-morphology", "Dilate", "Disk:3",
+            "-blur", "0x7", "-auto-level",
+            "-evaluate", "Multiply", "0.9", ")",
+            "-alpha", "off", "-compose", "CopyOpacity", "-composite",
+            "PNG32:-",
+        ],
+        input=placed_png,
+        capture_output=True,
+        check=True,
+    )
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".png") as h, tempfile.NamedTemporaryFile(
+        suffix=".png"
+    ) as p:
+        h.write(halo.stdout)
+        h.flush()
+        p.write(placed_png)
+        p.flush()
+        out = subprocess.run(
+            ["magick", h.name, p.name, "-compose", "Over", "-composite", "PNG32:-"],
+            capture_output=True,
+            check=True,
+        )
+        return out.stdout
 
 
 def fallback_layers() -> dict[str, bytes]:
@@ -270,6 +325,13 @@ def main() -> None:
             files[name] = fallback[name]
         else:
             missing.append(name)
+
+    # 辉光武器变体：基于已对位的武器图层加元素光晕。
+    for _fid, _name, glow_path, base_path, color in GLOW_WEAPONS:
+        if base_path in files:
+            files[glow_path] = add_glow(files[base_path], color)
+        else:
+            missing.append(glow_path)
 
     if missing:
         sys.exit(f"missing layers (and no fallback): {missing}")

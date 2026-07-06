@@ -4426,6 +4426,46 @@ pub fn update_hero_info(hero: Res<HeroLoadout>, mut info: Query<&mut Text, With<
                 &hero.spent_in_current_weapon().to_string(),
             ],
         );
+        // 装备加成汇总：把穿在身上的装备(含武器契合)算成一行可读加成，
+        // 只列非中性项——移速/攻速/伤害这些实打实的数值让玩家看得见。
+        let mut stats = crate::hero_gear::gear_stats(&hero.gear);
+        stats.combine(crate::hero_gear::weapon_affinity_stats(
+            &hero.gear, hero.weapon,
+        ));
+        let pct = |v: f32| format!("{:+.0}%", (v - 1.0) * 100.0);
+        let mut parts: Vec<String> = Vec::new();
+        if (stats.damage_mult - 1.0).abs() > 0.005 {
+            parts.push(format!("{}{}", crate::i18n::t("伤害"), pct(stats.damage_mult)));
+        }
+        if (stats.move_mult - 1.0).abs() > 0.005 {
+            parts.push(format!("{}{}", crate::i18n::t("移速"), pct(stats.move_mult)));
+        }
+        if (stats.cooldown_mult - 1.0).abs() > 0.005 {
+            parts.push(format!(
+                "{}{}",
+                crate::i18n::t("攻速"),
+                pct(1.0 / stats.cooldown_mult)
+            ));
+        }
+        if (stats.hp_mult - 1.0).abs() > 0.005 {
+            parts.push(format!("{}{}", crate::i18n::t("生命值"), pct(stats.hp_mult)));
+        }
+        if (stats.range_mult - 1.0).abs() > 0.005 {
+            parts.push(format!("{}{}", crate::i18n::t("射程"), pct(stats.range_mult)));
+        }
+        if stats.armor_add.abs() > 0.5 {
+            parts.push(format!("{}+{:.0}", crate::i18n::t("护甲"), stats.armor_add));
+        }
+        if !parts.is_empty() {
+            t.0.push_str(&format!(
+                "\n{}：{}",
+                crate::i18n::t("装备加成"),
+                parts.join(" ")
+            ));
+        }
+        if hero.level >= crate::hero_paperdoll::GLOW_WEAPON_LEVEL {
+            t.0.push_str(&format!("\n{}", crate::i18n::t("武器辉光已觉醒")));
+        }
     }
 }
 

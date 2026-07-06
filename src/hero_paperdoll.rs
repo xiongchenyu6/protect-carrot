@@ -15,6 +15,9 @@ use crate::tower::Tower;
 
 pub const HERO_PAPERDOLL_PATH: &str = "paperdoll/hero.ppd";
 pub const HERO_WEAPON_SLOT: u32 = 10;
+/// 英雄达到该等级后，武器换用带元素光晕的辉光变体（fragment id +50）。
+pub const GLOW_WEAPON_LEVEL: u8 = 20;
+const GLOW_FRAGMENT_OFFSET: u32 = 50;
 pub const HERO_PAPERDOLL_WORLD_SIZE: f32 = TILE_SIZE * 1.62;
 pub const HERO_PAPERDOLL_GHOST_SIZE: f32 = TILE_SIZE * 1.42;
 
@@ -23,6 +26,8 @@ pub struct HeroPaperdollKey {
     race: Race,
     weapon: HeroWeapon,
     gear: [Option<HeroGear>; HeroGearSlot::COUNT],
+    /// 高级武器辉光（Lv20+）：等级跨过阈值时纸娃娃需要重新合成。
+    glow: bool,
 }
 
 impl HeroPaperdollKey {
@@ -31,6 +36,7 @@ impl HeroPaperdollKey {
             race: loadout.race,
             weapon: loadout.weapon,
             gear: loadout.gear,
+            glow: loadout.level >= GLOW_WEAPON_LEVEL,
         }
     }
 }
@@ -121,11 +127,15 @@ fn compose_hero_paperdoll(
 ) -> Result<Image, String> {
     let paperdoll_id = asset.create_paperdoll(doll_id_for_race(loadout.race));
     let result = (|| {
+        let mut weapon_fragment = loadout.weapon_kind().paperdoll_fragment();
+        if loadout.level >= GLOW_WEAPON_LEVEL {
+            weapon_fragment += GLOW_FRAGMENT_OFFSET;
+        }
         set_fragment(
             asset,
             paperdoll_id,
             HERO_WEAPON_SLOT,
-            loadout.weapon_kind().paperdoll_fragment(),
+            weapon_fragment,
             "hero weapon",
         )?;
 
