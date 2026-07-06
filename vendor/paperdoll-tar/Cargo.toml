@@ -1,0 +1,13 @@
+[package]
+edition = "2021"
+name = "paperdoll-tar"
+version = "0.1.1"
+description = "2D paper doll model (vendored: in-memory read, wasm-safe)"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0"
+image = "0.24"
+paperdoll = "0.1.1"
+serde_yaml = "0.9"
+tar = "0.4"

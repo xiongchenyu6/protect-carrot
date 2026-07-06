@@ -84,6 +84,11 @@ webgpu = ["bevy/web", "bevy/webgpu"]
 # stays Wayland-native while still using Firefly's WebGPU 2D lighting pipeline.
 bevy_firefly = { path = "vendor/bevy_firefly" }
 
+# 上游 paperdoll-tar 的 read() 会把 tar 解包进 std::env::temp_dir()——wasm 上
+# 直接 panic("no filesystem on this platform")，网页版启动即崩。vendored 版
+# 全内存读取，原生/网页同一条路径。
+paperdoll-tar = { path = "vendor/paperdoll-tar" }
+
 # Native dev profile: optimize dependencies even in debug so Bevy runs smoothly,
 # while keeping our own crate fast to compile. This is the standard Bevy setup.
 [profile.dev.package."*"]
