@@ -185,6 +185,7 @@ fn main() -> AppExit {
     .add_plugins(lighting::LightingPlugin)
     .add_plugins(PaperdollPlugin)
     .add_plugins(hero_paperdoll::HeroPaperdollPlugin)
+    .add_plugins(protect_carrot::polish::PolishPlugin)
     .add_plugins(SpritesheetAnimationPlugin)
     .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
         1.0 / FPS,

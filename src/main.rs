@@ -25,8 +25,8 @@ use iyes_progress::ProgressPlugin;
 
 use protect_carrot::{
     Levels, audio, bestiary, build, creatures, data, enemy, equipment, fluent_i18n, game, hero,
-    hero_gear, hero_paperdoll, i18n, lighting, meta, mutators, quality, roguelite, sprites, states,
-    tower, tuning, tutorial, ui, vfx,
+    hero_gear, hero_paperdoll, i18n, lighting, meta, mutators, polish, quality, roguelite, sprites,
+    states, tower, tuning, tutorial, ui, vfx,
 };
 
 // Web-only: a retrying HTTP asset reader, installed before AssetPlugin so a
@@ -250,6 +250,7 @@ fn main() {
             }),
     )
     .add_plugins(CursorAssetPlugin)
+    .add_plugins(polish::PolishPlugin)
     .add_plugins(PaperdollPlugin)
     .add_plugins(hero_paperdoll::HeroPaperdollPlugin)
     .add_plugins(lighting::LightingPlugin)

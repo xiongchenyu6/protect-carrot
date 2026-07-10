@@ -27,6 +27,7 @@ pub mod roguelite;
 pub mod sprites;
 pub mod states;
 pub mod mutators;
+pub mod polish;
 pub mod tower;
 pub mod tuning;
 pub mod tutorial;
