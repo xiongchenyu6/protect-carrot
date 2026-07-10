@@ -8840,7 +8840,9 @@ pub fn menu_buttons(
             }
             UiAction::PlayEndless => {
                 mode.0 = RunMode::Endless;
-                current.0 = levels.0.len().saturating_sub(1);
+                // 无尽基线用第一章终关（index 19）：战役扩到 100 关后，
+                // “最后一关”带第 5 章 ×9 血量倍率，再叠无尽成长会开局即地狱。
+                current.0 = (crate::data::EPISODE_LEN - 1).min(levels.0.len() - 1);
                 next.set(GameState::Story);
             }
             UiAction::OpenBestiary => next.set(GameState::Bestiary),
