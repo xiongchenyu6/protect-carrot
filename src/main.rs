@@ -274,6 +274,7 @@ fn main() {
     .insert_resource(fluent_locale)
     .init_resource::<audio::AudioSettings>()
     .init_resource::<ui::MenuDirty>()
+    .init_resource::<ui::SelectedEpisode>()
     .init_resource::<fluent_i18n::FluentStatus>()
     .insert_resource(Levels(levels()))
     .insert_resource(AutostartLevel::from_env())

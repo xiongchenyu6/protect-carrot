@@ -45,12 +45,14 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// Persistent progression (how many levels are unlocked).
+/// `stars` 用 Vec 存储：旧档的 20 项定长数组能无损反序列化进来，100 关
+/// 扩展后按需增长（见 [`Progress::set_star`]）。
 #[derive(Resource, Clone, Serialize, Deserialize)]
 pub struct Progress {
     #[serde(default = "default_unlocked")]
     pub unlocked: usize,
     #[serde(default)]
-    pub stars: [u8; 20],
+    pub stars: Vec<u8>,
 }
 impl Default for Progress {
     fn default() -> Self {
@@ -58,6 +60,19 @@ impl Default for Progress {
             unlocked: load_progress_unlocked().max(1),
             stars: load_progress_stars(),
         }
+    }
+}
+
+impl Progress {
+    pub fn star(&self, level: usize) -> u8 {
+        self.stars.get(level).copied().unwrap_or(0).min(3)
+    }
+
+    pub fn set_star(&mut self, level: usize, value: u8) {
+        if self.stars.len() <= level {
+            self.stars.resize(level + 1, 0);
+        }
+        self.stars[level] = value.min(3);
     }
 }
 
@@ -116,7 +131,7 @@ fn load_progress_unlocked() -> usize {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn load_progress_stars() -> [u8; 20] {
+fn load_progress_stars() -> Vec<u8> {
     decode_stars(&load_progress_stars_js())
 }
 
@@ -129,21 +144,17 @@ fn load_progress_unlocked() -> usize {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn load_progress_stars() -> [u8; 20] {
+fn load_progress_stars() -> Vec<u8> {
     std::fs::read_to_string("tmp/progress_stars.txt")
         .map(|raw| decode_stars(&raw))
-        .unwrap_or([0; 20])
+        .unwrap_or_default()
 }
 
-fn decode_stars(raw: &str) -> [u8; 20] {
-    let mut stars = [0; 20];
-    for (slot, value) in stars.iter_mut().zip(
-        raw.split(|c: char| c == ',' || c.is_ascii_whitespace())
-            .filter(|value| !value.is_empty()),
-    ) {
-        *slot = value.parse::<u8>().unwrap_or(0).min(3);
-    }
-    stars
+fn decode_stars(raw: &str) -> Vec<u8> {
+    raw.split(|c: char| c == ',' || c.is_ascii_whitespace())
+        .filter(|value| !value.is_empty())
+        .map(|value| value.parse::<u8>().unwrap_or(0).min(3))
+        .collect()
 }
 
 /// Handle to the CJK-capable UI font. Bevy's built-in default font has no Chinese
@@ -218,6 +229,10 @@ pub struct MenuSettingsRoot;
 /// so every translated string re-renders).
 #[derive(Resource, Default)]
 pub struct MenuDirty(pub bool);
+
+/// 选关页当前查看的章节。None = 跟随进度（解锁前沿所在章节）。
+#[derive(Resource, Default)]
+pub struct SelectedEpisode(pub Option<usize>);
 /// Menu label showing the current master-volume percentage.
 #[derive(Component)]
 pub struct VolumeLabel;
@@ -435,6 +450,8 @@ pub enum UiAction {
     EquipHeroGear(HeroGear),
     UnequipHeroGear(HeroGearSlot),
     PlayLevel(usize),
+    /// 选关页切换章节（0-based）。
+    SelectEpisode(usize),
     PlayEndless,
     BeginMission,
     Restart,
@@ -6271,7 +6288,7 @@ pub fn spawn_level_briefing(
     let f = &fonts.0;
     let level = &levels.0[current.0];
     let theme = LEVEL_THEMES
-        .get(current.0)
+        .get(current.0 % LEVEL_THEMES.len())
         .copied()
         .unwrap_or(LEVEL_THEMES[0]);
     let endless = mode.0.is_endless();
@@ -6977,6 +6994,7 @@ pub fn spawn_menu(
     lang: Res<Language>,
     audio: Res<AudioSettings>,
     lighting: Res<LightingSettings>,
+    episode: Res<SelectedEpisode>,
     mut dirty: ResMut<MenuDirty>,
 ) {
     dirty.0 = false;
@@ -6984,6 +7002,10 @@ pub fn spawn_menu(
     let tr = |s: &str| tr(lang, s);
     let f = &fonts.0;
     let unlocked_count = progress.unlocked.min(levels.0.len());
+    // 默认展示解锁前沿所在的章节。
+    let selected_episode = episode
+        .0
+        .unwrap_or_else(|| crate::data::episode_of(unlocked_count.saturating_sub(1)));
     let discovered = MONSTER_SPECIES
         .iter()
         .filter(|species| bestiary.count(species.id) > 0)
@@ -7333,6 +7355,96 @@ pub fn spawn_menu(
                         ));
                     });
 
+                // ---- 章节页签：5 章 × 20 关，选关网格一次只展示一章 ----
+                let frontier_ep =
+                    crate::data::episode_of(progress.unlocked.saturating_sub(1).max(0));
+                let sel_ep = selected_episode.min(crate::data::EPISODE_COUNT - 1);
+                right
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        column_gap: Val::Px(6.0),
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    })
+                    .with_children(|tabs| {
+                        for (ep, def) in crate::data::EPISODES.iter().enumerate() {
+                            let ep_start = ep * crate::data::EPISODE_LEN;
+                            let ep_open = progress.unlocked > ep_start;
+                            let ep_stars: u32 = (ep_start
+                                ..(ep_start + crate::data::EPISODE_LEN).min(levels.0.len()))
+                                .map(|i| progress.star(i) as u32)
+                                .sum();
+                            let selected = ep == sel_ep;
+                            let bg = if selected {
+                                Color::srgba(0.24, 0.34, 0.28, 0.95)
+                            } else if ep_open {
+                                Color::srgba(0.10, 0.13, 0.15, 0.92)
+                            } else {
+                                Color::srgba(0.06, 0.07, 0.08, 0.92)
+                            };
+                            let mut tab = if ep_open {
+                                tabs.spawn((Button, UiAction::SelectEpisode(ep)))
+                            } else {
+                                tabs.spawn_empty()
+                            };
+                            tab.insert((
+                                Node {
+                                    flex_direction: FlexDirection::Column,
+                                    align_items: AlignItems::Center,
+                                    padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
+                                    row_gap: Val::Px(1.0),
+                                    ..default()
+                                },
+                                BackgroundColor(bg),
+                            ))
+                            .with_children(|tab| {
+                                let title = if ep_open {
+                                    crate::i18n::tf(
+                                        "第{}章 {}",
+                                        &[&(ep + 1).to_string(), &tr(def.name)],
+                                    )
+                                } else {
+                                    crate::i18n::tf("第{}章 ???", &[&(ep + 1).to_string()])
+                                };
+                                tab.spawn((
+                                    Text::new(title),
+                                    text_font(f, 13.0),
+                                    TextColor(if selected {
+                                        UI_ACCENT_GOLD
+                                    } else if ep_open {
+                                        UI_TEXT
+                                    } else {
+                                        UI_TEXT_DIM
+                                    }),
+                                ));
+                                let sub = if ep_open {
+                                    format!("★{}/{}", ep_stars, crate::data::EPISODE_LEN * 3)
+                                } else {
+                                    tr("未解锁")
+                                };
+                                tab.spawn((
+                                    Text::new(sub),
+                                    text_font(f, 10.0),
+                                    TextColor(UI_TEXT_DIM),
+                                ));
+                            });
+                        }
+                    });
+                // 章节副标题（一句话氛围）。
+                right
+                    .spawn(Node {
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    })
+                    .with_children(|line| {
+                        line.spawn((
+                            Text::new(tr(crate::data::EPISODES[sel_ep].subtitle)),
+                            text_font(f, 11.0),
+                            TextColor(UI_TEXT_DIM),
+                        ));
+                    });
+                let _ = frontier_ep;
+
                 right
                     .spawn(Node {
                         flex_direction: FlexDirection::Row,
@@ -7343,14 +7455,19 @@ pub fn spawn_menu(
                         ..default()
                     })
                     .with_children(|grid| {
-                        for (i, _lvl) in levels.0.iter().enumerate() {
+                        let ep_tint = crate::data::EPISODES[sel_ep].tint;
+                        let start = sel_ep * crate::data::EPISODE_LEN;
+                        let end = (start + crate::data::EPISODE_LEN).min(levels.0.len());
+                        for i in start..end {
                             let open = i < progress.unlocked;
-                            let stars = progress.stars.get(i).copied().unwrap_or(0).min(3);
+                            let stars = progress.star(i);
                             // Each level is a map THUMBNAIL tile; the name / wave count /
                             // rating live in the hover tooltip (text → tooltip). Locked
                             // levels are darkened. Number + stars overlay on the art.
+                            // 缩略图复用第一章的 20 张地图美术，按章节乘色调；
+                            // 未解锁压暗。
                             let tint = if open {
-                                Color::WHITE
+                                ep_tint
                             } else {
                                 Color::srgb(0.20, 0.20, 0.24)
                             };
@@ -7371,8 +7488,10 @@ pub fn spawn_menu(
                                         ..default()
                                     },
                                     ImageNode {
-                                        image: assets
-                                            .load(format!("sprites/levels/lvl_{:02}.webp", i)),
+                                        image: assets.load(format!(
+                                            "sprites/levels/lvl_{:02}.webp",
+                                            i % crate::data::EPISODE_LEN
+                                        )),
                                         color: tint,
                                         ..default()
                                     },
@@ -8678,6 +8797,7 @@ pub fn menu_buttons(
     mut hero: ResMut<HeroLoadout>,
     levels: Res<Levels>,
     mut mode: ResMut<GameMode>,
+    mut episode: ResMut<SelectedEpisode>,
     mut next: ResMut<NextState<GameState>>,
     mut settings: Query<&mut Node, With<MenuSettingsRoot>>,
 ) {
@@ -8705,6 +8825,10 @@ pub fn menu_buttons(
             }
             UiAction::SelectHeroRace(r) => hero.set_race(*r),
             UiAction::SelectHeroWeapon(c) => hero.set_weapon(*c),
+            UiAction::SelectEpisode(ep) => {
+                episode.0 = Some(*ep);
+                dirty.0 = true;
+            }
             UiAction::PlayLevel(i) => {
                 mode.0 = RunMode::Campaign;
                 current.0 = *i;
@@ -9344,10 +9468,13 @@ pub fn spawn_campaign_dossier(
             })
             .with_children(|grid| {
                 for (i, level) in levels.0.iter().enumerate() {
-                    let theme = LEVEL_THEMES.get(i).copied().unwrap_or(LEVEL_THEMES[0]);
+                    let theme = LEVEL_THEMES
+                        .get(i % LEVEL_THEMES.len())
+                        .copied()
+                        .unwrap_or(LEVEL_THEMES[0]);
                     let open = i < unlocked;
                     let stars = progress.stars.get(i).copied().unwrap_or(0);
-                    let lore = LEVEL_LORE.get(i).copied().unwrap_or("档案缺失。");
+                    let lore = crate::data::lore_for_level(i);
                     let status = if open {
                         crate::i18n::t(rating_label(stars))
                     } else {
@@ -9880,10 +10007,10 @@ pub fn spawn_victory(
     let level = &levels.0[current.0];
     let start_lives = (level.lives + diff.0.lives_bonus()).max(1);
     let stars = victory_rating(run.lives.max(0), start_lives);
-    let old_stars = progress.stars[current.0];
+    let old_stars = progress.star(current.0);
     let mut persist_progress = false;
     if stars > old_stars {
-        progress.stars[current.0] = stars;
+        progress.set_star(current.0, stars);
         persist_progress = true;
     }
     // Unlock the next level.
@@ -9899,7 +10026,7 @@ pub fn spawn_victory(
             warn!("failed to persist campaign progress: {err}");
         }
     }
-    let best_stars = progress.stars[current.0];
+    let best_stars = progress.star(current.0);
     let reward_bonus = clear_reward_bonus(diff.0);
     let rewards = roll_clear_rewards(&mut rng, stars, reward_bonus, current.0);
     for item in &rewards {

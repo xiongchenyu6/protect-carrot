@@ -238,7 +238,12 @@ fn spawn_one(
     let kind = species.kind;
     let def = kind.def();
     let is_elite = elite_affix != EliteAffix::None;
-    let wave_mult = 1.0 + (wave - 1) as f32 * 0.35 + level_index as f32 * 0.08;
+    // 关卡序号加成用「章节内序号」：跨章节的强度增长完全由章节倍率
+    // (EPISODES[e].hp_mult) 承担，避免全局序号(最高 99)把后期章节的
+    // wave_mult 推到不可战胜的双重叠加。
+    let wave_mult = 1.0
+        + (wave - 1) as f32 * 0.35
+        + (level_index % crate::data::EPISODE_LEN) as f32 * 0.08;
     let endless_wave = if endless { wave.max(1) as f32 } else { 0.0 };
     let endless_hp = if endless {
         1.0 + (endless_wave / 10.0).powf(1.08) * 0.18
@@ -283,6 +288,15 @@ fn spawn_one(
         EliteAffix::Siege => 0.94,
         _ => 1.0,
     };
+    // 后期章节 boss 血量阻尼：章节经济涨了但地块有限、DPS 有上限，boss 若按
+    // 章节 hp 倍率全额膨胀会把终局拖成十几分钟的磨血战。把 boss 承受的章节
+    // 倍率打个 0.5 次幂折扣（小怪不变，波次压力保持原样）。
+    let episode_boss_damp = if def.boss {
+        let ep_mult = crate::data::EPISODES[crate::data::episode_of(level_index)].hp_mult;
+        ep_mult.powf(0.5) / ep_mult
+    } else {
+        1.0
+    };
     let hp = (level_hp
         * wave_mult
         * campaign_hp_pressure(wave, level_index, endless)
@@ -292,7 +306,8 @@ fn spawn_one(
         * endless_hp
         * elite_hp
         * affix_hp
-        * build_pressure)
+        * build_pressure
+        * episode_boss_damp)
         .floor();
     // px/sec: original moved `speed*dt/16` with speed = level.speed*TILE/60*mod.
     let base_speed =

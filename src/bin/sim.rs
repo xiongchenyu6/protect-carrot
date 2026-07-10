@@ -1286,7 +1286,11 @@ fn main() {
             );
         }
         "winrate" => {
-            let n = 20u64;
+            // 可选第 4 参数 = 局数（默认 20），如 `sim 99 12345 winrate 8`。
+            let n: u64 = std::env::args()
+                .nth(4)
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(20);
             eprintln!(
                 "[sim] WIN-RATE — greedy player, level {} ({}), {} seeds...",
                 level, level_name, n

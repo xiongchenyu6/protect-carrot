@@ -2036,14 +2036,19 @@ pub fn pick_boss(
     level_index: usize,
     rng: &mut crate::game::Rng,
 ) -> &'static MonsterSpecies {
-    if wave == total_waves && wave >= 20 && level_index >= 19 {
+    // 章节内相对序号：每章（20 关）的第 19/20 关是终章双雄；整个战役的
+    // 最后一关（第 5 章第 20 关）才请出真·最终 boss（id 100）。
+    let in_episode = level_index % crate::data::EPISODE_LEN;
+    let final_level = level_index + 1 >= crate::data::EPISODE_LEN * crate::data::EPISODE_COUNT;
+    if wave == total_waves && wave >= 20 && (in_episode >= 19 || final_level) {
+        let id = if final_level { 100 } else { 99 };
         return MONSTER_SPECIES
             .iter()
-            .find(|s| s.id == 100)
-            .unwrap_or(&MONSTER_SPECIES[100]);
+            .find(|s| s.id == id)
+            .unwrap_or(&MONSTER_SPECIES[id]);
     }
 
-    if wave == total_waves && wave >= 20 && level_index >= 18 {
+    if wave == total_waves && wave >= 20 && in_episode >= 18 {
         return MONSTER_SPECIES
             .iter()
             .find(|s| s.id == 99)

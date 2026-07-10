@@ -4,7 +4,7 @@ use crate::Levels;
 use crate::board::Board;
 use crate::components::{Carrot, CarrotSealBar, LevelEntity};
 use crate::data::{
-    BOARD_H, BOARD_W, BOSS_WAVE_INTERVAL, COLS, LEVEL_LORE, LEVEL_THEMES, ROWS, TILE_SIZE,
+    BOARD_H, BOARD_W, BOSS_WAVE_INTERVAL, COLS, LEVEL_THEMES, ROWS, TILE_SIZE,
     cell_center,
 };
 use crate::equipment::{EquipmentInventory, unequip_all_to_inventory};
@@ -335,7 +335,8 @@ pub fn load_level(
         run.spawn_interval = level.spawn_interval_ms / 1000.0;
         run.base_count = level.enemies.count;
         // Cthulhu-flavored level lore, shown a little longer than a normal message.
-        let lore = LEVEL_LORE.get(current.0).copied().unwrap_or("");
+        // 第一章逐关独立，第 2-5 章共用章节 lore。
+        let lore = crate::data::lore_for_level(current.0);
         run.message = crate::i18n::tf(
             "{}\n{}",
             &[&crate::i18n::t(level.name), &crate::i18n::t(lore)],
@@ -343,8 +344,13 @@ pub fn load_level(
         run.message_timer = 8.0;
     }
 
-    // 每关专属的 AI 手绘地图背景（assets/sprites/levels/lvl_XX.webp，20 张全齐）。
-    let bg = assets.load(format!("sprites/levels/lvl_{:02}.webp", current.0 % 20));
+    // 每关的 AI 手绘地图背景：20 张美术按章节循环复用，叠加章节色调
+    // （沙漠暖黄/冰原冷蓝/深渊血红/虚空紫）区分五章氛围。
+    let bg = assets.load(format!(
+        "sprites/levels/lvl_{:02}.webp",
+        current.0 % crate::data::EPISODE_LEN
+    ));
+    let episode_tint = crate::data::EPISODES[crate::data::episode_of(current.0)].tint;
     draw_board(
         &mut commands,
         &board,
@@ -352,6 +358,7 @@ pub fn load_level(
         &mut meshes,
         &mut materials,
         bg,
+        episode_tint,
         &sprites,
         &lighting,
     );
@@ -368,11 +375,12 @@ fn draw_board(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<ColorMaterial>,
     bg: Handle<Image>,
+    episode_tint: Color,
     sprites: &crate::sprites::Sprites,
     lighting: &crate::lighting::LightingSettings,
 ) {
     let theme = LEVEL_THEMES
-        .get(board.level_index)
+        .get(board.level_index % LEVEL_THEMES.len())
         .copied()
         .unwrap_or(LEVEL_THEMES[0]);
 
@@ -391,10 +399,15 @@ fn draw_board(
     ));
     // 每关的 AI 手绘地图背景：接近全亮显示——这是画面的主角，棋盘格只做
     // 极淡的引导覆盖（见下）。
+    let bg_srgba = episode_tint.to_srgba();
     commands.spawn((
         Sprite {
             image: bg,
-            color: Color::srgb(0.94, 0.94, 0.94),
+            color: Color::srgb(
+                0.94 * bg_srgba.red,
+                0.94 * bg_srgba.green,
+                0.94 * bg_srgba.blue,
+            ),
             custom_size: Some(Vec2::new(BOARD_W, BOARD_H)),
             ..default()
         },

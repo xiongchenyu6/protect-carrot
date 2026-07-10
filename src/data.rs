@@ -1965,5 +1965,153 @@ pub fn levels() -> Vec<Level> {
             lvl.enemies.reward = reward;
         }
     }
+
+    // ============== 章节 2-5：在第一章 20 关的基础上生成 80 个新关 ==============
+    // 路径复用第一章的手工设计，但按章节做几何变换（水平镜像/垂直镜像/双镜像/
+    // 反向行进），保证路径合法的同时让每章地图布局焕然一新；数值按章节倍率
+    // 延伸第一章的平衡曲线（wave_mult 本身还会随全局关卡序号继续增长）。
+    let base: Vec<Level> = levels.clone();
+    for ep in 1..EPISODE_COUNT {
+        let def = &EPISODES[ep];
+        for (i, src) in base.iter().enumerate() {
+            let mut path: Vec<(i32, i32)> = src
+                .path
+                .iter()
+                .map(|&(c, r)| match ep {
+                    1 => (COLS - 1 - c, r),            // 水平镜像：从右侧入场
+                    2 => (c, ROWS - 1 - r),            // 垂直镜像
+                    3 => (COLS - 1 - c, ROWS - 1 - r), // 双镜像
+                    _ => (c, r),                       // 终章：反向行进（下面 reverse）
+                })
+                .collect();
+            if ep == 4 {
+                path.reverse();
+            }
+            levels.push(Level {
+                name: EPISODE_LEVEL_NAMES[ep - 1][i],
+                gold: (src.gold as f32 * def.gold_mult) as i32,
+                lives: src.lives,
+                waves: src.waves,
+                path,
+                enemies: EnemyBase {
+                    hp: (src.enemies.hp * def.hp_mult).floor(),
+                    speed: src.enemies.speed * def.speed_mult,
+                    reward: (src.enemies.reward * def.gold_mult).floor(),
+                    count: src.enemies.count,
+                },
+                spawn_interval_ms: (src.spawn_interval_ms * def.pace_mult).max(300.0),
+            });
+        }
+    }
     levels
+}
+
+// ===================== 章节（Episode）：5 章 × 20 关 = 100 关 =====================
+
+pub const EPISODE_LEN: usize = 20;
+pub const EPISODE_COUNT: usize = 5;
+
+#[derive(Clone, Copy, Debug)]
+pub struct EpisodeDef {
+    pub name: &'static str,
+    pub subtitle: &'static str,
+    /// 战场背景与选关缩略图的章节色调（乘色）。第一章为纯白（原样）。
+    pub tint: Color,
+    pub hp_mult: f32,
+    pub gold_mult: f32,
+    pub speed_mult: f32,
+    pub pace_mult: f32,
+    /// 章节氛围 lore：第 2-5 章的关卡载入时显示（第一章保留每关独立 lore）。
+    pub lore: &'static str,
+}
+
+pub const EPISODES: [EpisodeDef; EPISODE_COUNT] = [
+    EpisodeDef {
+        name: "翠野惊变",
+        subtitle: "草原的封印开始松动",
+        tint: Color::WHITE,
+        hp_mult: 1.0,
+        gold_mult: 1.0,
+        speed_mult: 1.0,
+        pace_mult: 1.0,
+        lore: "",
+    },
+    EpisodeDef {
+        name: "余烬沙海",
+        subtitle: "黄沙之下，旧日的余烬未熄",
+        tint: Color::srgb(1.0, 0.88, 0.72),
+        hp_mult: 2.0,
+        gold_mult: 1.9,
+        speed_mult: 1.04,
+        pace_mult: 0.95,
+        lore: "沙海吞没过七座文明，每一粒沙都记得它们的名字——现在它想记住你的。",
+    },
+    EpisodeDef {
+        name: "霜星冰原",
+        subtitle: "坠落的星辰在永冻土下低语",
+        tint: Color::srgb(0.80, 0.90, 1.0),
+        hp_mult: 3.5,
+        gold_mult: 3.4,
+        speed_mult: 1.06,
+        pace_mult: 0.92,
+        lore: "冰层封住的不是水，是一场仍在下坠的星陨。冻土之下，光仍在挣扎。",
+    },
+    EpisodeDef {
+        name: "血潮深渊",
+        subtitle: "潮水漫过城墙，深渊睁开了眼",
+        tint: Color::srgb(1.0, 0.78, 0.80),
+        hp_mult: 6.0,
+        gold_mult: 5.8,
+        speed_mult: 1.08,
+        pace_mult: 0.90,
+        lore: "深渊不需要淹没你——它只需让你听见潮声，剩下的路你会自己走下去。",
+    },
+    EpisodeDef {
+        name: "虚空终章",
+        subtitle: "现实的边缘，最后的封印",
+        tint: Color::srgb(0.86, 0.80, 1.0),
+        hp_mult: 9.0,
+        gold_mult: 9.5,
+        speed_mult: 1.10,
+        pace_mult: 0.88,
+        lore: "群星归位，帷幕将落。守住封印之种，或与现实一同谢幕。",
+    },
+];
+
+/// 第 2-5 章的关卡名（每章 20 个）。
+pub const EPISODE_LEVEL_NAMES: [[&str; EPISODE_LEN]; EPISODE_COUNT - 1] = [
+    [
+        "沙海门户", "灼风峡", "骨沙绿洲", "蜃楼回廊", "焦土哨线", "玻璃平原", "沙暴之心",
+        "熔金矿脉", "灰烬商路", "双日祭坛", "埋城之丘", "蝎母巢穴", "赤岩风口", "盐湖魔镜",
+        "流沙漏斗", "燃霄高台", "沙下龙骨", "落日封印", "余烬王座", "沙海终门",
+    ],
+    [
+        "霜风隘口", "碎冰湖面", "极光雪原", "回音冰谷", "雪藏哨站", "冻土裂谷", "星陨之坑",
+        "寒雾森林", "冰帆港湾", "白鲸之脊", "永冻瀑布", "霜巨人阶梯", "蓝冰洞窟", "雪暴之眼",
+        "星辉祭坛", "冰封舰队", "极夜灯塔", "霜星裂隙", "冰原王庭", "绝对零度",
+    ],
+    [
+        "血雾滩头", "沉船墓场", "深渊阶梯", "珊瑚尖塔", "触手之林", "幽光海沟", "血潮祭坛",
+        "溺亡者广场", "深海宫殿", "逆流漩涡", "骨鲸残骸", "黑水教堂", "深渊之喉", "血月环礁",
+        "无光平原", "古神卧榻", "潮汐绞盘", "深渊裂隙", "血潮王座", "万丈深渊",
+    ],
+    [
+        "虚空边境", "星骸回廊", "扭曲之门", "无面者庭院", "逆转星图", "噬光迷宫", "虚数祭坛",
+        "群星坟场", "疯狂棱镜", "时之沙漏", "无声钟楼", "异界织网", "崩解平原", "虚空之眼",
+        "万象裂隙", "终焉前庭", "古神苏醒", "现实边缘", "最后封印", "萝卜纪元",
+    ],
+];
+
+/// 关卡所属章节（0-based）。
+pub fn episode_of(level_index: usize) -> usize {
+    (level_index / EPISODE_LEN).min(EPISODE_COUNT - 1)
+}
+
+/// 关卡载入时的氛围 lore：第一章逐关独立，其余章节共用章节 lore。
+pub fn lore_for_level(level_index: usize) -> &'static str {
+    if level_index < LEVEL_LORE.len() {
+        LEVEL_LORE[level_index]
+    } else {
+        EPISODES[episode_of(level_index)].lore
+    }
 }
