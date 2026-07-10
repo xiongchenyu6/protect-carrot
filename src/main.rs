@@ -494,6 +494,7 @@ fn main() {
             enemy::draw_heal_auras,
             enemy::draw_elite_auras,
             enemy::draw_boss_cast_telegraphs,
+            mutators::draw_mutators,
             tower::draw_tower_raider_threats,
             tower::draw_equipment_resonance,
             build::hero_afterimage,

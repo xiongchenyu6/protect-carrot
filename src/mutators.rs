@@ -123,6 +123,7 @@ pub fn starfall(
     mut strikes: Query<(Entity, &mut StarfallStrike)>,
     mut enemies: Query<(&mut Enemy, &Transform)>,
     mut vfx: MessageWriter<crate::vfx::VfxEvent>,
+    mut sfx: MessageWriter<crate::audio::SfxEvent>,
 ) {
     if episode_of(current.0) != 2 {
         return;
@@ -152,6 +153,9 @@ pub fn starfall(
             color: Color::srgb(0.68, 0.86, 1.0),
             strong: true,
         });
+        // 星陨落地：陨石轰击 + 冰封声。
+        sfx.write(crate::audio::SfxEvent(crate::audio::Sound::Meteor));
+        sfx.write(crate::audio::SfxEvent(crate::audio::Sound::Freeze));
         commands.entity(entity).despawn();
     }
 
@@ -179,9 +183,12 @@ pub fn starfall(
 /// 虚空裂隙（第 5 章）：敌人穿过裂隙获得短暂相位（复用 phase_timer/invisible）。
 pub fn void_rift(
     mut commands: Commands,
+    time: Res<Time>,
     current: Res<CurrentLevel>,
     state: Res<MutatorState>,
     mut enemies: Query<(Entity, &mut Enemy, &Transform), Without<RiftTouched>>,
+    mut sfx: MessageWriter<crate::audio::SfxEvent>,
+    mut sfx_cooldown: Local<f32>,
 ) {
     if episode_of(current.0) != 4 {
         return;
@@ -189,6 +196,7 @@ pub fn void_rift(
     let Some(rift) = state.rift_pos else {
         return;
     };
+    *sfx_cooldown = (*sfx_cooldown - time.delta_secs()).max(0.0);
     for (entity, mut e, tf) in &mut enemies {
         if e.boss || e.phase_timer > 0.0 {
             continue;
@@ -197,6 +205,11 @@ pub fn void_rift(
             e.phase_timer = RIFT_PHASE;
             e.invisible = true;
             commands.entity(entity).insert(RiftTouched);
+            // 相位吞没声（0.5s 节流，防止整波齐过时炸耳）。
+            if *sfx_cooldown <= 0.0 {
+                *sfx_cooldown = 0.5;
+                sfx.write(crate::audio::SfxEvent(crate::audio::Sound::Curse));
+            }
         }
     }
 }
