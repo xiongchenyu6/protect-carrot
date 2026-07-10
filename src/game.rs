@@ -341,6 +341,17 @@ pub fn load_level(
             "{}\n{}",
             &[&crate::i18n::t(level.name), &crate::i18n::t(lore)],
         );
+        // 章节战场机制提示（第 2-5 章各有专属规则）。
+        if let Some(desc) = crate::mutators::mechanic_desc(crate::data::episode_of(current.0)) {
+            run.message
+                .push_str(&crate::i18n::tf("\n【{}】{}", &[
+                    &crate::i18n::t(
+                        crate::mutators::mechanic_name(crate::data::episode_of(current.0))
+                            .unwrap_or(""),
+                    ),
+                    &crate::i18n::t(desc),
+                ]));
+        }
         run.message_timer = 8.0;
     }
 
@@ -909,6 +920,13 @@ pub fn start_wave(run: &mut RunState, level_index: usize, rng: &mut Rng) {
     } else {
         run.pending_boss_species = None;
         run.show(crate::i18n::tf("第 {} 波！", &[&run.wave.to_string()]));
+    }
+    // 章节机制波次播报：沙暴/血潮来袭时提前告知玩家应对策略。
+    if crate::mutators::is_sandstorm_wave(level_index, run.wave) {
+        run.show_for(crate::i18n::t("沙暴来袭：敌人移速+30%！备好减速与控制"), 3.2);
+    }
+    if crate::mutators::is_bloodtide_wave(level_index, run.wave) {
+        run.show_for(crate::i18n::t("血潮涌动：敌人自带血护盾！持续输出破盾"), 3.2);
     }
 }
 

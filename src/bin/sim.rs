@@ -904,6 +904,9 @@ fn run_sim_with_hero(
                 enemy::update_enemies,
                 tower::necromancer_raise,
                 enemy::heal_auras,
+                enemy::incubation,
+                protect_carrot::mutators::starfall,
+                protect_carrot::mutators::void_rift,
                 build::hero_status,
                 build::hero_respawn.run_if(sim_hero_enabled),
                 tick_auto_wave,
@@ -934,9 +937,13 @@ fn run_sim_with_hero(
         lv.0[level].gold = gold;
         lv.0[level].enemies.reward = reward;
     }
+    app.init_resource::<protect_carrot::mutators::MutatorState>();
     app.world_mut()
         .run_system_once(load_level)
         .expect("load_level");
+    app.world_mut()
+        .run_system_once(protect_carrot::mutators::setup_mutators)
+        .expect("setup_mutators");
     if greedy && field_hero_enabled {
         app.world_mut()
             .run_system_once(build::auto_spawn_hero)

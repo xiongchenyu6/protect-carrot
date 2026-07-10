@@ -234,6 +234,9 @@ fn spawn_one(
     // 孵化升级用：在指定位置/路径进度处生成（高级孵化原地变身为 boss）。
     // None 表示常规从出生点入场。
     start_at: Option<(Vec2, usize)>,
+    // 章节机制的波次修正：(移速倍率, 附加护盾占最大生命比例)。
+    // 沙暴波加速、血潮波带盾；常规波传 (1.0, 0.0)。
+    wave_mods: (f32, f32),
 ) {
     let kind = species.kind;
     let def = kind.def();
@@ -313,7 +316,8 @@ fn spawn_one(
     let base_speed =
         level_speed * def.speed_mod * species.speed_mult * affix_speed * endless_speed * TILE_SIZE
             / 60.0
-            * (1000.0 / 16.0);
+            * (1000.0 / 16.0)
+            * wave_mods.0;
     let reward = (level_reward
         * def.reward_mod
         * species.reward_mult
@@ -343,6 +347,10 @@ fn spawn_one(
     };
     if elite_affix == EliteAffix::Carapace {
         shield += (hp * 0.22).floor();
+    }
+    // 血潮波：全员附加按最大生命比例的血护盾。
+    if wave_mods.1 > 0.0 {
+        shield += (hp * wave_mods.1).floor();
     }
     // `splits` now means remaining split GENERATIONS (not a one-shot splinter
     // count): a 普通 splitter splits 1 generation, 中级 2, 高级 4 — tier derived
@@ -829,6 +837,7 @@ pub fn spawn_enemies(
             run.is_endless(),
             build_pressure,
             None,
+            crate::mutators::wave_spawn_mods(current.0, run.wave),
         );
         // Dramatic boss entrance: heavy shockwave + shake + banner at the gate.
         if species.is_boss() {
@@ -2423,6 +2432,7 @@ pub fn incubation(
                 run.is_endless(),
                 build_pressure,
                 Some((pos, path_index)),
+                (1.0, 0.0),
             );
             vfx.write(crate::vfx::VfxEvent::BossEntrance {
                 pos,

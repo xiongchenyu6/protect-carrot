@@ -25,8 +25,8 @@ use iyes_progress::ProgressPlugin;
 
 use protect_carrot::{
     Levels, audio, bestiary, build, creatures, data, enemy, equipment, fluent_i18n, game, hero,
-    hero_gear, hero_paperdoll, i18n, lighting, meta, quality, roguelite, sprites, states, tower,
-    tuning, tutorial, ui, vfx,
+    hero_gear, hero_paperdoll, i18n, lighting, meta, mutators, quality, roguelite, sprites, states,
+    tower, tuning, tutorial, ui, vfx,
 };
 
 // Web-only: a retrying HTTP asset reader, installed before AssetPlugin so a
@@ -287,6 +287,7 @@ fn main() {
     .init_resource::<Selection>()
     .init_resource::<Snapshot>()
     .init_resource::<tutorial::Tutorial>()
+    .init_resource::<mutators::MutatorState>()
     .init_resource::<ui::TouchMode>()
     .init_resource::<ui::HudPanels>()
     .init_resource::<ui::JoystickState>()
@@ -432,6 +433,7 @@ fn main() {
         OnEnter(GameState::Playing),
         (
             load_level,
+            mutators::setup_mutators,
             roguelite::reset_run,
             spawn_hud,
             build::auto_spawn_hero,
@@ -471,7 +473,7 @@ fn main() {
             enemy::update_enemies,
             tower::necromancer_raise,
             // 嵌套成二元组以绕开单个 add_systems 最多 20 个系统的上限。
-            (enemy::heal_auras, enemy::incubation),
+            (enemy::heal_auras, enemy::incubation, mutators::starfall, mutators::void_rift),
             (tick_auto_wave, tick_message),
         )
             .chain()
