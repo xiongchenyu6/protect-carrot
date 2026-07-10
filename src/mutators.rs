@@ -18,7 +18,7 @@ use bevy::prelude::*;
 
 use crate::board::Board;
 use crate::components::{Enemy, LevelEntity};
-use crate::data::{episode_of, TILE_SIZE};
+use crate::data::{episode_of, BOARD_H, BOARD_W, TILE_SIZE};
 use crate::game::{CurrentLevel, Rng, RunState};
 
 /// 星陨间隔（秒，游戏时间）。
@@ -86,6 +86,10 @@ pub struct MutatorState {
     pub rift_pos: Option<Vec2>,
 }
 
+/// 沙暴波的全场琥珀色沙幕（alpha 随波次激活/退场渐变）。
+#[derive(Component)]
+pub struct SandstormOverlay;
+
 /// 正在预警/落下的星陨。
 #[derive(Component)]
 pub struct StarfallStrike {
@@ -99,6 +103,7 @@ pub struct RiftTouched;
 
 /// OnEnter(Playing)：重置机制状态；第 5 章在路径中段放置裂隙。
 pub fn setup_mutators(
+    mut commands: Commands,
     mut state: ResMut<MutatorState>,
     current: Res<CurrentLevel>,
     board: Res<Board>,
@@ -108,6 +113,19 @@ pub fn setup_mutators(
     if episode_of(current.0) == 4 && board.path_world.len() >= 4 {
         let idx = (board.path_world.len() as f32 * 0.55) as usize;
         state.rift_pos = board.path_world.get(idx).copied();
+    }
+    // 第 2 章：预铺一层透明沙幕，沙暴波激活时渐显。
+    if episode_of(current.0) == 1 {
+        commands.spawn((
+            Sprite {
+                color: Color::srgba(0.92, 0.72, 0.38, 0.0),
+                custom_size: Some(Vec2::new(BOARD_W, BOARD_H)),
+                ..default()
+            },
+            Transform::from_translation(Vec3::new(0.0, 0.0, 7.5)),
+            LevelEntity,
+            SandstormOverlay,
+        ));
     }
 }
 
@@ -240,5 +258,22 @@ pub fn draw_mutators(
             RIFT_RADIUS * 0.55 * pulse,
             Color::srgba(0.9, 0.78, 1.0, 0.55),
         );
+    }
+}
+
+
+/// 沙暴波氛围：沙幕透明度朝目标值渐变（激活 0.16，平息 0）。
+pub fn sandstorm_overlay(
+    time: Res<Time>,
+    run: Res<RunState>,
+    current: Res<CurrentLevel>,
+    mut overlays: Query<&mut Sprite, With<SandstormOverlay>>,
+) {
+    let active = is_sandstorm_wave(current.0, run.wave) && run.wave_in_progress;
+    let target = if active { 0.16 } else { 0.0 };
+    let k = (time.delta_secs() * 3.0).min(1.0);
+    for mut sprite in &mut overlays {
+        let a = sprite.color.alpha();
+        sprite.color.set_alpha(a + (target - a) * k);
     }
 }
