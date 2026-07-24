@@ -33,16 +33,30 @@ const CAMPAIGN_LEVEL_PRESSURE: [f32; 20] = [
     1.18, 1.30, 1.17, 1.14,
 ];
 
+fn campaign_level_pressure(level_index: usize) -> f32 {
+    // The five episodes reuse the same 20 battlefield layouts and economy
+    // profiles. Later episodes already add chapter HP/speed, elite chance, and
+    // siege damage. Short replayed layouts still need some of their original
+    // correction, while long maps must lean on chapter scaling to avoid an
+    // economy death spiral from a small extra HP multiplier.
+    let layout = level_index % CAMPAIGN_LEVEL_PRESSURE.len();
+    let layout_pressure = CAMPAIGN_LEVEL_PRESSURE[layout];
+    if level_index < crate::data::EPISODE_LEN {
+        layout_pressure
+    } else {
+        let remaining = 1.0 - layout as f32 / (CAMPAIGN_LEVEL_PRESSURE.len() - 1) as f32;
+        let replay_weight = 0.5 * remaining * remaining;
+        1.0 + (layout_pressure - 1.0) * replay_weight
+    }
+}
+
 fn campaign_hp_pressure(wave: i32, level_index: usize, endless: bool) -> f32 {
     if endless {
         return 1.0;
     }
     let wave_t = ((wave - 1).max(0) as f32 / 17.0).clamp(0.0, 1.0);
     let level_t = (level_index as f32 / 18.0).clamp(0.0, 1.0);
-    let level_pressure = CAMPAIGN_LEVEL_PRESSURE
-        .get(level_index)
-        .copied()
-        .unwrap_or(1.0);
+    let level_pressure = campaign_level_pressure(level_index);
     (CAMPAIGN_HP_PRESSURE_BASE
         + CAMPAIGN_HP_PRESSURE_WAVE * wave_t
         + CAMPAIGN_HP_PRESSURE_LEVEL * level_t)
@@ -167,6 +181,29 @@ mod tests {
         let loadout = test_loadout(30, HeroWeapon::StarfireStaff, gear, 5);
         assert!((hero_build_pressure(&loadout, 0, true) - 1.0).abs() < f32::EPSILON);
     }
+
+    #[test]
+    fn expanded_episodes_keep_attenuated_layout_pressure() {
+        assert_eq!(CAMPAIGN_LEVEL_PRESSURE.len(), crate::data::EPISODE_LEN);
+        for layout in 0..crate::data::EPISODE_LEN {
+            let first_episode = campaign_level_pressure(layout);
+            let remaining =
+                1.0 - layout as f32 / (CAMPAIGN_LEVEL_PRESSURE.len().saturating_sub(1)) as f32;
+            let expected = 1.0 + (first_episode - 1.0) * (0.5 * remaining * remaining);
+            for episode in 1..crate::data::EPISODE_COUNT {
+                assert_eq!(
+                    campaign_level_pressure(episode * crate::data::EPISODE_LEN + layout),
+                    expected
+                );
+            }
+            assert!(expected <= first_episode);
+            assert!(expected >= 1.0);
+        }
+        assert_eq!(
+            campaign_level_pressure(crate::data::EPISODE_LEN * 2 - 1),
+            1.0
+        );
+    }
 }
 
 #[derive(Component)]
@@ -244,9 +281,8 @@ fn spawn_one(
     // 关卡序号加成用「章节内序号」：跨章节的强度增长完全由章节倍率
     // (EPISODES[e].hp_mult) 承担，避免全局序号(最高 99)把后期章节的
     // wave_mult 推到不可战胜的双重叠加。
-    let wave_mult = 1.0
-        + (wave - 1) as f32 * 0.35
-        + (level_index % crate::data::EPISODE_LEN) as f32 * 0.08;
+    let wave_mult =
+        1.0 + (wave - 1) as f32 * 0.35 + (level_index % crate::data::EPISODE_LEN) as f32 * 0.08;
     let endless_wave = if endless { wave.max(1) as f32 } else { 0.0 };
     let endless_hp = if endless {
         1.0 + (endless_wave / 10.0).powf(1.08) * 0.18
