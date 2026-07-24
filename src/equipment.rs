@@ -282,6 +282,7 @@ const fn base(
 pub static EQUIPMENT_DEFS: &[EquipmentDef] = &[
     EquipmentDef {
         damage_mult: 1.08,
+        element: Some(Element::Physical),
         desc: "早期瞄具，稳定提升伤害。",
         ..base(Equipment::RustySight, "锈蚀准星", "准星", Rarity::Common)
     },
@@ -298,6 +299,7 @@ pub static EQUIPMENT_DEFS: &[EquipmentDef] = &[
     },
     EquipmentDef {
         damage_mult: 1.10,
+        element: Some(Element::Physical),
         range_mult: 1.05,
         chain_range_add: 12.0,
         desc: "骨质尾羽，适合远程塔。",
@@ -310,7 +312,7 @@ pub static EQUIPMENT_DEFS: &[EquipmentDef] = &[
     },
     EquipmentDef {
         damage_mult: 1.15,
-        element: Some(Element::Physical),
+        element: Some(Element::Fire),
         armor_pierce: 4.0,
         aoe_radius_add: 8.0,
         desc: "黑火药桶，提升爆破与穿甲。",
@@ -383,6 +385,7 @@ pub static EQUIPMENT_DEFS: &[EquipmentDef] = &[
     EquipmentDef {
         cooldown_mult: 0.78,
         damage_mult: 1.06,
+        element: Some(Element::Storm),
         summon_speed_mult: 1.16,
         desc: "危险但高效的机械扳机。",
         ..base(
@@ -424,6 +427,7 @@ pub static EQUIPMENT_DEFS: &[EquipmentDef] = &[
     },
     EquipmentDef {
         damage_mult: 1.28,
+        element: Some(Element::Physical),
         armor_pierce: 18.0,
         aoe_radius_add: 10.0,
         chain_range_add: 16.0,
@@ -770,6 +774,8 @@ pub fn equipment_mechanic_summary(d: &EquipmentDef) -> String {
 pub struct EquipmentSetBonus {
     pub damage_mult: f32,
     pub armor_add: f32,
+    pub range_mult: f32,
+    pub attack_speed_mult: f32,
     pub resonance_element: Option<Element>,
     pub resonance_count: usize,
     pub grade_tier: u8,
@@ -780,6 +786,8 @@ impl Default for EquipmentSetBonus {
         Self {
             damage_mult: 1.0,
             armor_add: 0.0,
+            range_mult: 1.0,
+            attack_speed_mult: 1.0,
             resonance_element: None,
             resonance_count: 0,
             grade_tier: 0,
@@ -789,7 +797,10 @@ impl Default for EquipmentSetBonus {
 
 impl EquipmentSetBonus {
     pub fn active(self) -> bool {
-        self.damage_mult > 1.001 || self.armor_add > 0.0
+        self.damage_mult > 1.001
+            || self.armor_add > 0.0
+            || self.range_mult > 1.001
+            || self.attack_speed_mult > 1.001
     }
 }
 
@@ -802,26 +813,55 @@ pub fn equipment_set_bonus(slots: &[Option<Equipment>; 3]) -> EquipmentSetBonus 
     }
 
     let mut bonus = EquipmentSetBonus::default();
+    let has_catalyst = equipped.contains(&Equipment::AzathothEye);
 
     let resonance = Element::ALL
         .into_iter()
         .filter_map(|element| {
-            let count = equipped
+            let natural_count = equipped
                 .iter()
                 .filter(|item| item.def().element == Some(element))
                 .count();
+            let count = natural_count
+                + usize::from(element != Element::Arcane && natural_count >= 2 && has_catalyst);
             (count >= 2).then_some((element, count))
         })
         .max_by_key(|(_, count)| *count);
     if let Some((element, count)) = resonance {
         bonus.resonance_element = Some(element);
         bonus.resonance_count = count;
-        if count >= 3 {
-            bonus.damage_mult *= 1.18;
-            bonus.armor_add += 3.0;
-        } else {
-            bonus.damage_mult *= 1.10;
-            bonus.armor_add += 1.0;
+        let full = count >= 3;
+        match element {
+            Element::Physical => {
+                bonus.damage_mult *= if full { 1.22 } else { 1.12 };
+                bonus.armor_add += if full { 5.0 } else { 2.0 };
+            }
+            Element::Arcane => {
+                bonus.damage_mult *= if full { 1.14 } else { 1.08 };
+                bonus.range_mult *= if full { 1.14 } else { 1.08 };
+            }
+            Element::Fire => {
+                bonus.damage_mult *= if full { 1.20 } else { 1.11 };
+                bonus.attack_speed_mult *= if full { 1.10 } else { 1.05 };
+            }
+            Element::Frost => {
+                bonus.damage_mult *= if full { 1.10 } else { 1.06 };
+                bonus.range_mult *= if full { 1.05 } else { 1.03 };
+                bonus.armor_add += if full { 7.0 } else { 3.0 };
+            }
+            Element::Storm => {
+                bonus.damage_mult *= if full { 1.12 } else { 1.07 };
+                bonus.attack_speed_mult *= if full { 1.22 } else { 1.12 };
+            }
+            Element::Shadow => {
+                bonus.damage_mult *= if full { 1.18 } else { 1.10 };
+                bonus.range_mult *= if full { 1.10 } else { 1.05 };
+            }
+            Element::Toxic => {
+                bonus.damage_mult *= if full { 1.16 } else { 1.09 };
+                bonus.attack_speed_mult *= if full { 1.10 } else { 1.05 };
+                bonus.armor_add += if full { 3.0 } else { 1.0 };
+            }
         }
     }
 
@@ -854,10 +894,17 @@ pub fn equipment_set_bonus_summary(slots: &[Option<Equipment>; 3]) -> String {
 
     let mut parts = Vec::new();
     if let Some(element) = bonus.resonance_element {
-        let pct = if bonus.resonance_count >= 3 { 18 } else { 10 };
         parts.push(crate::i18n::tf(
-            "{}共鸣+{}%",
-            &[&crate::i18n::t(element.name()), &pct.to_string()],
+            "{}共鸣{}件{}",
+            &[
+                &crate::i18n::t(element.name()),
+                &bonus.resonance_count.to_string(),
+                &if bonus.resonance_count >= 3 {
+                    crate::i18n::t("·满鸣")
+                } else {
+                    String::new()
+                },
+            ],
         ));
     }
     match bonus.grade_tier {
@@ -867,10 +914,12 @@ pub fn equipment_set_bonus_summary(slots: &[Option<Equipment>; 3]) -> String {
         _ => {}
     }
     parts.push(crate::i18n::tf(
-        "总伤害×{} 护甲+{}",
+        "总伤害×{} 护甲+{} 射程×{} 攻速×{}",
         &[
             &format!("{:.2}", bonus.damage_mult),
             &format!("{:.0}", bonus.armor_add),
+            &format!("{:.2}", bonus.range_mult),
+            &format!("{:.2}", bonus.attack_speed_mult),
         ],
     ));
     crate::i18n::tf("共鸣：{}", &[&parts.join("  ")])
@@ -1016,6 +1065,10 @@ fn recompute_tower_element(tower: &mut crate::tower::Tower) {
             tower.magic = element != Element::Physical;
         }
     }
+    if let Some(element) = equipment_set_bonus(&tower.equipment).resonance_element {
+        tower.element = element;
+        tower.magic = element != Element::Physical;
+    }
 }
 
 pub fn apply_equipment_stats(tower: &mut crate::tower::Tower) {
@@ -1028,6 +1081,7 @@ pub fn apply_equipment_stats(tower: &mut crate::tower::Tower) {
     for item in equipped {
         apply_item_stats(tower, item);
     }
+    recompute_tower_element(tower);
 }
 
 pub fn equip_into(tower: &mut crate::tower::Tower, item: Equipment) -> bool {
@@ -1036,6 +1090,7 @@ pub fn equip_into(tower: &mut crate::tower::Tower, item: Equipment) -> bool {
     };
     *slot = Some(item);
     apply_item_stats(tower, item);
+    recompute_tower_element(tower);
     true
 }
 
@@ -1300,5 +1355,78 @@ mod tests {
         remove_equipment_effects(&mut tower, &[Equipment::KrakenHeart]);
         assert_eq!(tower.max_summons, base_cap);
         approx_eq(tower.summon_hp, base_hp);
+    }
+
+    #[test]
+    fn every_element_has_a_real_two_piece_resonance_path() {
+        for element in Element::ALL {
+            let matching = Equipment::ALL
+                .into_iter()
+                .filter(|item| *item != Equipment::AzathothEye)
+                .filter(|item| item.def().element == Some(element))
+                .count();
+            assert!(
+                matching >= 2,
+                "{} needs at least two non-catalyst relics, found {matching}",
+                element.name()
+            );
+        }
+    }
+
+    #[test]
+    fn elemental_resonances_create_distinct_tower_stats() {
+        let arcane = equipment_set_bonus(&[
+            Some(Equipment::PrismShard),
+            Some(Equipment::VoidCapacitor),
+            None,
+        ]);
+        let storm = equipment_set_bonus(&[
+            Some(Equipment::ThunderCoil),
+            Some(Equipment::ClockworkTrigger),
+            None,
+        ]);
+        let frost = equipment_set_bonus(&[
+            Some(Equipment::FrostLens),
+            Some(Equipment::DeepOneScale),
+            None,
+        ]);
+
+        assert_eq!(arcane.resonance_element, Some(Element::Arcane));
+        assert!(arcane.range_mult > storm.range_mult);
+        assert_eq!(storm.resonance_element, Some(Element::Storm));
+        assert!(storm.attack_speed_mult > arcane.attack_speed_mult);
+        assert_eq!(frost.resonance_element, Some(Element::Frost));
+        assert!(frost.armor_add > storm.armor_add);
+    }
+
+    #[test]
+    fn azathoth_eye_completes_and_preserves_non_arcane_resonance() {
+        let slots = [
+            Some(Equipment::SaltpeterKeg),
+            Some(Equipment::EmberCore),
+            Some(Equipment::AzathothEye),
+        ];
+        let bonus = equipment_set_bonus(&slots);
+        assert_eq!(bonus.resonance_element, Some(Element::Fire));
+        assert_eq!(bonus.resonance_count, 3);
+        assert!(bonus.attack_speed_mult > 1.05);
+
+        let mut tower = Tower::from_def(TowerKind::Arrow.def(), 0, 0);
+        for item in slots.into_iter().flatten() {
+            assert!(equip_into(&mut tower, item));
+        }
+        assert_eq!(tower.element, Element::Fire);
+        assert!(tower.magic);
+    }
+
+    #[test]
+    fn catalyst_does_not_invent_a_resonance_for_mixed_singletons() {
+        let bonus = equipment_set_bonus(&[
+            Some(Equipment::EmberCore),
+            Some(Equipment::ThunderCoil),
+            Some(Equipment::AzathothEye),
+        ]);
+        assert_eq!(bonus.resonance_element, None);
+        assert_eq!(bonus.resonance_count, 0);
     }
 }

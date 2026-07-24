@@ -1073,8 +1073,8 @@ fn verify_tower_gems(
     }
     let expected = [
         equipment::Equipment::PrismShard,
-        equipment::Equipment::FrostLens,
-        equipment::Equipment::ThunderCoil,
+        equipment::Equipment::VoidCapacitor,
+        equipment::Equipment::AzathothEye,
     ];
     for item in expected {
         if !tower.equipment.contains(&Some(item)) {
@@ -1084,11 +1084,21 @@ fn verify_tower_gems(
             );
         }
     }
+    let resonance = equipment::equipment_set_bonus(&tower.equipment);
+    if resonance.resonance_element != Some(data::Element::Arcane)
+        || resonance.resonance_count != 3
+        || resonance.range_mult <= 1.10
+    {
+        panic!(
+            "[capture/tower_gems] expected full arcane resonance, got {:?}",
+            resonance
+        );
+    }
 
     *done = true;
     println!(
-        "[capture/tower_gems] selected {:?} tower has 3 expected gems",
-        tower.kind
+        "[capture/tower_gems] selected {:?} tower has full arcane resonance, range x{:.2}",
+        tower.kind, resonance.range_mult
     );
 }
 
@@ -1650,8 +1660,8 @@ fn apply_capture_scenario(
 
             let gems = [
                 equipment::Equipment::PrismShard,
-                equipment::Equipment::FrostLens,
-                equipment::Equipment::ThunderCoil,
+                equipment::Equipment::VoidCapacitor,
+                equipment::Equipment::AzathothEye,
             ];
             for item in gems {
                 inventory.counts[item.idx()] = inventory.counts[item.idx()].max(1);

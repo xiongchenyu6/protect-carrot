@@ -7,7 +7,8 @@ use crate::board::Board;
 use crate::components::{LevelEntity, Particle, TowerHpBar};
 use crate::data::{BOARD_H, BOARD_W, COLS, ROWS, TILE_SIZE, TowerKind, cell_center};
 use crate::equipment::{
-    EquipmentInventory, return_equipment_to_inventory, unequip_all_to_inventory,
+    EquipmentInventory, equipment_set_bonus, return_equipment_to_inventory,
+    unequip_all_to_inventory,
 };
 use crate::game::RunState;
 use crate::hero::{HeroLoadout, HeroWeapon, Race, hero_move_speed};
@@ -1440,10 +1441,12 @@ pub fn draw_range_gizmos(
 ) {
     if let Some(e) = sel.selected {
         if let Ok(t) = towers.get(e) {
-            // Show the effective range (includes a Sentry Crossbow hero's range aura).
-            let r = t.range * (1.0 + t.aura_range);
+            // Show the same effective range used by targeting, including hero
+            // auras and elemental gem resonance.
+            let range_mult = equipment_set_bonus(&t.equipment).range_mult;
+            let r = t.range * (1.0 + t.aura_range) * range_mult;
             gizmos.circle_2d(t.center(), r, Color::WHITE.with_alpha(0.4));
-            if t.aura_range > 0.0 {
+            if t.aura_range > 0.0 || range_mult > 1.001 {
                 gizmos.circle_2d(t.center(), t.range, Color::WHITE.with_alpha(0.15));
             }
             // Pulsing footprint highlight so the selected tower is obvious.

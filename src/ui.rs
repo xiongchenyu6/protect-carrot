@@ -4394,8 +4394,9 @@ pub fn update_unit_stats(
     for (stat, mut text) in &mut stats {
         text.0 = match tw {
             Some(tw) => {
+                let set_bonus = equipment_set_bonus(&tw.equipment);
                 let aps = if tw.cooldown > 0.0 {
-                    1.0 / tw.cooldown
+                    set_bonus.attack_speed_mult / tw.cooldown
                 } else {
                     0.0
                 };
@@ -4406,7 +4407,7 @@ pub fn update_unit_stats(
                 };
                 match stat {
                     UnitStat::Damage => format!("{}", tw.damage as i32),
-                    UnitStat::Range => format!("{}", tw.range as i32),
+                    UnitStat::Range => format!("{}", (tw.range * set_bonus.range_mult) as i32),
                     UnitStat::Armor => format!("{:.0}", armor),
                     UnitStat::Speed => format!("{:.2}", aps),
                     UnitStat::Dps => format!("{:.0}", tw.damage * aps),
@@ -9753,7 +9754,7 @@ fn spawn_armory_contents(
             }
             p.spawn((
                 Text::new(crate::i18n::t(
-                    "套装规则：同属性转化2件触发元素共鸣+10%伤害，3件为+18%并护甲+3；任意3件有整备奖励，高阶遗物成组提供更强火力与抗攻城护甲。精炼：3件同名遗物→1件下一品级随机遗物。",
+                    "套装规则：2件同元素宝石触发专属共鸣，物理偏强攻、秘法/暗影偏射程、雷风偏攻速、冰霜偏防守；阿撒托斯之眼可将任意二件元素组催化为满鸣。任意3件仍有整备奖励，高阶组合额外强化。精炼：3件同名宝石→1件下一品级随机宝石。",
                 )),
                 text_font(f, 12.0),
                 TextColor(Color::srgb(0.68, 0.74, 0.64)),

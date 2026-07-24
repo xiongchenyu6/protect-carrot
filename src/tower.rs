@@ -508,9 +508,11 @@ pub fn build_snapshot(
     snap.detectors.clear();
     snap.tower_zones.clear();
     for (entity, t, _) in &towers {
-        snap.tower_zones.insert(entity, (t.center(), t.range));
+        let effective_range = effective_attack_range(t);
+        snap.tower_zones
+            .insert(entity, (t.center(), effective_range));
         if t.detector {
-            snap.detectors.push((t.center(), t.range));
+            snap.detectors.push((t.center(), effective_range));
         }
     }
     snap.summon_counts.clear();
@@ -680,7 +682,8 @@ fn is_forge_hammer_hero(tower: &Tower) -> bool {
 }
 
 fn effective_attack_range(tower: &Tower) -> f32 {
-    let range = tower.range * (1.0 + tower.aura_range);
+    let range =
+        tower.range * (1.0 + tower.aura_range) * equipment_set_bonus(&tower.equipment).range_mult;
     if is_close_combat_hero(tower) {
         range.min(HERO_MELEE_ATTACK_RANGE_CAP)
     } else {
@@ -1485,7 +1488,8 @@ pub fn update_towers(
     for (entity, mut tower, _, current_action, action_queue) in &mut towers {
         if tower.cooldown_timer > 0.0 {
             // Forge Hammer/Sentry Crossbow doctrine haste speeds the cooldown tick (= faster attacks).
-            tower.cooldown_timer -= dt * (1.0 + tower.aura_haste);
+            let set_bonus = equipment_set_bonus(&tower.equipment);
+            tower.cooldown_timer -= dt * (1.0 + tower.aura_haste) * set_bonus.attack_speed_mult;
         }
         let c = tower.center();
         if snap.tower_silenced(c) {
@@ -1533,7 +1537,7 @@ pub fn update_towers(
                 // actually build. `snap.target()` re-picks the "best" enemy every
                 // frame, which against a moving stream would reset the charge each
                 // frame. We only re-acquire once the held target is gone.
-                let eff_range = tower.range * (1.0 + tower.aura_range);
+                let eff_range = effective_attack_range(&tower);
                 let held = if focus.is_some() {
                     tower.laser_target.and_then(|prev| {
                         snap.enemies.iter().copied().find(|e| {
@@ -1619,10 +1623,10 @@ pub fn update_towers(
             Behavior::Summon => {
                 if tower.cooldown_timer <= 0.0 {
                     let count = snap.summon_counts.get(&entity).copied().unwrap_or(0);
-                    let enemy_in_range = snap
-                        .enemies
-                        .iter()
-                        .any(|e| snap.can_target(&tower, e) && c.distance(e.pos) <= tower.range);
+                    let enemy_in_range = snap.enemies.iter().any(|e| {
+                        snap.can_target(&tower, e)
+                            && c.distance(e.pos) <= effective_attack_range(&tower)
+                    });
                     if enemy_in_range && (count as i32) < tower.max_summons {
                         tower.cooldown_timer = tower.cooldown;
                         // The minion tier and its damage scale with the tower level
@@ -4243,7 +4247,7 @@ pub fn necromancer_raise(
             if t.behavior != Behavior::Necromancer || t.cooldown_timer > 0.0 {
                 continue;
             }
-            if t.center().distance(ev.pos) <= t.range {
+            if t.center().distance(ev.pos) <= effective_attack_range(&t) {
                 t.cooldown_timer = t.cooldown;
                 let center = t.center();
                 spawn_layered_beam(
@@ -4315,7 +4319,7 @@ pub fn update_fire_grounds(
     let detect: Vec<(Vec2, f32)> = detectors
         .iter()
         .filter(|t| t.detector)
-        .map(|t| (t.center(), t.range))
+        .map(|t| (t.center(), effective_attack_range(t)))
         .collect();
     for (e, mut g, mut tf, mut sprite) in &mut grounds {
         g.life -= dt;
@@ -4598,5 +4602,21 @@ mod tests {
         let basic_laser_dps = focus_beam_dps(25.0, 3.0, laser);
         let final_prism_dps = focus_beam_dps(55.0, 3.0, prism);
         assert!(final_prism_dps > basic_laser_dps * 3.0);
+    }
+
+    #[test]
+    fn arcane_resonance_extends_runtime_targeting_range() {
+        let mut tower = Tower::from_def(TowerKind::Magic.def(), 0, 0);
+        assert!(crate::equipment::equip_into(
+            &mut tower,
+            Equipment::PrismShard
+        ));
+        assert!(crate::equipment::equip_into(
+            &mut tower,
+            Equipment::VoidCapacitor
+        ));
+
+        let item_adjusted_range = tower.range;
+        assert!(effective_attack_range(&tower) > item_adjusted_range);
     }
 }
