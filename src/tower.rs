@@ -12,12 +12,12 @@
 use crate::board::Board;
 use crate::components::{Enemy, FogHidden, LevelEntity, Particle, SummonHpBarFg};
 use crate::data::{
-    Behavior, Category, Element, MOSS_TOWER_SENSE, TILE_SIZE, TOWER_RAIDER_ENGAGE,
-    TOWER_RAIDER_SENSE, TowerDef, TowerKind, cell_center,
+    cell_center, Behavior, Category, Element, TowerDef, TowerKind, MOSS_TOWER_SENSE, TILE_SIZE,
+    TOWER_RAIDER_ENGAGE, TOWER_RAIDER_SENSE,
 };
 use crate::equipment::{
-    Equipment, EquipmentInventory, EquipmentVisual, Rarity, equipment_set_bonus,
-    return_equipment_to_inventory,
+    equipment_set_bonus, return_equipment_to_inventory, Equipment, EquipmentInventory,
+    EquipmentVisual, Rarity,
 };
 use crate::game::RunState;
 use crate::hero::HeroWeapon;
@@ -2403,10 +2403,11 @@ fn hero_ranger_shot(
     for (i, (_, e)) in hits.into_iter().take(max_hits).enumerate() {
         let main = e.entity == target.entity;
         let falloff = if main { 1.0 } else { 0.64 - i as f32 * 0.04 };
+        let hunt = ranger_hunt_multiplier(e.hp, e.max_hp);
         dmg.write(Damage {
             source_tower: Some(source_tower),
             target: e.entity,
-            amount: tower.damage * falloff.max(0.48),
+            amount: tower.damage * falloff.max(0.48) * hunt,
             magic: tower.magic,
             element: tower.element,
             armor_pierce: tower.armor_pierce,
@@ -2430,6 +2431,14 @@ fn hero_ranger_shot(
                 },
             });
         }
+    }
+}
+
+fn ranger_hunt_multiplier(hp: f32, max_hp: f32) -> f32 {
+    if max_hp > 0.0 && hp / max_hp <= 0.35 {
+        3.0
+    } else {
+        1.0
     }
 }
 
@@ -4618,5 +4627,12 @@ mod tests {
 
         let item_adjusted_range = tower.range;
         assert!(effective_attack_range(&tower) > item_adjusted_range);
+    }
+
+    #[test]
+    fn ranger_hunt_only_executes_wounded_targets() {
+        assert_eq!(ranger_hunt_multiplier(36.0, 100.0), 1.0);
+        assert_eq!(ranger_hunt_multiplier(35.0, 100.0), 3.0);
+        assert_eq!(ranger_hunt_multiplier(1.0, 0.0), 1.0);
     }
 }

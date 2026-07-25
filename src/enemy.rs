@@ -1,23 +1,23 @@
 //! Enemy spawning, path-following, status effects, death and carrot arrival.
 //! Ported from `spawnEnemy` / `getEnemyPoolForWave` / `updateEnemies`.
 
-use crate::Levels;
 use crate::board::Board;
 use crate::components::{Enemy, HpBarFg, LevelEntity, ShieldBarFg};
 use crate::creatures::Creatures;
 use crate::data::{Element, EnemyKind, MOSS_TOWER_SENSE, TILE_SIZE, TOWER_RAIDER_SENSE};
 use crate::equipment::{
-    EquipmentInventory, Rarity, equipment_set_bonus, return_equipment_to_inventory, roll_drop,
+    equipment_set_bonus, return_equipment_to_inventory, roll_drop, EquipmentInventory, Rarity,
 };
-use crate::game::{AUTO_WAVE_DELAY, CurrentLevel, KILL_COMBO_WINDOW, Rng, RunState};
+use crate::game::{CurrentLevel, Rng, RunState, AUTO_WAVE_DELAY, KILL_COMBO_WINDOW};
 use crate::hero::{HeroLoadout, HeroWeapon};
 use crate::monster::{
-    BossSkill, EliteAffix, MONSTER_SPECIES, MonsterSpecies, boss_skill, default_species_id,
-    pick_boss, pick_elite_affix, pick_regular, species_by_id,
+    boss_skill, default_species_id, pick_boss, pick_elite_affix, pick_regular, species_by_id,
+    BossSkill, EliteAffix, MonsterSpecies, MONSTER_SPECIES,
 };
 use crate::sprites::Sprites;
 use crate::states::GameState;
 use crate::ui::UiFont;
+use crate::Levels;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
@@ -63,7 +63,12 @@ fn campaign_hp_pressure(wave: i32, level_index: usize, endless: bool) -> f32 {
         * level_pressure
 }
 
-fn hero_build_pressure(loadout: &HeroLoadout, level_index: usize, endless: bool) -> f32 {
+fn hero_build_challenge(
+    loadout: &HeroLoadout,
+    level_index: usize,
+    wave: i32,
+    endless: bool,
+) -> f32 {
     if endless {
         return 1.0;
     }
@@ -96,7 +101,12 @@ fn hero_build_pressure(loadout: &HeroLoadout, level_index: usize, endless: bool)
         HeroWeapon::NightDagger => 0.30,
     };
 
-    (1.0 + extra * weapon_pressure).clamp(1.0, 1.35)
+    // Mature builds may see a few more late-wave elites, but never hidden HP
+    // scaling. Equipment must remain real progression instead of raising every
+    // enemy's health merely because the player equipped it.
+    let late_wave = ((wave - 5).max(0) as f32 / 14.0).clamp(0.0, 1.0);
+    let late_wave = late_wave * late_wave;
+    (1.0 + extra * weapon_pressure * 0.35 * late_wave).clamp(1.0, 1.08)
 }
 
 fn enemy_visual_px(size: f32, boss: bool, elite: bool) -> f32 {
@@ -150,11 +160,11 @@ mod tests {
     #[test]
     fn baseline_hero_does_not_raise_campaign_pressure() {
         let loadout = test_loadout(1, HeroWeapon::BannerSword, hero_gear::empty_gear(), 0);
-        assert!((hero_build_pressure(&loadout, 0, false) - 1.0).abs() < f32::EPSILON);
+        assert!((hero_build_challenge(&loadout, 0, 1, false) - 1.0).abs() < f32::EPSILON);
     }
 
     #[test]
-    fn mature_resonant_ranged_build_raises_campaign_pressure() {
+    fn mature_resonant_ranged_build_raises_late_elite_challenge() {
         let gear = [
             Some(HeroGear::StarweaveRobe),
             Some(HeroGear::EmberPrayer),
@@ -162,12 +172,14 @@ mod tests {
             Some(HeroGear::StarpathSandals),
         ];
         let loadout = test_loadout(18, HeroWeapon::StarfireStaff, gear, 3);
-        let pressure = hero_build_pressure(&loadout, 11, false);
+        let opening_challenge = hero_build_challenge(&loadout, 11, 1, false);
+        let challenge = hero_build_challenge(&loadout, 11, 20, false);
+        assert_eq!(opening_challenge, 1.0);
         assert!(
-            pressure > 1.12,
-            "expected mature resonant ranged build to raise enemy pressure, got {pressure}"
+            challenge > 1.03,
+            "expected mature resonant ranged build to raise late elite challenge, got {challenge}"
         );
-        assert!(pressure <= 1.35);
+        assert!(challenge <= 1.08);
     }
 
     #[test]
@@ -179,7 +191,7 @@ mod tests {
             Some(HeroGear::StarpathSandals),
         ];
         let loadout = test_loadout(30, HeroWeapon::StarfireStaff, gear, 5);
-        assert!((hero_build_pressure(&loadout, 0, true) - 1.0).abs() < f32::EPSILON);
+        assert!((hero_build_challenge(&loadout, 0, 20, true) - 1.0).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -267,7 +279,6 @@ fn spawn_one(
     diff: crate::game::Difficulty,
     elite_affix: EliteAffix,
     endless: bool,
-    build_pressure: f32,
     // 孵化升级用：在指定位置/路径进度处生成（高级孵化原地变身为 boss）。
     // None 表示常规从出生点入场。
     start_at: Option<(Vec2, usize)>,
@@ -345,7 +356,6 @@ fn spawn_one(
         * endless_hp
         * elite_hp
         * affix_hp
-        * build_pressure
         * episode_boss_damp)
         .floor();
     // px/sec: original moved `speed*dt/16` with speed = level.speed*TILE/60*mod.
@@ -810,7 +820,7 @@ pub fn spawn_enemies(
         return;
     }
     let level = &levels.0[current.0];
-    let build_pressure = hero_build_pressure(&loadout, current.0, run.is_endless());
+    let build_challenge = hero_build_challenge(&loadout, current.0, run.wave, run.is_endless());
 
     run.spawn_timer += time.delta_secs() * run.game_speed;
     if run.spawn_timer >= run.spawn_interval && run.spawned < run.spawn_target {
@@ -844,7 +854,7 @@ pub fn spawn_enemies(
         let elite_chance = if run.wave >= 4 {
             ((0.075 + run.wave as f32 * 0.019 + current.0 as f32 * 0.0016 + endless_elite_bonus)
                 * diff.0.elite_mult()
-                * (1.0 + (build_pressure - 1.0) * 1.35))
+                * (1.0 + (build_challenge - 1.0) * 1.35))
                 .min(elite_cap)
         } else {
             0.0
@@ -871,7 +881,6 @@ pub fn spawn_enemies(
             diff.0,
             elite_affix,
             run.is_endless(),
-            build_pressure,
             None,
             crate::mutators::wave_spawn_mods(current.0, run.wave),
         );
@@ -2422,7 +2431,6 @@ pub fn incubation(
     creatures: Res<Creatures>,
     font: Res<UiFont>,
     diff: Res<crate::game::GameDifficulty>,
-    loadout: Res<HeroLoadout>,
     mut enemies: Query<(Entity, &mut Enemy, &mut Transform, &mut Sprite)>,
     mut vfx: MessageWriter<crate::vfx::VfxEvent>,
 ) {
@@ -2433,7 +2441,6 @@ pub fn incubation(
     const INCUBATE_PERIOD: f32 = 6.0;
     const MAX_INCUBATE_STACKS: i32 = 4;
     let level = &levels.0[current.0];
-    let build_pressure = hero_build_pressure(&loadout, current.0, run.is_endless());
     for (entity, mut e, tf, mut sprite) in &mut enemies {
         // 已经是 boss（含刚孵化出来的）不再孵化。
         if !e.incubate || e.boss {
@@ -2466,7 +2473,6 @@ pub fn incubation(
                 diff.0,
                 EliteAffix::None,
                 run.is_endless(),
-                build_pressure,
                 Some((pos, path_index)),
                 (1.0, 0.0),
             );

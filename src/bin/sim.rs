@@ -29,15 +29,15 @@ use bevy::time::TimeUpdateStrategy;
 use bevy_spritesheet_animation::prelude::SpritesheetAnimationPlugin;
 
 use protect_carrot::{
-    Levels, audio, bestiary, build, components, data, enemy, equipment as equipment_inv, game,
-    hero, hero_gear, i18n, meta, roguelite, states, tower, ui, vfx,
+    audio, bestiary, build, components, data, enemy, equipment as equipment_inv, game, hero,
+    hero_gear, i18n, meta, roguelite, states, tower, ui, vfx, Levels,
 };
 
 use build::spawn_tower;
-use data::{BOARD_H, BOARD_W, Behavior, TILE_SIZE, TowerKind, UpgradeMul, cell_center, levels};
+use data::{cell_center, levels, Behavior, TowerKind, UpgradeMul, BOARD_H, BOARD_W, TILE_SIZE};
 use game::{
-    CurrentLevel, GameDifficulty, GameMode, Paused, Rng, RunState, load_level, tick_auto_wave,
-    tick_message,
+    load_level, tick_auto_wave, tick_message, CurrentLevel, GameDifficulty, GameMode, Paused, Rng,
+    RunState,
 };
 use protect_carrot::board::Board;
 use tower::{Damage, Tower};
@@ -53,6 +53,7 @@ struct KindStat {
 #[derive(Resource, Default)]
 struct Report {
     per_kind: HashMap<TowerKind, KindStat>,
+    hero_damage: f64,
 }
 
 #[derive(Resource, Default)]
@@ -86,6 +87,7 @@ fn sim_no_hero() -> bool {
 fn sim_hero_ai(
     time: Res<Time>,
     run: Res<RunState>,
+    loadout: Res<hero::HeroLoadout>,
     enemies: Query<(&components::Enemy, &Transform)>,
     mut towers: ParamSet<(Query<&mut Tower>, Query<&Tower>)>,
     mut acc: Local<f32>,
@@ -96,6 +98,27 @@ fn sim_hero_ai(
     }
     *acc = 0.0;
 
+    let support_weapon = matches!(
+        loadout.weapon,
+        hero::HeroWeapon::StarfireStaff
+            | hero::HeroWeapon::StormOrb
+            | hero::HeroWeapon::SentryCrossbow
+            | hero::HeroWeapon::SummonStaff
+    );
+    let support_anchor = support_weapon
+        .then(|| {
+            towers
+                .p1()
+                .iter()
+                .filter(|tower| !tower.hero && tower.hp > 0.0)
+                .max_by(|a, b| {
+                    let dps_a = a.damage / a.cooldown.max(0.05) * behavior_mult(a.behavior) as f32;
+                    let dps_b = b.damage / b.cooldown.max(0.05) * behavior_mult(b.behavior) as f32;
+                    dps_a.total_cmp(&dps_b)
+                })
+                .map(Tower::center)
+        })
+        .flatten();
     let coverage: Vec<(Vec2, f32)> = towers
         .p1()
         .iter()
@@ -122,6 +145,11 @@ fn sim_hero_ai(
     let Some(mut hero) = heroes.iter_mut().find(|t| t.hero && t.hp > 0.0) else {
         return;
     };
+    let hero_pos = hero.center();
+    if let Some(anchor) = support_anchor {
+        hero.move_target = Some(anchor);
+        return;
+    }
     let Some((enemy, tf)) = target_enemy else {
         if let Some(target) = fallback {
             hero.move_target = Some(target);
@@ -135,9 +163,46 @@ fn sim_hero_ai(
     } else {
         Vec2::X
     };
-    // Aim a little behind the enemy so the hero fights at the front without
-    // pinning every wave directly on the portal tile.
-    let target = enemy_pos - facing * (TILE_SIZE * 0.35);
+    let line_holder = matches!(
+        loadout.weapon,
+        hero::HeroWeapon::BannerSword
+            | hero::HeroWeapon::OathShield
+            | hero::HeroWeapon::ForgeHammer
+    );
+    let target = if line_holder {
+        // Aim a little behind the enemy so melee heroes intercept the frontline.
+        enemy_pos - facing * (TILE_SIZE * 0.35)
+    } else if loadout.weapon == hero::HeroWeapon::NightDagger {
+        // Stay just outside the enemy engage radius while following its back.
+        // This lets the dagger exercise its actual backstab identity.
+        enemy_pos - facing * (TILE_SIZE * 0.98)
+    } else {
+        // Ranged weapons should flank the path rather than accidentally becoming
+        // melee blockers and compressing a wave into a single leaking pack.
+        let normal = Vec2::new(-facing.y, facing.x);
+        [
+            enemy_pos + normal * (TILE_SIZE * 1.35),
+            enemy_pos - normal * (TILE_SIZE * 1.35),
+        ]
+        .into_iter()
+        .filter(|candidate| {
+            candidate.x.abs() <= BOARD_W * 0.46 && candidate.y.abs() <= BOARD_H * 0.46
+        })
+        .max_by(|a, b| {
+            let covered_a = coverage
+                .iter()
+                .filter(|(center, range)| center.distance(*a) <= *range)
+                .count();
+            let covered_b = coverage
+                .iter()
+                .filter(|(center, range)| center.distance(*b) <= *range)
+                .count();
+            covered_a
+                .cmp(&covered_b)
+                .then_with(|| hero_pos.distance(*b).total_cmp(&hero_pos.distance(*a)))
+        })
+        .unwrap_or(enemy_pos)
+    };
     hero.move_target = Some(Vec2::new(
         target.x.clamp(-BOARD_W * 0.46, BOARD_W * 0.46),
         target.y.clamp(-BOARD_H * 0.46, BOARD_H * 0.46),
@@ -150,9 +215,18 @@ fn collect_damage(towers: Query<&Tower>, mut report: ResMut<Report>) {
     for s in report.per_kind.values_mut() {
         s.damage = 0.0;
     }
+    let mut living_hero_damage = 0.0;
     for t in &towers {
+        if t.hero {
+            living_hero_damage += t.damage_done as f64;
+            continue;
+        }
         report.per_kind.entry(t.kind).or_default().damage += t.damage_done as f64;
     }
+    // A dead hero is despawned before the final report. Preserve the highest
+    // cumulative value observed while it existed so weak/suicidal builds do not
+    // misleadingly report zero contribution.
+    report.hero_damage = report.hero_damage.max(living_hero_damage);
 }
 
 fn count_enemies(q: Query<(), With<components::Enemy>>, mut c: ResMut<EnemyCount>) {
@@ -562,6 +636,7 @@ fn auto_pick_roguelite(
 
 struct SimResult {
     per_kind: HashMap<TowerKind, KindStat>,
+    hero_damage: f64,
     outcome: &'static str,
     wave: i32,
     total_waves: i32,
@@ -573,6 +648,8 @@ struct SimResult {
     spawned: i32,
     spawn_target: i32,
     enemy_debug: String,
+    hero_debug: String,
+    gold: i32,
 }
 
 fn use_saved_profile() -> bool {
@@ -716,12 +793,7 @@ fn hero_build_profiles() -> [HeroScenario; 10] {
             race: hero::Race::Human,
             weapon: BannerSword,
             level: BUILD_LEVEL,
-            gear: gear_slots(
-                WarflagTabard,
-                BloodBanner,
-                DragonheartCrown,
-                BloodstepGreaves,
-            ),
+            gear: gear_slots(WarflagTabard, BloodBanner, DragonheartCrown, WayfarerBoots),
         },
         HeroScenario::Build {
             label: "starfire-burst",
@@ -756,7 +828,7 @@ fn hero_build_profiles() -> [HeroScenario; 10] {
             race: hero::Race::Human,
             weapon: SentryCrossbow,
             level: BUILD_LEVEL,
-            gear: gear_slots(MoonthreadVest, BountyQuiver, SentryScope, WatchtowerGreaves),
+            gear: gear_slots(WindrunnerCloak, BountyQuiver, SentryScope, CarrotWings),
         },
         HeroScenario::Build {
             label: "night-backstab",
@@ -922,6 +994,7 @@ fn run_sim_with_hero(
             game::update_carrot_seal,
             tower::compute_synergy,
             count_enemies,
+            collect_damage,
         ),
     );
     if greedy {
@@ -974,7 +1047,10 @@ fn run_sim_with_hero(
     } else {
         20
     };
-    let max_frames = 60 * 60 * cap_minutes;
+    let max_frames = std::env::var("CARROT_SIM_MAX_FRAMES")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(60 * 60 * cap_minutes);
     let mut frame = 0u32;
     let outcome;
     loop {
@@ -1028,6 +1104,19 @@ fn run_sim_with_hero(
             .collect::<Vec<_>>()
             .join(" | ")
     };
+    let hero_debug = {
+        let mut q = app.world_mut().query::<&Tower>();
+        q.iter(app.world())
+            .find(|tower| tower.hero)
+            .map(|tower| {
+                let pos = tower.center();
+                format!(
+                    "alive hp={:.0}/{:.0} pos=({:.0},{:.0})",
+                    tower.hp, tower.max_hp, pos.x, pos.y
+                )
+            })
+            .unwrap_or_else(|| "dead".to_string())
+    };
     let run = app.world().resource::<RunState>();
     let report = app.world().resource::<Report>();
     let enemies = app.world().resource::<EnemyCount>().0;
@@ -1037,6 +1126,7 @@ fn run_sim_with_hero(
         .is_waiting();
     SimResult {
         per_kind: report.per_kind.clone(),
+        hero_damage: report.hero_damage,
         outcome,
         wave: run.wave,
         total_waves: run.total_waves,
@@ -1048,17 +1138,19 @@ fn run_sim_with_hero(
         spawned: run.spawned,
         spawn_target: run.spawn_target,
         enemy_debug,
+        hero_debug,
+        gold: run.gold,
     }
 }
 
 /// Run the greedy player over `n` seeds of a level. Returns
-/// (wins, timeouts, avg_waves, avg_lives, total_waves, tower-usage).
+/// (wins, timeouts, avg_waves, avg_lives, total_waves, avg hero damage, tower-usage).
 fn greedy_winrate(
     level: usize,
     base_seed: u64,
     n: u64,
     econ: Option<(i32, f32)>,
-) -> (u32, u32, f32, f32, i32, HashMap<TowerKind, u64>) {
+) -> (u32, u32, f32, f32, i32, f64, HashMap<TowerKind, u64>) {
     greedy_winrate_with_hero(level, base_seed, n, econ, HeroScenario::from_env())
 }
 
@@ -1068,12 +1160,13 @@ fn greedy_winrate_with_hero(
     n: u64,
     econ: Option<(i32, f32)>,
     hero_profile: HeroScenario,
-) -> (u32, u32, f32, f32, i32, HashMap<TowerKind, u64>) {
+) -> (u32, u32, f32, f32, i32, f64, HashMap<TowerKind, u64>) {
     let mut wins = 0u32;
     let mut timeouts = 0u32;
     let mut waves = 0i64;
     let mut lives = 0i64;
     let mut total_waves = 0i32;
+    let mut hero_damage = 0.0;
     let mut usage: HashMap<TowerKind, u64> = HashMap::new();
     for s in 0..n {
         let r = run_sim_with_hero(
@@ -1083,6 +1176,25 @@ fn greedy_winrate_with_hero(
             econ,
             hero_profile,
         );
+        if n == 1 && r.outcome != "VICTORY" {
+            eprintln!(
+                "[sim/build-debug] {} outcome={} wave={}/{} lives={} gold={} enemies={} spawned={}/{} frames={} active={} draft={} hero={} front={}",
+                hero_profile.label(),
+                r.outcome,
+                r.wave,
+                r.total_waves,
+                r.lives,
+                r.gold,
+                r.enemies,
+                r.spawned,
+                r.spawn_target,
+                r.frames,
+                r.wave_in_progress,
+                r.draft_waiting,
+                r.hero_debug,
+                r.enemy_debug,
+            );
+        }
         if r.outcome == "VICTORY" {
             wins += 1;
         }
@@ -1092,6 +1204,7 @@ fn greedy_winrate_with_hero(
         waves += r.wave as i64;
         lives += r.lives.max(0) as i64;
         total_waves = r.total_waves;
+        hero_damage += r.hero_damage;
         for (k, st) in &r.per_kind {
             *usage.entry(*k).or_default() += st.count as u64;
         }
@@ -1102,6 +1215,7 @@ fn greedy_winrate_with_hero(
         waves as f32 / n as f32,
         lives as f32 / n as f32,
         total_waves,
+        hero_damage / n as f64,
         usage,
     )
 }
@@ -1302,7 +1416,7 @@ fn main() {
                 "[sim] WIN-RATE — greedy player, level {} ({}), {} seeds...",
                 level, level_name, n
             );
-            let (wins, timeouts, aw, al, tw, usage) = greedy_winrate(level, seed, n, None);
+            let (wins, timeouts, aw, al, tw, _, usage) = greedy_winrate(level, seed, n, None);
             let mut us: Vec<(TowerKind, u64)> = usage.into_iter().filter(|(_, c)| *c > 0).collect();
             us.sort_by(|a, b| b.1.cmp(&a.1));
             println!(
@@ -1339,10 +1453,18 @@ fn main() {
                 "\n============== HERO BUILD SWEEP (level {level}: {level_name}) =============="
             );
             println!(
-                "{:<17} {:<10} {:>6}  {:>11}  {:>9}  {}",
-                "profile", "weapon", "win%", "avg waves", "avg lives", "resonance"
+                "{:<17} {:<10} {:>6}  {:>11}  {:>9}  {:>6}  {:>10}  {:>6}  {}",
+                "profile",
+                "weapon",
+                "win%",
+                "avg waves",
+                "avg lives",
+                "power",
+                "hero dmg",
+                "towers",
+                "resonance / set"
             );
-            println!("{}", "-".repeat(86));
+            println!("{}", "-".repeat(104));
             for profile in hero_build_profiles() {
                 if filter
                     .as_deref()
@@ -1350,21 +1472,29 @@ fn main() {
                 {
                     continue;
                 }
-                let (wins, timeouts, aw, al, tw, _) =
+                let (wins, timeouts, aw, al, tw, hero_damage, usage) =
                     greedy_winrate_with_hero(level, seed, n, None, profile);
                 let weapon = profile.weapon();
                 let gear = profile.gear();
+                let stats = hero_gear::active_stats_for_weapon(&gear, weapon);
+                let power = stats.damage_mult / stats.cooldown_mult.max(0.01);
+                let average_towers = usage.values().copied().sum::<u64>() as f32 / n as f32;
                 let resonance = hero_gear::weapon_resonance_summary(&gear, weapon)
                     .unwrap_or_else(|| "无".to_string());
+                let gear_set = hero_gear::gear_set_summary(&gear).unwrap_or_default();
                 println!(
-                    "{:<17} {:<10} {:>5.0}%  {:>6.1}/{:<4}  {:>9.1}  {}{}",
+                    "{:<17} {:<10} {:>5.0}%  {:>6.1}/{:<4}  {:>9.1}  {:>5.2}  {:>10.0}  {:>6.1}  {}{}{}",
                     profile.label(),
                     i18n::t(weapon.name()),
                     wins as f32 / n as f32 * 100.0,
                     aw,
                     tw,
                     al,
+                    power,
+                    hero_damage,
+                    average_towers,
                     resonance.trim(),
+                    gear_set,
                     if timeouts > 0 { "  TIMEOUT" } else { "" }
                 );
                 eprintln!(
@@ -1373,7 +1503,7 @@ fn main() {
                     wins as f32 / n as f32 * 100.0
                 );
             }
-            println!("{}", "=".repeat(86));
+            println!("{}", "=".repeat(104));
             println!(
                 "(builds = Lv18 + rank-3 weapon talents + four matching hero gear pieces; greedy towers still play normally.)\n"
             );
@@ -1390,7 +1520,7 @@ fn main() {
             println!("{}", "-".repeat(56));
             for lvl in 0..count {
                 let name = i18n::t(levels()[lvl].name);
-                let (wins, timeouts, aw, al, tw, _) = greedy_winrate(lvl, seed, n, None);
+                let (wins, timeouts, aw, al, tw, _, _) = greedy_winrate(lvl, seed, n, None);
                 let winpct = wins as f32 / n as f32 * 100.0;
                 println!(
                     "{:>3}  {:<18} {:>5.0}%  {:>6.1}/{:<4}  {:>9.1}  {:>4}",

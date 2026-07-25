@@ -190,6 +190,8 @@ pub struct HeroPanelRoot;
 #[derive(Component)]
 pub struct HeroPaperdollPreview;
 #[derive(Component)]
+pub struct HeroPaperdollCaption;
+#[derive(Component)]
 pub struct HeroPaperdollPortrait;
 #[derive(Component)]
 pub struct HeroWeaponSlotIcon;
@@ -1621,10 +1623,11 @@ fn hero_gear_codex_card(
             ));
             card.spawn((
                 Text::new(crate::i18n::tf(
-                    "{} · {} · ×{}",
+                    "{} · {} · {} · ×{}",
                     &[
                         &def.rarity.label(),
                         &crate::i18n::t(def.slot.name()),
+                        &crate::i18n::t(item.gear_set().short()),
                         &count.to_string(),
                     ],
                 )),
@@ -1723,21 +1726,32 @@ fn hero_gear_stat_line(d: &crate::hero_gear::HeroGearDef) -> String {
     }
 }
 
-fn hero_gear_affinity_line(item: HeroGear, current: HeroWeapon) -> String {
+fn hero_gear_affinity_line(
+    item: HeroGear,
+    current: HeroWeapon,
+    equipped: &[Option<HeroGear>; crate::hero_gear::HeroGearSlot::COUNT],
+) -> String {
     let current_name = crate::i18n::t(crate::hero_gear::HeroWeaponKind::for_weapon(current).name());
     let (route, route_desc) = crate::hero_gear::weapon_resonance_route(current);
+    let mut preview = *equipped;
+    preview[item.def().slot.idx()] = Some(item);
+    let set = item.gear_set();
+    let set_count = crate::hero_gear::gear_set_count(&preview, set);
     let status = if item.has_weapon_affinity(current) {
         crate::i18n::t("已激活")
     } else {
         crate::i18n::t("未激活")
     };
     crate::i18n::tf(
-        "适配武器：{}\n当前{}：{}\n共鸣路线：{}\n{}",
+        "适配武器：{}\n当前{}：{}\n武器共鸣：{}\n套装预览：{} {}/4\n{}\n{}",
         &[
             &crate::i18n::t(item.affinity_weapons_label()),
             &current_name,
             &status,
             &crate::i18n::t(route),
+            &crate::i18n::t(set.name()),
+            &set_count.to_string(),
+            &crate::i18n::t(set.desc()),
             &crate::i18n::t(route_desc),
         ],
     )
@@ -2647,6 +2661,7 @@ pub fn spawn_hud(
                         )),
                         text_font(f, 11.0),
                         TextColor(Color::srgb(0.84, 0.94, 1.0)),
+                        HeroPaperdollCaption,
                     ));
                 });
 
@@ -5187,7 +5202,7 @@ fn tooltip_text(
                     &crate::i18n::t(d.slot.name()),
                     &crate::i18n::t(d.desc),
                     &hero_gear_stat_line(d),
-                    &hero_gear_affinity_line(*item, hero.weapon),
+                    &hero_gear_affinity_line(*item, hero.weapon, &hero.gear),
                     &count.to_string(),
                     &active,
                 ],
@@ -6912,6 +6927,7 @@ pub fn update_hero_paperdoll_panel(
     sprites: Res<Sprites>,
     paperdoll: Option<Res<crate::hero_paperdoll::HeroPaperdollRuntime>>,
     mut previews: Query<&mut ImageNode, With<HeroPaperdollPreview>>,
+    mut captions: Query<&mut Text, (With<HeroPaperdollCaption>, Without<HeroGearSlotLabel>)>,
     mut portraits: Query<
         &mut ImageNode,
         (
@@ -6929,7 +6945,7 @@ pub fn update_hero_paperdoll_panel(
         (&HeroGearSlotIcon, &mut ImageNode),
         (Without<HeroWeaponSlotIcon>, Without<HeroPaperdollPreview>),
     >,
-    mut slot_labels: Query<(&HeroGearSlotLabel, &mut Text)>,
+    mut slot_labels: Query<(&HeroGearSlotLabel, &mut Text), Without<HeroPaperdollCaption>>,
     mut slot_buttons: Query<(&HeroGearSlotButton, &mut BackgroundColor)>,
     mut bag_tiles: Query<(&HeroGearBagTile, &mut Node)>,
 ) {
@@ -6940,6 +6956,16 @@ pub fn update_hero_paperdoll_panel(
     for mut image in &mut previews {
         image.image = preview.clone();
         image.color = Color::WHITE;
+    }
+    for mut text in &mut captions {
+        text.0 = crate::i18n::tf(
+            "{}·{} Lv{}",
+            &[
+                &crate::i18n::t(hero.race.name()),
+                &crate::i18n::t(hero.weapon_kind().name()),
+                &hero.level.to_string(),
+            ],
+        );
     }
     for mut image in &mut portraits {
         image.image = preview.clone();
@@ -10035,8 +10061,14 @@ pub fn spawn_victory(
     for item in &rewards {
         inv.add(*item);
     }
-    let hero_reward =
-        crate::hero_gear::roll_clear_reward(&mut rng, stars, reward_bonus, current.0, hero.weapon);
+    let hero_reward = crate::hero_gear::roll_clear_reward(
+        &mut rng,
+        stars,
+        reward_bonus,
+        current.0,
+        hero.weapon,
+        &hero.gear,
+    );
     if let Some(item) = hero_reward {
         hero_gear_inv.add(item);
     }

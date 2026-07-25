@@ -5,7 +5,7 @@
 //! regular [`Tower`] (so it reuses attack/render/HP/damage) carrying the `hero`
 //! flag, a free-floating `hero_pos`, and an optional `move_target`.
 
-use crate::data::{BOARD_H, Behavior, Element, TowerKind};
+use crate::data::{Behavior, Element, TowerKind, BOARD_H};
 use crate::hero_gear::{self, HeroGear, HeroGearInventory, HeroGearSlot, HeroWeaponKind};
 use crate::tower::Tower;
 use bevy::prelude::*;
@@ -128,7 +128,7 @@ impl HeroWeapon {
         match self {
             HeroWeapon::BannerSword => "【不灭战魂】持续回血，可单刷守关不靠塔",
             HeroWeapon::StarfireStaff => "【湮灭领域】范围歼灭，并增幅周围法系塔",
-            HeroWeapon::ShadowBow => "【赏金猎手】击杀额外金币，发育打钱最快",
+            HeroWeapon::ShadowBow => "【赏金猎手】残血追猎并获得额外金币，发育打钱最快",
             HeroWeapon::OathShield => "【统御军阵】光环为周围塔加攻、自身扛线",
             HeroWeapon::StormOrb => "【风暴领域】身边形成减速力场，群体控场核心",
             HeroWeapon::SentryCrossbow => "【戍卫结界】穿透哨箭减速敌线，并大幅提升周围塔射程",
@@ -240,7 +240,7 @@ impl HeroWeapon {
             // Economy: bounty gold on every kill (anywhere) while alive.
             HeroWeapon::ShadowBow => Doctrine {
                 name: "赏金猎手",
-                desc: "全场击杀额外获得16%金币，发育与打钱效率最高",
+                desc: "全场击杀额外获得16%金币；箭矢对35%生命以下目标造成三倍伤害",
                 gold_bonus: 0.16,
                 ..Doctrine::ZERO
             },

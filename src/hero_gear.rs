@@ -54,6 +54,69 @@ impl HeroGearSlot {
     }
 }
 
+/// Cross-weapon equipment families. Weapon affinity answers "does this item
+/// suit my current weapon?" while a gear set answers "what kind of build am I
+/// assembling?". Keeping both axes lets a player run a focused 4-piece set or
+/// combine two 2-piece identities without bringing classes back.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum HeroGearSet {
+    Vanguard,
+    Spellweave,
+    Hunt,
+    Covenant,
+    Workshop,
+}
+
+impl HeroGearSet {
+    pub const ALL: [HeroGearSet; 5] = [
+        HeroGearSet::Vanguard,
+        HeroGearSet::Spellweave,
+        HeroGearSet::Hunt,
+        HeroGearSet::Covenant,
+        HeroGearSet::Workshop,
+    ];
+
+    pub fn idx(self) -> usize {
+        match self {
+            HeroGearSet::Vanguard => 0,
+            HeroGearSet::Spellweave => 1,
+            HeroGearSet::Hunt => 2,
+            HeroGearSet::Covenant => 3,
+            HeroGearSet::Workshop => 4,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            HeroGearSet::Vanguard => "先锋战阵",
+            HeroGearSet::Spellweave => "星织秘仪",
+            HeroGearSet::Hunt => "逐影猎装",
+            HeroGearSet::Covenant => "眷属契约",
+            HeroGearSet::Workshop => "机巧工坊",
+        }
+    }
+
+    pub fn short(self) -> &'static str {
+        match self {
+            HeroGearSet::Vanguard => "先锋",
+            HeroGearSet::Spellweave => "星织",
+            HeroGearSet::Hunt => "逐影",
+            HeroGearSet::Covenant => "契约",
+            HeroGearSet::Workshop => "工坊",
+        }
+    }
+
+    pub fn desc(self) -> &'static str {
+        match self {
+            HeroGearSet::Vanguard => "生命与护甲起步，成套后强化英雄和附近防御塔的正面守线能力。",
+            HeroGearSet::Spellweave => "强化射程、技能爆发和施法循环，适合主动清理密集敌群。",
+            HeroGearSet::Hunt => "强化机动、攻速、穿甲与赏金，适合游走补刀和追猎首领。",
+            HeroGearSet::Covenant => "强化神话召唤物、主动技能与生存，适合召唤协同构筑。",
+            HeroGearSet::Workshop => "强化塔攻速光环、临时守卫与自身耐久，适合围绕塔群作战。",
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum HeroWeaponKind {
     Sword,
@@ -266,6 +329,44 @@ impl HeroGear {
             HeroGear::AssassinWraps => "夜刃匕首 / 猎影长弓",
             HeroGear::MythcallerTotem => "召唤法杖",
             HeroGear::GolemBlueprint => "工匠战锤",
+        }
+    }
+
+    pub fn gear_set(self) -> HeroGearSet {
+        match self {
+            HeroGear::VowPlate
+            | HeroGear::WarflagTabard
+            | HeroGear::BloodBanner
+            | HeroGear::CitadelSeal
+            | HeroGear::DragonheartCrown
+            | HeroGear::WayfarerBoots => HeroGearSet::Vanguard,
+            HeroGear::StarweaveRobe
+            | HeroGear::MoonthreadVest
+            | HeroGear::ThunderCharm
+            | HeroGear::EmberPrayer
+            | HeroGear::MeteorCodex
+            | HeroGear::TempestCore
+            | HeroGear::StarpathSandals => HeroGearSet::Spellweave,
+            HeroGear::WindrunnerCloak
+            | HeroGear::AssassinWraps
+            | HeroGear::NightMask
+            | HeroGear::BountyQuiver
+            | HeroGear::SentryScope
+            | HeroGear::BrassCompass
+            | HeroGear::BloodstepGreaves
+            | HeroGear::CarrotWings => HeroGearSet::Hunt,
+            HeroGear::NullMantle
+            | HeroGear::SaintBell
+            | HeroGear::MythcallerTotem
+            | HeroGear::RiftIdol
+            | HeroGear::CarrotHalo
+            | HeroGear::SummonerGreaves => HeroGearSet::Covenant,
+            HeroGear::WildhideHarness
+            | HeroGear::ClockworkBadge
+            | HeroGear::ForgeGauntlet
+            | HeroGear::GolemBlueprint
+            | HeroGear::EngineerTreads
+            | HeroGear::WatchtowerGreaves => HeroGearSet::Workshop,
         }
     }
 
@@ -509,6 +610,78 @@ impl HeroGearStats {
         self.aura_damage_add += def.aura_damage_add;
         self.tower_haste_add += def.tower_haste_add;
         self.gold_bonus_add += def.gold_bonus_add;
+    }
+
+    pub fn add_gear_set_bonus(&mut self, set: HeroGearSet, count: usize) {
+        if count < 2 {
+            return;
+        }
+
+        match set {
+            HeroGearSet::Vanguard => {
+                self.hp_mult *= 1.06;
+                self.armor_add += 3.0;
+                if count >= 3 {
+                    self.hp_mult *= 1.05;
+                    self.armor_add += 4.0;
+                    self.aura_damage_add += 0.02;
+                }
+                if count >= 4 {
+                    self.damage_mult *= 1.05;
+                    self.tower_haste_add += 0.03;
+                }
+            }
+            HeroGearSet::Spellweave => {
+                self.skill_mult *= 1.08;
+                self.range_mult *= 1.03;
+                if count >= 3 {
+                    self.cooldown_mult *= 0.95;
+                    self.skill_cooldown_reduction += 1;
+                }
+                if count >= 4 {
+                    self.skill_mult *= 1.08;
+                    self.cooldown_mult *= 0.97;
+                }
+            }
+            HeroGearSet::Hunt => {
+                self.cooldown_mult *= 0.96;
+                self.move_mult *= 1.04;
+                self.armor_pierce += 4.0;
+                if count >= 3 {
+                    self.damage_mult *= 1.06;
+                    self.gold_bonus_add += 0.03;
+                }
+                if count >= 4 {
+                    self.damage_mult *= 1.04;
+                    self.cooldown_mult *= 0.96;
+                    self.armor_pierce += 6.0;
+                }
+            }
+            HeroGearSet::Covenant => {
+                self.summon_power_add += 0.12;
+                self.skill_mult *= 1.05;
+                if count >= 3 {
+                    self.hp_mult *= 1.05;
+                    self.aura_damage_add += 0.02;
+                }
+                if count >= 4 {
+                    self.summon_power_add += 0.12;
+                    self.cooldown_mult *= 0.96;
+                }
+            }
+            HeroGearSet::Workshop => {
+                self.tower_haste_add += 0.04;
+                self.armor_add += 2.0;
+                if count >= 3 {
+                    self.hp_mult *= 1.05;
+                    self.skill_cooldown_reduction += 1;
+                }
+                if count >= 4 {
+                    self.damage_mult *= 1.05;
+                    self.tower_haste_add += 0.04;
+                }
+            }
+        }
     }
 
     pub fn add_weapon_affinity(&mut self, item: HeroGear, weapon: HeroWeapon) {
@@ -1372,6 +1545,7 @@ pub fn roll_clear_reward(
     difficulty_bonus: i32,
     level_index: usize,
     weapon: HeroWeapon,
+    equipped: &[Option<HeroGear>; HeroGearSlot::COUNT],
 ) -> Option<HeroGear> {
     let stars = stars.clamp(1, 3);
     let chance = (0.20
@@ -1383,7 +1557,7 @@ pub fn roll_clear_reward(
         return None;
     }
     let rarity = roll_reward_rarity(rng.frac(), stars, difficulty_bonus, level_index);
-    Some(pick_by_rarity_for_weapon(rng, rarity, weapon))
+    Some(pick_by_rarity_for_weapon(rng, rarity, weapon, equipped))
 }
 
 fn roll_reward_rarity(p: f32, stars: u8, difficulty_bonus: i32, level_index: usize) -> Rarity {
@@ -1454,6 +1628,7 @@ fn pick_by_rarity_for_weapon(
     rng: &mut crate::game::Rng,
     rarity: Rarity,
     weapon: HeroWeapon,
+    equipped: &[Option<HeroGear>; HeroGearSlot::COUNT],
 ) -> HeroGear {
     let mut candidates = HeroGear::ALL
         .into_iter()
@@ -1468,11 +1643,11 @@ fn pick_by_rarity_for_weapon(
 
     let total_weight: usize = candidates
         .iter()
-        .map(|item| reward_affinity_weight(*item, weapon))
+        .map(|item| reward_affinity_weight(*item, weapon, equipped))
         .sum();
     let mut roll = rng.range(total_weight.max(1));
     for item in candidates {
-        let weight = reward_affinity_weight(item, weapon);
+        let weight = reward_affinity_weight(item, weapon, equipped);
         if roll < weight {
             return item;
         }
@@ -1481,8 +1656,12 @@ fn pick_by_rarity_for_weapon(
     HeroGear::WayfarerBoots
 }
 
-fn reward_affinity_weight(item: HeroGear, weapon: HeroWeapon) -> usize {
-    if matches!(
+fn reward_affinity_weight(
+    item: HeroGear,
+    weapon: HeroWeapon,
+    equipped: &[Option<HeroGear>; HeroGearSlot::COUNT],
+) -> usize {
+    let affinity = if matches!(
         item,
         HeroGear::CarrotHalo | HeroGear::WayfarerBoots | HeroGear::CarrotWings
     ) {
@@ -1491,7 +1670,9 @@ fn reward_affinity_weight(item: HeroGear, weapon: HeroWeapon) -> usize {
         6
     } else {
         1
-    }
+    };
+    let set_progress = gear_set_count(equipped, item.gear_set()).min(3);
+    affinity + set_progress * 2
 }
 
 fn rarity_tier(rarity: Rarity) -> i32 {
@@ -1509,11 +1690,35 @@ pub fn empty_gear() -> [Option<HeroGear>; HeroGearSlot::COUNT] {
     [None; HeroGearSlot::COUNT]
 }
 
+pub fn gear_set_counts(
+    slots: &[Option<HeroGear>; HeroGearSlot::COUNT],
+) -> [usize; HeroGearSet::ALL.len()] {
+    let mut counts = [0; HeroGearSet::ALL.len()];
+    for item in slots.iter().flatten() {
+        counts[item.gear_set().idx()] += 1;
+    }
+    counts
+}
+
+pub fn gear_set_count(slots: &[Option<HeroGear>; HeroGearSlot::COUNT], set: HeroGearSet) -> usize {
+    gear_set_counts(slots)[set.idx()]
+}
+
+pub fn gear_set_stats(slots: &[Option<HeroGear>; HeroGearSlot::COUNT]) -> HeroGearStats {
+    let counts = gear_set_counts(slots);
+    let mut stats = HeroGearStats::default();
+    for set in HeroGearSet::ALL {
+        stats.add_gear_set_bonus(set, counts[set.idx()]);
+    }
+    stats
+}
+
 pub fn gear_stats(slots: &[Option<HeroGear>; HeroGearSlot::COUNT]) -> HeroGearStats {
     let mut stats = HeroGearStats::default();
     for item in slots.iter().flatten() {
         stats.add_item(*item);
     }
+    stats.combine(gear_set_stats(slots));
     stats
 }
 
@@ -1606,9 +1811,10 @@ pub fn summary_for_weapon(
     let stats = weapon
         .map(|weapon| active_stats_for_weapon(slots, weapon))
         .unwrap_or_else(|| gear_stats(slots));
-    let resonance = weapon
+    let weapon_resonance = weapon
         .and_then(|weapon| weapon_resonance_summary(slots, weapon))
         .unwrap_or_default();
+    let set_resonance = gear_set_summary(slots).unwrap_or_default();
     let names = HeroGearSlot::ALL
         .iter()
         .enumerate()
@@ -1623,7 +1829,7 @@ pub fn summary_for_weapon(
         "英雄装备：{}{}  伤害×{}  HP×{}  攻速×{}  技能×{}  召唤+{}%  光环+{}%",
         &[
             &names,
-            &resonance,
+            &format!("{weapon_resonance}{set_resonance}"),
             &format!("{:.2}", stats.damage_mult),
             &format!("{:.2}", stats.hp_mult),
             &format!("{:.2}", 1.0 / stats.cooldown_mult.max(0.01)),
@@ -1635,6 +1841,20 @@ pub fn summary_for_weapon(
             ),
         ],
     )
+}
+
+pub fn gear_set_summary(slots: &[Option<HeroGear>; HeroGearSlot::COUNT]) -> Option<String> {
+    let counts = gear_set_counts(slots);
+    let active = HeroGearSet::ALL
+        .into_iter()
+        .filter_map(|set| {
+            let count = counts[set.idx()];
+            (count >= 2).then(|| {
+                crate::i18n::tf("{}{}件", &[&crate::i18n::t(set.name()), &count.to_string()])
+            })
+        })
+        .collect::<Vec<_>>();
+    (!active.is_empty()).then(|| crate::i18n::tf("  套装·{}", &[&active.join(" / ")]))
 }
 
 pub fn weapon_resonance_summary(
@@ -1694,7 +1914,7 @@ pub fn weapon_resonance_route(weapon: HeroWeapon) -> (&'static str, &'static str
         ),
         HeroWeapon::ShadowBow => (
             "猎影赏金",
-            "提高游走、穿甲和击杀金币，让英雄负责补刀和发育滚雪球。",
+            "提高游走、穿甲与残血追猎，让英雄稳定补刀并用赏金滚雪球。",
         ),
         HeroWeapon::OathShield => (
             "誓约壁垒",
@@ -1761,11 +1981,9 @@ mod tests {
         assert_eq!(HeroGear::ALL.len(), 33);
         assert_eq!(HeroGearSlot::COUNT, 4);
         assert_eq!(HeroGearSlot::Boots.idx(), 3);
-        assert!(
-            HeroGear::ALL
-                .iter()
-                .any(|item| item.def().slot == HeroGearSlot::Boots)
-        );
+        assert!(HeroGear::ALL
+            .iter()
+            .any(|item| item.def().slot == HeroGearSlot::Boots));
     }
 
     #[test]
@@ -1890,16 +2108,12 @@ mod tests {
         let two_piece = weapon_affinity_stats(&slots, HeroWeapon::SummonStaff);
         assert_eq!(weapon_affinity_count(&slots, HeroWeapon::SummonStaff), 2);
         assert!(two_piece.damage_mult > 1.0);
-        assert!(
-            weapon_resonance_summary(&slots, HeroWeapon::SummonStaff)
-                .unwrap()
-                .contains("初鸣")
-        );
-        assert!(
-            weapon_resonance_detail(&slots, HeroWeapon::SummonStaff)
-                .unwrap()
-                .contains("异界眷属")
-        );
+        assert!(weapon_resonance_summary(&slots, HeroWeapon::SummonStaff)
+            .unwrap()
+            .contains("初鸣"));
+        assert!(weapon_resonance_detail(&slots, HeroWeapon::SummonStaff)
+            .unwrap()
+            .contains("异界眷属"));
 
         equip(&mut slots, HeroGear::RiftIdol);
         let three_piece = weapon_affinity_stats(&slots, HeroWeapon::SummonStaff);
@@ -1908,11 +2122,9 @@ mod tests {
 
         equip(&mut slots, HeroGear::SummonerGreaves);
         assert_eq!(weapon_affinity_count(&slots, HeroWeapon::SummonStaff), 4);
-        assert!(
-            weapon_resonance_summary(&slots, HeroWeapon::SummonStaff)
-                .unwrap()
-                .contains("满鸣")
-        );
+        assert!(weapon_resonance_summary(&slots, HeroWeapon::SummonStaff)
+            .unwrap()
+            .contains("满鸣"));
     }
 
     #[test]
@@ -1997,17 +2209,67 @@ mod tests {
 
     #[test]
     fn clear_reward_weights_favor_current_weapon_affinity() {
+        let slots = empty_gear();
         let summon_specific =
-            reward_affinity_weight(HeroGear::SummonerGreaves, HeroWeapon::SummonStaff);
-        let unrelated = reward_affinity_weight(HeroGear::SummonerGreaves, HeroWeapon::BannerSword);
-        let universal = reward_affinity_weight(HeroGear::CarrotWings, HeroWeapon::BannerSword);
+            reward_affinity_weight(HeroGear::SummonerGreaves, HeroWeapon::SummonStaff, &slots);
+        let unrelated =
+            reward_affinity_weight(HeroGear::SummonerGreaves, HeroWeapon::BannerSword, &slots);
+        let universal =
+            reward_affinity_weight(HeroGear::CarrotWings, HeroWeapon::BannerSword, &slots);
 
         assert!(summon_specific > universal);
         assert!(universal > unrelated);
         assert_eq!(
-            reward_affinity_weight(HeroGear::SentryScope, HeroWeapon::SentryCrossbow),
+            reward_affinity_weight(HeroGear::SentryScope, HeroWeapon::SentryCrossbow, &slots,),
             summon_specific
         );
+    }
+
+    #[test]
+    fn every_gear_set_can_fill_all_four_slots() {
+        for set in HeroGearSet::ALL {
+            for slot in HeroGearSlot::ALL {
+                assert!(
+                    HeroGear::ALL
+                        .into_iter()
+                        .any(|item| item.gear_set() == set && item.def().slot == slot),
+                    "{} needs an item for {}",
+                    set.name(),
+                    slot.name()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn two_plus_two_hybrid_activates_both_set_identities() {
+        let slots = [
+            Some(HeroGear::StarweaveRobe),
+            Some(HeroGear::ThunderCharm),
+            Some(HeroGear::CarrotHalo),
+            Some(HeroGear::SummonerGreaves),
+        ];
+        assert_eq!(gear_set_count(&slots, HeroGearSet::Spellweave), 2);
+        assert_eq!(gear_set_count(&slots, HeroGearSet::Covenant), 2);
+
+        let bonus = gear_set_stats(&slots);
+        assert!(bonus.range_mult > 1.0);
+        assert!(bonus.skill_mult > 1.10);
+        assert!(bonus.summon_power_add >= 0.12);
+        let summary = gear_set_summary(&slots).unwrap();
+        assert!(summary.contains(HeroGearSet::Spellweave.name()));
+        assert!(summary.contains(HeroGearSet::Covenant.name()));
+    }
+
+    #[test]
+    fn clear_rewards_help_complete_the_equipped_set() {
+        let mut slots = empty_gear();
+        equip(&mut slots, HeroGear::VowPlate);
+        let same_set =
+            reward_affinity_weight(HeroGear::BloodBanner, HeroWeapon::BannerSword, &slots);
+        let other_set =
+            reward_affinity_weight(HeroGear::ForgeGauntlet, HeroWeapon::BannerSword, &slots);
+        assert!(same_set > other_set);
     }
 }
 
