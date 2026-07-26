@@ -19,11 +19,11 @@ use crate::equipment::{
     unequip_slot_to_inventory,
 };
 use crate::game::{
-    CurrentLevel, Difficulty, GameDifficulty, GameMode, KILL_COMBO_WINDOW, Rng, RunMode, RunState,
-    start_wave, toggle_auto_wave,
+    CurrentLevel, Difficulty, EncounterRng, GameDifficulty, GameMode, KILL_COMBO_WINDOW, Rng,
+    RunMode, RunState, start_wave, toggle_auto_wave,
 };
 use crate::hero::{HeroLoadout, HeroWeapon, Race};
-use crate::hero_gear::{HeroGear, HeroGearInventory, HeroGearSlot};
+use crate::hero_gear::{HeroGear, HeroGearInventory, HeroGearSet, HeroGearSlot};
 use crate::i18n::{Language, tr};
 use crate::lighting::LightingSettings;
 use crate::meta::{Abilities, Ability, Talents, talent_cost};
@@ -1743,7 +1743,7 @@ fn hero_gear_affinity_line(
         crate::i18n::t("未激活")
     };
     crate::i18n::tf(
-        "适配武器：{}\n当前{}：{}\n武器共鸣：{}\n套装预览：{} {}/4\n{}\n{}",
+        "适配武器：{}\n当前{}：{}\n武器共鸣：{}\n套装预览：{} {}/4\n{}\n四件核心【{}】：{}\n{}",
         &[
             &crate::i18n::t(item.affinity_weapons_label()),
             &current_name,
@@ -1752,6 +1752,8 @@ fn hero_gear_affinity_line(
             &crate::i18n::t(set.name()),
             &set_count.to_string(),
             &crate::i18n::t(set.desc()),
+            &crate::i18n::t(set.keystone_name()),
+            &crate::i18n::t(set.keystone_desc()),
             &crate::i18n::t(route_desc),
         ],
     )
@@ -4298,7 +4300,7 @@ pub fn update_hud(
                     String::new()
                 };
                 crate::i18n::tf(
-                    "{} Lv{}/3  宝石 {}/3  {}{}  目标:{}\nHP {}/{}  穿甲 {}  击杀 {}  修理{}  升级{}{}  {}",
+                    "{} Lv{}/3  宝石 {}/3  {}{}  目标:{}\nHP {}/{}  穿甲 {}  击杀 {}  修理{}  升级{}{}{}  {}",
                     &[
                         &crate::i18n::t(tw.kind.def().name),
                         &tw.level.to_string(),
@@ -4316,6 +4318,14 @@ pub fn update_hud(
                             crate::i18n::tf(
                                 "  协同+{}%",
                                 &[&((tw.synergy * 100.0) as i32).to_string()],
+                            )
+                        } else {
+                            String::new()
+                        },
+                        &if tw.battle_focus > 0.0 {
+                            crate::i18n::tf(
+                                "  强化+{}%",
+                                &[&((tw.battle_focus * 100.0).round() as i32).to_string()],
                             )
                         } else {
                             String::new()
@@ -4463,15 +4473,24 @@ pub fn update_hero_info(hero: Res<HeroLoadout>, mut info: Query<&mut Text, With<
         // 只列非中性项——移速/攻速/伤害这些实打实的数值让玩家看得见。
         let mut stats = crate::hero_gear::gear_stats(&hero.gear);
         stats.combine(crate::hero_gear::weapon_affinity_stats(
-            &hero.gear, hero.weapon,
+            &hero.gear,
+            hero.weapon,
         ));
         let pct = |v: f32| format!("{:+.0}%", (v - 1.0) * 100.0);
         let mut parts: Vec<String> = Vec::new();
         if (stats.damage_mult - 1.0).abs() > 0.005 {
-            parts.push(format!("{}{}", crate::i18n::t("伤害"), pct(stats.damage_mult)));
+            parts.push(format!(
+                "{}{}",
+                crate::i18n::t("伤害"),
+                pct(stats.damage_mult)
+            ));
         }
         if (stats.move_mult - 1.0).abs() > 0.005 {
-            parts.push(format!("{}{}", crate::i18n::t("移速"), pct(stats.move_mult)));
+            parts.push(format!(
+                "{}{}",
+                crate::i18n::t("移速"),
+                pct(stats.move_mult)
+            ));
         }
         if (stats.cooldown_mult - 1.0).abs() > 0.005 {
             parts.push(format!(
@@ -4481,10 +4500,18 @@ pub fn update_hero_info(hero: Res<HeroLoadout>, mut info: Query<&mut Text, With<
             ));
         }
         if (stats.hp_mult - 1.0).abs() > 0.005 {
-            parts.push(format!("{}{}", crate::i18n::t("生命值"), pct(stats.hp_mult)));
+            parts.push(format!(
+                "{}{}",
+                crate::i18n::t("生命值"),
+                pct(stats.hp_mult)
+            ));
         }
         if (stats.range_mult - 1.0).abs() > 0.005 {
-            parts.push(format!("{}{}", crate::i18n::t("射程"), pct(stats.range_mult)));
+            parts.push(format!(
+                "{}{}",
+                crate::i18n::t("射程"),
+                pct(stats.range_mult)
+            ));
         }
         if stats.armor_add.abs() > 0.5 {
             parts.push(format!("{}+{:.0}", crate::i18n::t("护甲"), stats.armor_add));
@@ -4611,7 +4638,7 @@ pub fn hud_buttons(
     mut actions: MessageReader<UiActionActivated>,
     mut run: ResMut<RunState>,
     current: Res<CurrentLevel>,
-    mut rng: ResMut<Rng>,
+    mut encounter_rng: ResMut<EncounterRng>,
     mut sel: ResMut<Selection>,
     mut paused: ResMut<crate::game::Paused>,
     mut towers: Query<(Entity, &mut crate::tower::Tower)>,
@@ -4666,7 +4693,7 @@ pub fn hud_buttons(
                 if confirm_state.4.is_waiting() {
                     run.show(crate::i18n::t("先选择一个本波构筑天赋"));
                 } else {
-                    start_wave(&mut run, current.0, &mut rng);
+                    start_wave(&mut run, current.0, &mut encounter_rng);
                     sfx.write(crate::audio::SfxEvent(Sound::Wave));
                 }
             }
@@ -8086,7 +8113,7 @@ fn cast_hero_skill(
 ) -> bool {
     let hero_pos = source.pos;
     let mult = loadout.skill_damage_mult();
-    match loadout.weapon {
+    let casted = match loadout.weapon {
         crate::hero::HeroWeapon::BannerSword => {
             let radius = 108.0 + loadout.talent_rank(0) as f32 * 10.0;
             let amount = (190.0 + source.damage * 1.25) * mult;
@@ -8466,6 +8493,13 @@ fn cast_hero_skill(
                         duration: 2.4 + loadout.talent_rank(4) as f32 * 0.3,
                     },
                 });
+                status.write(Status {
+                    source_tower: Some(hero_entity),
+                    target: enemy,
+                    kind: StatusKind::Slow {
+                        duration: 1.25 + loadout.talent_rank(3) as f32 * 0.18,
+                    },
+                });
                 vfx.write(crate::vfx::VfxEvent::Muzzle {
                     pos: hero_pos,
                     dir: (pos - hero_pos).normalize_or_zero(),
@@ -8650,6 +8684,231 @@ fn cast_hero_skill(
                 ],
             ));
             true
+        }
+    };
+    if casted {
+        apply_hero_set_keystone_on_skill(
+            commands,
+            hero_entity,
+            source,
+            loadout,
+            towers,
+            enemies,
+            sprites,
+            creatures,
+            dmg,
+            status,
+            buff,
+            vfx,
+            run,
+        );
+    }
+    casted
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_hero_set_keystone_on_skill(
+    commands: &mut Commands,
+    hero_entity: Entity,
+    source: HeroSkillSource,
+    loadout: &HeroLoadout,
+    towers: &mut Query<(Entity, &mut crate::tower::Tower)>,
+    enemies: &Query<(Entity, &Enemy, &Transform)>,
+    sprites: &Sprites,
+    creatures: &crate::creatures::Creatures,
+    dmg: &mut MessageWriter<Damage>,
+    status: &mut MessageWriter<Status>,
+    buff: &mut MessageWriter<BuffTower>,
+    vfx: &mut MessageWriter<crate::vfx::VfxEvent>,
+    run: &mut RunState,
+) {
+    let Some(set) = crate::hero_gear::active_four_piece_set(&loadout.gear) else {
+        return;
+    };
+    let mult = loadout.skill_damage_mult();
+    let name = crate::i18n::t(set.keystone_name());
+
+    match set {
+        HeroGearSet::Vanguard => {
+            let radius = TILE_SIZE * 3.4;
+            let _ = heal_hero(hero_entity, towers, source.max_hp * 0.25);
+            let tower_hits = repair_and_buff_towers(
+                hero_entity,
+                source.pos,
+                radius,
+                0.08,
+                2,
+                towers,
+                buff,
+                vfx,
+                Color::srgb(1.0, 0.72, 0.24),
+            );
+            vfx.write(crate::vfx::VfxEvent::MeleeCleave {
+                pos: source.pos,
+                radius,
+                color: Color::srgb(1.0, 0.72, 0.24),
+            });
+            run.show(crate::i18n::tf(
+                "四件套【{}】触发：恢复英雄并强化 {} 座塔",
+                &[&name, &tower_hits.to_string()],
+            ));
+        }
+        HeroGearSet::Spellweave => {
+            let mut targets = enemies
+                .iter()
+                .filter(|(_, enemy, _)| enemy.hp > 0.0)
+                .map(|(entity, enemy, tf)| {
+                    (
+                        entity,
+                        enemy.path_index,
+                        enemy.max_hp,
+                        enemy.boss,
+                        tf.translation.truncate(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            targets.sort_by(|a, b| b.1.cmp(&a.1));
+            targets.truncate(6);
+            let mut center = Vec2::ZERO;
+            for (enemy, _, max_hp, boss, pos) in targets.iter().copied() {
+                center += pos;
+                let hp_scale =
+                    (max_hp * if boss { 0.012 } else { 0.035 }).min(900.0 + source.damage * mult);
+                dmg.write(Damage {
+                    source_tower: Some(hero_entity),
+                    target: enemy,
+                    amount: (90.0 + source.damage * 0.65) * mult + hp_scale,
+                    magic: true,
+                    element: Element::Arcane,
+                    armor_pierce: 0.0,
+                });
+                status.write(Status {
+                    source_tower: Some(hero_entity),
+                    target: enemy,
+                    kind: StatusKind::Freeze { duration: 0.65 },
+                });
+            }
+            if !targets.is_empty() {
+                center /= targets.len() as f32;
+                vfx.write(crate::vfx::VfxEvent::Explosion {
+                    pos: center,
+                    radius: TILE_SIZE * 2.0,
+                    color: Color::srgb(0.46, 0.70, 1.0),
+                });
+            }
+            run.show(crate::i18n::tf(
+                "四件套【{}】触发：奥术回响命中 {} 个敌人",
+                &[&name, &targets.len().to_string()],
+            ));
+        }
+        HeroGearSet::Hunt => {
+            let mut targets = enemies
+                .iter()
+                .filter(|(_, enemy, _)| enemy.hp > 0.0)
+                .map(|(entity, enemy, tf)| {
+                    (
+                        entity,
+                        enemy.path_index,
+                        enemy.hp / enemy.max_hp.max(1.0),
+                        enemy.max_hp,
+                        enemy.boss,
+                        tf.translation.truncate(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            targets.sort_by(|a, b| a.2.total_cmp(&b.2).then_with(|| b.1.cmp(&a.1)));
+            targets.truncate(4);
+            for (enemy, _, hp_frac, max_hp, boss, pos) in targets.iter().copied() {
+                let missing = (1.0 - hp_frac).clamp(0.0, 1.0);
+                let execute = (max_hp * missing * if boss { 0.045 } else { 0.12 })
+                    .min(1_800.0 + source.damage * mult * 2.0);
+                dmg.write(Damage {
+                    source_tower: Some(hero_entity),
+                    target: enemy,
+                    amount: (72.0 + source.damage * 0.48) * mult + execute,
+                    magic: false,
+                    element: Element::Physical,
+                    armor_pierce: 55.0,
+                });
+                vfx.write(crate::vfx::VfxEvent::Muzzle {
+                    pos: source.pos,
+                    dir: (pos - source.pos).normalize_or_zero(),
+                    color: Color::srgb(0.72, 1.0, 0.48),
+                });
+            }
+            run.show(crate::i18n::tf(
+                "四件套【{}】触发：终猎重创 {} 个目标",
+                &[&name, &targets.len().to_string()],
+            ));
+        }
+        HeroGearSet::Covenant => {
+            let stats = crate::hero_gear::active_stats_for_weapon(&loadout.gear, loadout.weapon);
+            let summon_power = 1.0 + stats.summon_power_add.max(0.0);
+            let facing = source.facing.normalize_or_zero();
+            let side = Vec2::new(-facing.y, facing.x);
+            let pos = source.pos + side * TILE_SIZE * 0.68;
+            crate::tower::spawn_mythic_ally(
+                commands,
+                sprites.mythic_summon.clone(),
+                pos,
+                (source.max_hp * 0.34 * summon_power).max(260.0),
+                ((48.0 + source.damage * 0.44) * mult * summon_power).max(70.0),
+                86.0,
+                16.0 + summon_power * 3.0,
+                hero_entity,
+            );
+            vfx.write(crate::vfx::VfxEvent::Burst {
+                pos,
+                radius: TILE_SIZE * 1.25,
+                color: Color::srgb(0.78, 0.48, 1.0),
+            });
+            run.show(crate::i18n::tf(
+                "四件套【{}】触发：神话眷属响应召唤",
+                &[&name],
+            ));
+        }
+        HeroGearSet::Workshop => {
+            let radius = TILE_SIZE * 3.8;
+            let tower_hits = repair_and_buff_towers(
+                hero_entity,
+                source.pos,
+                radius,
+                0.10,
+                3,
+                towers,
+                buff,
+                vfx,
+                Color::srgb(0.34, 0.94, 0.92),
+            );
+            let pos = forge_guard_positions(source.pos, source.facing, 1, radius, enemies)[0];
+            let guard = crate::tower::spawn_ally(
+                commands,
+                creatures,
+                crate::data::EnemyKind::Shielded,
+                pos,
+                (source.max_hp * 0.34).max(280.0),
+                ((52.0 + source.damage * 0.62) * mult).max(72.0),
+                50.0,
+                18.0,
+                0.76,
+                hero_entity,
+            );
+            commands.entity(guard).insert((
+                TemporaryGuard,
+                FixedSummonHome {
+                    pos,
+                    range: TILE_SIZE * 2.25,
+                },
+            ));
+            vfx.write(crate::vfx::VfxEvent::HammerImpact {
+                pos,
+                angle: source.facing.to_angle(),
+                color: Color::srgb(0.34, 0.94, 0.92),
+            });
+            run.show(crate::i18n::tf(
+                "四件套【{}】触发：组装守卫并超频 {} 座塔",
+                &[&name, &tower_hits.to_string()],
+            ));
         }
     }
 }

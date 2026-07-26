@@ -284,6 +284,7 @@ fn main() {
     .init_resource::<game::GameMode>()
     .init_resource::<game::GameDifficulty>()
     .init_resource::<Rng>()
+    .init_resource::<game::EncounterRng>()
     .init_resource::<RunState>()
     .init_resource::<Selection>()
     .init_resource::<Snapshot>()
@@ -474,7 +475,12 @@ fn main() {
             enemy::update_enemies,
             tower::necromancer_raise,
             // 嵌套成二元组以绕开单个 add_systems 最多 20 个系统的上限。
-            (enemy::heal_auras, enemy::incubation, mutators::starfall, mutators::void_rift),
+            (
+                enemy::heal_auras,
+                enemy::incubation,
+                mutators::starfall,
+                mutators::void_rift,
+            ),
             (tick_auto_wave, tick_message),
         )
             .chain()

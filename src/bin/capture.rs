@@ -37,7 +37,8 @@ use protect_carrot::{
 
 use data::{BOARD_H, BOARD_W, TILE_SIZE, TowerKind, cell_center, hex, levels};
 use game::{
-    CurrentLevel, Paused, Rng, RunState, load_level, not_paused, tick_auto_wave, tick_message,
+    CurrentLevel, EncounterRng, Paused, Rng, RunState, load_level, not_paused, tick_auto_wave,
+    tick_message,
 };
 use sprites::build_sprites;
 use tower::{BuffTower, Damage, HealCarrot, Snapshot, Status};
@@ -205,6 +206,7 @@ fn main() -> AppExit {
     .init_resource::<game::GameMode>()
     .init_resource::<game::GameDifficulty>()
     .init_resource::<Rng>()
+    .init_resource::<EncounterRng>()
     .init_resource::<RunState>()
     .init_resource::<Selection>()
     .init_resource::<Snapshot>()
@@ -382,7 +384,9 @@ fn main() -> AppExit {
             ui::update_ability_buttons,
             ui::update_hero_select_buttons,
             ui::update_hero_paperdoll_panel.after(prepare_capture_level),
-            ui::update_roguelite_draft_panel.after(prepare_roguelite_draft_capture),
+            ui::update_roguelite_draft_panel
+                .after(prepare_roguelite_draft_capture)
+                .after(drive_hero_skill_smoke),
             press_capture_escape_once.before(ui::close_hud_panels_with_escape),
             ui::close_hud_panels_with_escape,
             ui::update_panel_visibility.after(prepare_capture_level),
@@ -795,6 +799,7 @@ fn drive_hero_skill_smoke(
     mut prepared: ResMut<CapturePrepared>,
     mut loadout: ResMut<hero::HeroLoadout>,
     mut run: ResMut<RunState>,
+    mut roguelite: ResMut<roguelite::RogueliteRun>,
     mut selection: ResMut<Selection>,
     mut panels: ResMut<ui::HudPanels>,
     mut actions: MessageWriter<ui::UiActionActivated>,
@@ -810,10 +815,17 @@ fn drive_hero_skill_smoke(
         With<tower::Summon>,
     >,
 ) {
-    if *scenario != CaptureScenario::HeroSkillSmoke
-        || !prepared.level_ready
-        || prepared.scenario_ready
-    {
+    if *scenario != CaptureScenario::HeroSkillSmoke {
+        return;
+    }
+    // The proof sequence must keep playing after a wave clear. Real gameplay
+    // waits for a player draft pick; this deterministic capture skips the draft
+    // so a modal cannot freeze most of the 15-second clip.
+    if roguelite.draft.take().is_some() {
+        run.auto_wave_timer = 0.0;
+    }
+    run.auto_wave = true;
+    if !prepared.level_ready || prepared.scenario_ready {
         return;
     }
 
@@ -830,6 +842,17 @@ fn drive_hero_skill_smoke(
             loadout.race = hero::Race::Elf;
             loadout.weapon = hero::HeroWeapon::SummonStaff;
             loadout.level = hero::HeroLoadout::MAX_LEVEL;
+            loadout.gear = [
+                Some(hero_gear::HeroGear::NullMantle),
+                Some(hero_gear::HeroGear::MythcallerTotem),
+                Some(hero_gear::HeroGear::RiftIdol),
+                Some(hero_gear::HeroGear::SummonerGreaves),
+            ];
+            assert_eq!(
+                hero_gear::active_four_piece_set(&loadout.gear),
+                Some(hero_gear::HeroGearSet::Covenant),
+                "[capture/skill] summon loadout did not activate Covenant four-piece"
+            );
             loadout.skill_cd = 0;
             let weapon_index = loadout.weapon_index();
             loadout.weapon_talents[weapon_index] = [3, 0, 3, 3, 3, 3];
@@ -857,8 +880,10 @@ fn drive_hero_skill_smoke(
                 .iter()
                 .filter(|(_, _, mythic, _, _)| mythic.is_some())
                 .count();
-            if mythic_count == 0 {
-                panic!("[capture/skill] SummonStaff skill spawned no MythicSummonSprite allies");
+            if mythic_count < 4 {
+                panic!(
+                    "[capture/skill] SummonStaff + Covenant spawned {mythic_count} mythic allies; expected three skill summons plus one four-piece retainer"
+                );
             }
             state.mythic_count = mythic_count;
             state.guard_count = summons
@@ -868,6 +893,17 @@ fn drive_hero_skill_smoke(
 
             loadout.weapon = hero::HeroWeapon::ForgeHammer;
             loadout.level = hero::HeroLoadout::MAX_LEVEL;
+            loadout.gear = [
+                Some(hero_gear::HeroGear::WildhideHarness),
+                Some(hero_gear::HeroGear::ClockworkBadge),
+                Some(hero_gear::HeroGear::GolemBlueprint),
+                Some(hero_gear::HeroGear::EngineerTreads),
+            ];
+            assert_eq!(
+                hero_gear::active_four_piece_set(&loadout.gear),
+                Some(hero_gear::HeroGearSet::Workshop),
+                "[capture/skill] forge loadout did not activate Workshop four-piece"
+            );
             loadout.skill_cd = 0;
             let weapon_index = loadout.weapon_index();
             loadout.weapon_talents[weapon_index] = [3, 3, 3, 3, 3, 3];
@@ -902,9 +938,9 @@ fn drive_hero_skill_smoke(
                     state.mythic_count, mythic_count
                 );
             }
-            if guard_count <= state.guard_count {
+            if guard_count < state.guard_count + 5 {
                 panic!(
-                    "[capture/skill] ForgeHammer skill spawned no temporary guards: {} -> {}",
+                    "[capture/skill] ForgeHammer + Workshop spawned too few temporary guards: {} -> {}; expected four skill guards plus one four-piece sentinel",
                     state.guard_count, guard_count
                 );
             }
@@ -918,7 +954,7 @@ fn drive_hero_skill_smoke(
                     state.guard_homes.len()
                 );
             }
-            let moved = Vec2::new(BOARD_W * 0.34, -BOARD_H * 0.34);
+            let moved = Vec2::new(BOARD_W * 0.25, -BOARD_H * 0.25);
             for (_, mut tower) in &mut towers {
                 if tower.hero {
                     tower.hero_pos = moved;
@@ -979,7 +1015,7 @@ fn drive_hero_skill_smoke(
             prepared.scenario_ready = true;
             state.step = 4;
             println!(
-                "[capture/skill] verified {} mythic allies and {} anchored temporary guards after hero moved",
+                "[capture/skill] verified Covenant/Workshop keystones: {} mythic allies and {} anchored temporary guards after hero moved",
                 state.mythic_count,
                 guards.len()
             );
@@ -1243,7 +1279,7 @@ fn prepare_roguelite_draft_capture(
     mut roguelite: ResMut<roguelite::RogueliteRun>,
     mut run: ResMut<RunState>,
     loadout: Res<hero::HeroLoadout>,
-    mut rng: ResMut<Rng>,
+    mut encounter_rng: ResMut<EncounterRng>,
     mut panels: ResMut<ui::HudPanels>,
 ) {
     if !matches!(
@@ -1261,7 +1297,7 @@ fn prepare_roguelite_draft_capture(
     panels.dock_open = false;
     panels.hero_open = false;
     panels.settings_open = false;
-    if roguelite.offer_wave_draft(&loadout, run.wave, &mut rng) {
+    if roguelite.offer_wave_draft(&loadout, run.wave, &mut encounter_rng.0) {
         prepared.scenario_ready = true;
         println!("[capture/roguelite] draft opened after wave {}", run.wave);
     }
@@ -1488,7 +1524,7 @@ fn prepare_capture_level(
     talents: Res<meta::Talents>,
     current: Res<CurrentLevel>,
     scenario: Res<CaptureScenario>,
-    mut rng: ResMut<Rng>,
+    mut encounter_rng: ResMut<EncounterRng>,
     mut run: ResMut<RunState>,
     mut selection: ResMut<Selection>,
     mut panels: ResMut<ui::HudPanels>,
@@ -1554,7 +1590,7 @@ fn prepare_capture_level(
             placed += 1;
         }
 
-        game::start_wave(&mut run, current.0, &mut rng);
+        game::start_wave(&mut run, current.0, &mut encounter_rng);
         println!(
             "[capture] prepared level {} with {placed} towers",
             current.0 + 1

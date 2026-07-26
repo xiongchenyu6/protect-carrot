@@ -5,9 +5,9 @@
 //! regular [`Tower`] (so it reuses attack/render/HP/damage) carrying the `hero`
 //! flag, a free-floating `hero_pos`, and an optional `move_target`.
 
-use crate::data::{Behavior, Element, TowerKind, BOARD_H};
+use crate::data::{BOARD_H, Behavior, Element, TowerKind};
 use crate::hero_gear::{self, HeroGear, HeroGearInventory, HeroGearSlot, HeroWeaponKind};
-use crate::tower::Tower;
+use crate::tower::{TargetPriority, Tower};
 use bevy::prelude::*;
 
 /// Hero race — a multiplicative modifier layered over the weapon base stats.
@@ -132,7 +132,7 @@ impl HeroWeapon {
             HeroWeapon::OathShield => "【统御军阵】光环为周围塔加攻、自身扛线",
             HeroWeapon::StormOrb => "【风暴领域】身边形成减速力场，群体控场核心",
             HeroWeapon::SentryCrossbow => "【戍卫结界】穿透哨箭减速敌线，并大幅提升周围塔射程",
-            HeroWeapon::NightDagger => "【背击刺杀】绕后背击爆发，专精操作打BOSS",
+            HeroWeapon::NightDagger => "【背击刺杀】绕后爆发，毒影飞溅并缠住怪群，专精猎杀BOSS",
             HeroWeapon::SummonStaff => "【异界契约】召唤移动神话怪物，强化所有召唤物",
             HeroWeapon::ForgeHammer => "【临时工事】挥锤守线，并能组装临时守卫",
         }
@@ -272,7 +272,7 @@ impl HeroWeapon {
             // Duelist economy hybrid: small bounty + sustain.
             HeroWeapon::NightDagger => Doctrine {
                 name: "背击刺杀",
-                desc: "从敌人背后攻击触发背击(对BOSS伤害x2.6)，击杀额外15%金币",
+                desc: "背击对BOSS伤害x2.6并飞溅减速毒影，击杀额外15%金币",
                 gold_bonus: 0.15,
                 regen_pct: 0.02,
                 ..Doctrine::ZERO
@@ -336,7 +336,7 @@ impl HeroWeapon {
             HeroWeapon::OathShield => "修复附近防御塔，鼓舞塔攻势，并冻结贴近防线的敌人",
             HeroWeapon::StormOrb => "召来雷云多段轰击前线敌群，造成雷风伤害和减速",
             HeroWeapon::SentryCrossbow => "展开哨戒结界，强化附近塔并缠绕、削弱敌群",
-            HeroWeapon::NightDagger => "给最靠前敌人打上死印，造成暗影爆发、剧毒和破甲诅咒",
+            HeroWeapon::NightDagger => "给最靠前敌人打上死印，造成暗影爆发、剧毒、缚足和破甲诅咒",
             HeroWeapon::SummonStaff => "召唤会移动、会攻击的神话眷属，并裂界削弱周围敌人",
             HeroWeapon::ForgeHammer => "组装临时机械守卫，超频附近防御塔，并用震荡锤击迟滞敌人",
         }
@@ -1157,6 +1157,16 @@ pub fn apply_loadout_to_tower(loadout: &HeroLoadout, t: &mut Tower) {
     t.summon_hp = 0.0;
     t.summon_speed = 0.0;
     t.max_summons = 0;
+    t.target_priority = match loadout.weapon {
+        HeroWeapon::BannerSword | HeroWeapon::ShadowBow | HeroWeapon::NightDagger => {
+            TargetPriority::Weakest
+        }
+        HeroWeapon::OathShield | HeroWeapon::StormOrb | HeroWeapon::ForgeHammer => {
+            TargetPriority::Front
+        }
+        HeroWeapon::SentryCrossbow => TargetPriority::Threat,
+        HeroWeapon::StarfireStaff | HeroWeapon::SummonStaff => TargetPriority::Strongest,
+    };
 
     match loadout.weapon {
         HeroWeapon::BannerSword => {
@@ -1567,6 +1577,28 @@ mod tests {
         assert!(tower.fire_duration > 0.0);
         assert!(tower.armor_reduce > 0.0);
         assert!(tower.curse_duration > 0.0);
+    }
+
+    #[test]
+    fn weapons_spawn_with_role_specific_targeting() {
+        let mut loadout = test_loadout();
+        loadout.weapon = HeroWeapon::NightDagger;
+        assert_eq!(
+            make_hero_tower(&loadout, Vec2::ZERO).target_priority,
+            TargetPriority::Weakest
+        );
+
+        loadout.weapon = HeroWeapon::OathShield;
+        assert_eq!(
+            make_hero_tower(&loadout, Vec2::ZERO).target_priority,
+            TargetPriority::Front
+        );
+
+        loadout.weapon = HeroWeapon::SentryCrossbow;
+        assert_eq!(
+            make_hero_tower(&loadout, Vec2::ZERO).target_priority,
+            TargetPriority::Threat
+        );
     }
 }
 

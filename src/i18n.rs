@@ -8,8 +8,8 @@
 
 use bevy::prelude::*;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 /// Process-global current language, mirrored from the [`Language`] resource each
 /// frame by [`sync_current_lang`]. Lets [`t`] translate at any call site without
@@ -160,6 +160,11 @@ fn dict() -> &'static HashMap<&'static str, &'static str> {
             ("逐影", "Shadowhunt"),
             ("契约", "Pact"),
             ("工坊", "Workshop"),
+            ("不屈战阵", "Unbroken Line"),
+            ("奥术回响", "Arcane Echo"),
+            ("终猎印记", "Final Hunt Mark"),
+            ("远古盟约", "Ancient Covenant"),
+            ("战地装配", "Field Assembly"),
             (
                 "生命与护甲起步，成套后强化英雄和附近防御塔的正面守线能力。",
                 "Starts with health and armor, then strengthens the hero and nearby towers for frontline defense.",
@@ -180,12 +185,54 @@ fn dict() -> &'static HashMap<&'static str, &'static str> {
                 "强化塔攻速光环、临时守卫与自身耐久，适合围绕塔群作战。",
                 "Improves tower haste auras, temporary sentinels, and durability for formation play.",
             ),
+            (
+                "施放武器技能时恢复英雄生命，并修复、强化附近防御塔。",
+                "Casting a weapon skill heals the hero and repairs and empowers nearby towers.",
+            ),
+            (
+                "施放武器技能后，对最前方的敌群追加奥术回响与短暂冻结。",
+                "After a weapon skill, an arcane echo strikes and briefly freezes the leading enemies.",
+            ),
+            (
+                "施放武器技能后追击前线伤者，目标损失的生命越多，追加伤害越高。",
+                "After a weapon skill, wounded frontline targets are pursued for more damage as their health falls.",
+            ),
+            (
+                "施放武器技能时额外召唤一只短时存在的神话眷属。",
+                "Casting a weapon skill also summons a temporary mythic retainer.",
+            ),
+            (
+                "施放武器技能时超频附近防御塔，并在前线组装一名定点守卫。",
+                "Casting a weapon skill overclocks nearby towers and assembles a fixed frontline sentinel.",
+            ),
             ("{} · {} · {} · ×{}", "{} · {} · {} · ×{}"),
             ("{}{}件", "{} {}-piece"),
+            ("{}{}件{}", "{} {}-piece{}"),
+            ("【{}】", " [{}]"),
             ("  套装·{}", "  Set · {}"),
             (
-                "适配武器：{}\n当前{}：{}\n武器共鸣：{}\n套装预览：{} {}/4\n{}\n{}",
-                "Compatible weapons: {}\nCurrent {}: {}\nWeapon resonance: {}\nSet preview: {} {}/4\n{}\n{}",
+                "适配武器：{}\n当前{}：{}\n武器共鸣：{}\n套装预览：{} {}/4\n{}\n四件核心【{}】：{}\n{}",
+                "Compatible weapons: {}\nCurrent {}: {}\nWeapon resonance: {}\nSet preview: {} {}/4\n{}\nFour-piece keystone [{}]: {}\n{}",
+            ),
+            (
+                "四件套【{}】触发：恢复英雄并强化 {} 座塔",
+                "Four-piece [{}]: healed the hero and empowered {} towers.",
+            ),
+            (
+                "四件套【{}】触发：奥术回响命中 {} 个敌人",
+                "Four-piece [{}]: Arcane Echo struck {} enemies.",
+            ),
+            (
+                "四件套【{}】触发：终猎重创 {} 个目标",
+                "Four-piece [{}]: Final Hunt struck {} targets.",
+            ),
+            (
+                "四件套【{}】触发：神话眷属响应召唤",
+                "Four-piece [{}]: a mythic retainer answered the call.",
+            ),
+            (
+                "四件套【{}】触发：组装守卫并超频 {} 座塔",
+                "Four-piece [{}]: assembled a sentinel and overclocked {} towers.",
             ),
             (
                 "【赏金猎手】残血追猎并获得额外金币，发育打钱最快",
@@ -198,6 +245,11 @@ fn dict() -> &'static HashMap<&'static str, &'static str> {
             (
                 "提高游走、穿甲与残血追猎，让英雄稳定补刀并用赏金滚雪球。",
                 "Improves roaming, armor piercing, and wounded-target hunting for reliable bounty snowballing.",
+            ),
+            ("夜刃背刺", "Nightblade Backstab"),
+            (
+                "提高移动、穿甲和爆发；背击毒影飞溅，兼顾首领与贴身怪群。",
+                "Improves mobility, armor piercing, and burst; backstab splashes toxic shadows for both Bosses and nearby packs.",
             ),
             // Bestiary taxonomy/trait tags (split from species tags by traits()).
             ("精英", "Elite"),
@@ -423,8 +475,20 @@ fn dict() -> &'static HashMap<&'static str, &'static str> {
             ("{} 就绪", "{} ready"),
             ("英雄 {}·{} Lv{}  装备 {}/3  HP {}/{}\n{}  击杀 {}  {}", "Hero {}·{} Lv{}  Equip {}/3  HP {}/{}\n{}  Kills {}  {}"),
             ("  静默中", "  Silenced"),
-            ("{} Lv{}/3  装备 {}/3  {}{}  目标:{}\nHP {}/{}  穿甲 {}  击杀 {}  修理{}  升级{}{}  {}", "{} Lv{}/3  Equip {}/3  {}{}  Target: {}\nHP {}/{}  Armor Pen {}  Kills {}  Repair {}  Upgrade {}{}  {}"),
+            (
+                "已选中英雄 {}·{} Lv{}\n武器、装备、天赋和纸娃娃请打开右上角英雄面板。\nHP {}/{}  击杀 {}",
+                "Selected hero {} · {} Lv{}\nOpen the top-right hero panel for weapons, gear, talents, and paperdoll.\nHP {}/{}  Kills {}",
+            ),
+            (
+                "{} Lv{}/3  宝石 {}/3  {}{}  目标:{}\nHP {}/{}  穿甲 {}  击杀 {}  修理{}  升级{}{}{}  {}",
+                "{} Lv{}/3  Gems {}/3  {}{}  Target: {}\nHP {}/{}  Armor Pen {}  Kills {}  Repair {}  Upgrade {}{}{}  {}",
+            ),
             ("  协同+{}%", "  Synergy +{}%"),
+            ("  强化+{}%", "  Boost +{}%"),
+            (
+                "未选择防御塔\n点击防御塔查看属性；英雄请打开右上角纸娃娃面板",
+                "No tower selected\nSelect a tower for its stats; open the top-right paperdoll panel for the hero.",
+            ),
             ("未选择单位\n点击英雄或防御塔查看属性，并为其装配右下方装备", "No unit selected\nTap a hero or tower to see its stats and equip items from the bottom-right"),
             ("总数 {}", "Total {}"),
             ("  终极·{}✓", "  Ultimate·{}✓"),
@@ -829,7 +893,7 @@ fn dict() -> &'static HashMap<&'static str, &'static str> {
             ("【统御军阵】光环为周围塔加攻、自身扛线", "[Command Array] Aura boosts nearby towers' damage; tanks the frontline"),
             ("【风暴领域】身边形成减速力场，群体控场核心", "[Storm Field] Forms a slowing field around you; core area crowd control"),
             ("【戍卫结界】大幅提升周围塔射程的远程辅助", "[Sentinel Ward] Ranged support that greatly extends nearby towers' range"),
-            ("【背击刺杀】绕后背击爆发，专精操作打BOSS", "[Backstab] Flank for burst backstabs; skill-based Boss killer"),
+            ("【背击刺杀】绕后爆发，毒影飞溅并缠住怪群，专精猎杀BOSS", "[Backstab] Flank for burst damage; toxic shadows splash and snare nearby packs while hunting Bosses"),
             ("【异界契约】召唤移动神话怪物，强化所有召唤物", "[Otherworld Pact] Summons mobile mythic creatures and empowers all summons"),
             ("【临时工事】挥锤守线，并能组装临时守卫", "[Fieldworks] Hammers the line and assembles temporary guards"),
             ("不死战神", "Deathless War God"),
@@ -872,7 +936,7 @@ fn dict() -> &'static HashMap<&'static str, &'static str> {
             ("戍卫结界", "Sentinel Ward"),
             ("提升周围防御塔射程(+22%)，让防线覆盖更远的路径", "Extends nearby towers' range (+22%), letting your defenses cover farther along the path"),
             ("背击刺杀", "Backstab"),
-            ("从敌人背后攻击触发背击(对BOSS伤害x2.6)，击杀额外15%金币", "Attacking from behind triggers a backstab (x2.6 damage to Bosses); kills grant +15% Gold"),
+            ("背击对BOSS伤害x2.6并飞溅减速毒影，击杀额外15%金币", "Backstabs deal x2.6 damage to Bosses and splash slowing toxic shadows; kills grant +15% Gold"),
             ("异界契约", "Otherworld Pact"),
             ("强化所有召唤物(+65%伤害/回血/延寿)，并加速附近召唤塔与死灵塔", "Empowers all summons (+65% damage/regen/duration) and hastens nearby summon and necromancer towers"),
             ("临时工事", "Fieldworks"),
@@ -895,7 +959,7 @@ fn dict() -> &'static HashMap<&'static str, &'static str> {
             ("修复附近防御塔，鼓舞塔攻势，并冻结贴近防线的敌人", "Repairs nearby towers, inspires their attacks, and freezes enemies that close on the line"),
             ("召来雷云多段轰击前线敌群，造成雷风伤害和减速", "Calls a thundercloud to repeatedly strike the frontline, dealing storm damage and slow"),
             ("展开哨戒结界，强化附近塔并缠绕、削弱敌群", "Deploys a sentinel ward that empowers nearby towers and ensnares and weakens enemies"),
-            ("给最靠前敌人打上死印，造成暗影爆发、剧毒和破甲诅咒", "Brands the frontmost enemy with a death mark, dealing shadow burst, heavy poison, and an armor-break curse"),
+            ("给最靠前敌人打上死印，造成暗影爆发、剧毒、缚足和破甲诅咒", "Brands the frontmost enemy with a death mark, dealing shadow burst, heavy poison, a snare, and an armor-break curse"),
             ("召唤会移动、会攻击的神话眷属，并裂界削弱周围敌人", "Summons mobile, attacking mythic familiars and weakens nearby enemies with a rift"),
             ("组装临时机械守卫，超频附近防御塔，并用震荡锤击迟滞敌人", "Assembles temporary mechanical guards, overclocks nearby towers, and slows enemies with shock hammering"),
             ("破阵重击", "Breaching Strike"),

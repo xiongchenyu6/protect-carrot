@@ -1,23 +1,23 @@
 //! Enemy spawning, path-following, status effects, death and carrot arrival.
 //! Ported from `spawnEnemy` / `getEnemyPoolForWave` / `updateEnemies`.
 
+use crate::Levels;
 use crate::board::Board;
 use crate::components::{Enemy, HpBarFg, LevelEntity, ShieldBarFg};
 use crate::creatures::Creatures;
 use crate::data::{Element, EnemyKind, MOSS_TOWER_SENSE, TILE_SIZE, TOWER_RAIDER_SENSE};
 use crate::equipment::{
-    equipment_set_bonus, return_equipment_to_inventory, roll_drop, EquipmentInventory, Rarity,
+    EquipmentInventory, Rarity, equipment_set_bonus, return_equipment_to_inventory, roll_drop,
 };
-use crate::game::{CurrentLevel, Rng, RunState, AUTO_WAVE_DELAY, KILL_COMBO_WINDOW};
+use crate::game::{AUTO_WAVE_DELAY, CurrentLevel, KILL_COMBO_WINDOW, Rng, RunState};
 use crate::hero::{HeroLoadout, HeroWeapon};
 use crate::monster::{
-    boss_skill, default_species_id, pick_boss, pick_elite_affix, pick_regular, species_by_id,
-    BossSkill, EliteAffix, MonsterSpecies, MONSTER_SPECIES,
+    BossSkill, EliteAffix, MONSTER_SPECIES, MonsterSpecies, boss_skill, default_species_id,
+    pick_boss, pick_elite_affix, pick_regular, species_by_id,
 };
 use crate::sprites::Sprites;
 use crate::states::GameState;
 use crate::ui::UiFont;
-use crate::Levels;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
@@ -215,6 +215,20 @@ mod tests {
             campaign_level_pressure(crate::data::EPISODE_LEN * 2 - 1),
             1.0
         );
+    }
+
+    #[test]
+    fn route_progress_stays_monotonic_across_corners() {
+        let path = [Vec2::ZERO, Vec2::new(100.0, 0.0), Vec2::new(100.0, 80.0)];
+        assert_eq!(route_progress(&path, 0, Vec2::new(75.0, 0.0)), 75.0);
+        assert_eq!(route_progress(&path, 1, Vec2::new(100.0, 25.0)), 125.0);
+    }
+
+    #[test]
+    fn route_traffic_waits_only_inside_the_clearance_gap() {
+        assert!(waits_for_route_traffic(100.0, 32.0, 125.0));
+        assert!(!waits_for_route_traffic(100.0, 32.0, 132.0));
+        assert!(!waits_for_route_traffic(100.0, 32.0, 90.0));
     }
 }
 
@@ -805,7 +819,7 @@ pub fn spawn_enemies(
     board: Res<Board>,
     levels: Res<Levels>,
     current: Res<CurrentLevel>,
-    mut rng: ResMut<Rng>,
+    mut encounter_rng: ResMut<crate::game::EncounterRng>,
     enemies: Query<(), With<Enemy>>,
     sprites: Res<Sprites>,
     creatures: Res<Creatures>,
@@ -821,6 +835,7 @@ pub fn spawn_enemies(
     }
     let level = &levels.0[current.0];
     let build_challenge = hero_build_challenge(&loadout, current.0, run.wave, run.is_endless());
+    let rng = &mut encounter_rng.0;
 
     run.spawn_timer += time.delta_secs() * run.game_speed;
     if run.spawn_timer >= run.spawn_interval && run.spawned < run.spawn_target {
@@ -833,12 +848,12 @@ pub fn spawn_enemies(
             {
                 boss
             } else {
-                let boss = pick_boss(run.wave, run.boss_pick_total_waves(), current.0, &mut rng);
+                let boss = pick_boss(run.wave, run.boss_pick_total_waves(), current.0, rng);
                 run.pending_boss_species = Some(boss.id);
                 boss
             }
         } else {
-            pick_regular(run.wave, current.0, &mut rng)
+            pick_regular(run.wave, current.0, rng)
         };
         // Elite chance grows with wave & difficulty (bosses are never "elite").
         let elite_cap = if run.is_endless() {
@@ -986,7 +1001,7 @@ pub fn spawn_enemies(
                     gold: perfect_bonus,
                 });
             }
-            let draft_offered = roguelite.offer_wave_draft(&loadout, run.wave, &mut rng);
+            let draft_offered = roguelite.offer_wave_draft(&loadout, run.wave, rng);
             if draft_offered {
                 run.auto_wave_timer = 0.0;
                 if perfect_bonus > 0 {
@@ -1266,6 +1281,42 @@ fn project_to_path_segment(path: &[Vec2], path_index: usize, pos: Vec2) -> Vec2 
     }
     let t = ((pos - from).dot(seg) / len_sq).clamp(0.0, 1.0);
     from + seg * t
+}
+
+fn route_progress(path: &[Vec2], path_index: usize, pos: Vec2) -> f32 {
+    if path.len() < 2 {
+        return 0.0;
+    }
+    let segment = path_index.min(path.len() - 2);
+    let completed = path
+        .windows(2)
+        .take(segment)
+        .map(|points| points[0].distance(points[1]))
+        .sum::<f32>();
+    let from = path[segment];
+    let to = path[segment + 1];
+    let delta = to - from;
+    let length = delta.length();
+    if length <= 0.01 {
+        return completed;
+    }
+    let along = ((pos - from).dot(delta / length)).clamp(0.0, length);
+    completed + along
+}
+
+fn route_spacing(enemy: &Enemy) -> f32 {
+    if enemy.boss {
+        TILE_SIZE * 0.72
+    } else if enemy.elite {
+        TILE_SIZE * 0.52
+    } else {
+        TILE_SIZE * 0.40
+    }
+}
+
+fn waits_for_route_traffic(progress: f32, spacing: f32, ahead_progress: f32) -> bool {
+    let gap = ahead_progress - progress;
+    gap > 0.05 && gap < spacing
 }
 
 fn damage_towers_in_radius(
@@ -1841,6 +1892,28 @@ pub fn update_enemies(
     }
     let path = &board.path_world;
     let last = path.len().saturating_sub(1);
+    // Snapshot route order before movement. When a front unit is held by a hero
+    // or summon, followers now queue behind it instead of collapsing onto the
+    // same pixel and leaking as one undifferentiated stack when the blocker moves.
+    let route_traffic = q
+        .iter()
+        .filter(|(_, enemy, _)| {
+            enemy.hp > 0.0
+                && enemy.path_index < last
+                && !enemy.flying
+                && !enemy.invisible
+                && !enemy.tower_raider
+                && !enemy.moss_destroy
+                && !enemy.explosive
+        })
+        .map(|(entity, enemy, tf)| {
+            (
+                entity,
+                route_progress(path, enemy.path_index, tf.translation.truncate()),
+                route_spacing(enemy),
+            )
+        })
+        .collect::<Vec<_>>();
     let tower_positions: Vec<Vec2> = towers
         .iter()
         .filter(|(_, t)| t.hp > 0.0)
@@ -1936,6 +2009,15 @@ pub fn update_enemies(
             }
         }
         let pos = tf.translation.truncate();
+        let waits_for_traffic = route_traffic
+            .iter()
+            .find(|(other, _, _)| *other == entity)
+            .is_some_and(|(_, progress, spacing)| {
+                route_traffic.iter().any(|(other, ahead, ahead_spacing)| {
+                    *other != entity
+                        && waits_for_route_traffic(*progress, spacing.max(*ahead_spacing), *ahead)
+                })
+            });
         let mut invisible_route_moved = false;
         if e.invisible && !e.frozen && !e.blocked && e.path_index < last {
             let target = path[e.path_index + 1];
@@ -1982,7 +2064,12 @@ pub fn update_enemies(
         } else {
             None
         };
-        if !invisible_route_moved && !e.frozen && !e.blocked && e.path_index < last {
+        if !invisible_route_moved
+            && !e.frozen
+            && !e.blocked
+            && !waits_for_traffic
+            && e.path_index < last
+        {
             // Flying units ignore the winding ground path and beeline straight to
             // the carrot (the final path point) — the shortest possible route.
             let target = if e.flying {

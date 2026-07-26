@@ -4,8 +4,7 @@ use crate::Levels;
 use crate::board::Board;
 use crate::components::{Carrot, CarrotSealBar, LevelEntity};
 use crate::data::{
-    BOARD_H, BOARD_W, BOSS_WAVE_INTERVAL, COLS, LEVEL_THEMES, ROWS, TILE_SIZE,
-    cell_center,
+    BOARD_H, BOARD_W, BOSS_WAVE_INTERVAL, COLS, LEVEL_THEMES, ROWS, TILE_SIZE, cell_center,
 };
 use crate::equipment::{EquipmentInventory, unequip_all_to_inventory};
 use crate::monster::{boss_skill, is_boss_wave, next_boss_wave, pick_boss};
@@ -285,6 +284,57 @@ impl Rng {
     }
 }
 
+/// Deterministic stream reserved for encounter composition: regular species,
+/// bosses, elite affixes, and between-wave draft offers. Combat/VFX systems use
+/// [`Rng`] instead, so changing a weapon's hit count cannot silently reroll the
+/// enemies faced by another build under the same seed.
+#[derive(Resource)]
+pub struct EncounterRng(pub Rng);
+
+impl EncounterRng {
+    pub fn seeded(seed: u64) -> Self {
+        let mixed = seed ^ 0xD1B5_4A32_D192_ED03;
+        Self(Rng(if mixed == 0 {
+            0xA24B_AED4_963E_E407
+        } else {
+            mixed
+        }))
+    }
+}
+
+impl Default for EncounterRng {
+    fn default() -> Self {
+        Self::seeded(0x9E37_79B9_7F4A_7C15)
+    }
+}
+
+#[cfg(test)]
+mod rng_tests {
+    use super::*;
+
+    #[test]
+    fn encounter_stream_is_independent_from_combat_randomness() {
+        let seed = 0x1234_5678_9ABC_DEF0;
+        let mut combat = Rng(seed);
+        let mut expected = EncounterRng::seeded(seed);
+        let mut actual = EncounterRng::seeded(seed);
+
+        for _ in 0..128 {
+            combat.next_u64();
+        }
+
+        for _ in 0..16 {
+            assert_eq!(actual.0.next_u64(), expected.0.next_u64());
+        }
+    }
+
+    #[test]
+    fn encounter_seed_never_uses_the_xorshift_zero_state() {
+        let encounter = EncounterRng::seeded(0xD1B5_4A32_D192_ED03);
+        assert_ne!(encounter.0.0, 0);
+    }
+}
+
 /// `OnEnter(Playing)`: clear any previous level, build the board, reset run state,
 /// and draw the static board visuals.
 pub fn load_level(
@@ -343,14 +393,16 @@ pub fn load_level(
         );
         // 章节战场机制提示（第 2-5 章各有专属规则）。
         if let Some(desc) = crate::mutators::mechanic_desc(crate::data::episode_of(current.0)) {
-            run.message
-                .push_str(&crate::i18n::tf("\n【{}】{}", &[
+            run.message.push_str(&crate::i18n::tf(
+                "\n【{}】{}",
+                &[
                     &crate::i18n::t(
                         crate::mutators::mechanic_name(crate::data::episode_of(current.0))
                             .unwrap_or(""),
                     ),
                     &crate::i18n::t(desc),
-                ]));
+                ],
+            ));
         }
         run.message_timer = 8.0;
     }
@@ -820,7 +872,7 @@ pub fn keyboard_controls(
     mut run: ResMut<RunState>,
     mut paused: ResMut<Paused>,
     current: Res<CurrentLevel>,
-    mut rng: ResMut<Rng>,
+    mut rng: ResMut<EncounterRng>,
     roguelite: Res<crate::roguelite::RogueliteRun>,
 ) {
     if keys.just_pressed(KeyCode::KeyP) {
@@ -847,7 +899,7 @@ pub fn keyboard_controls(
 }
 
 /// Begin the next wave (original `startWave`).
-pub fn start_wave(run: &mut RunState, level_index: usize, rng: &mut Rng) {
+pub fn start_wave(run: &mut RunState, level_index: usize, rng: &mut EncounterRng) {
     if !run.can_start_next_wave() {
         return;
     }
@@ -878,7 +930,12 @@ pub fn start_wave(run: &mut RunState, level_index: usize, rng: &mut Rng) {
     }
     run.spawn_target = target;
     if boss_wave {
-        let boss = pick_boss(run.wave, run.boss_pick_total_waves(), level_index, rng);
+        let boss = pick_boss(
+            run.wave,
+            run.boss_pick_total_waves(),
+            level_index,
+            &mut rng.0,
+        );
         run.pending_boss_species = Some(boss.id);
         let skill = boss_skill(boss.id);
         let prefix = if run.is_endless() {
@@ -923,10 +980,16 @@ pub fn start_wave(run: &mut RunState, level_index: usize, rng: &mut Rng) {
     }
     // 章节机制波次播报：沙暴/血潮来袭时提前告知玩家应对策略。
     if crate::mutators::is_sandstorm_wave(level_index, run.wave) {
-        run.show_for(crate::i18n::t("沙暴来袭：敌人移速+30%！备好减速与控制"), 3.2);
+        run.show_for(
+            crate::i18n::t("沙暴来袭：敌人移速+30%！备好减速与控制"),
+            3.2,
+        );
     }
     if crate::mutators::is_bloodtide_wave(level_index, run.wave) {
-        run.show_for(crate::i18n::t("血潮涌动：敌人自带血护盾！持续输出破盾"), 3.2);
+        run.show_for(
+            crate::i18n::t("血潮涌动：敌人自带血护盾！持续输出破盾"),
+            3.2,
+        );
     }
 }
 
@@ -934,7 +997,7 @@ pub fn tick_auto_wave(
     time: Res<Time>,
     mut run: ResMut<RunState>,
     current: Res<CurrentLevel>,
-    mut rng: ResMut<Rng>,
+    mut rng: ResMut<EncounterRng>,
     roguelite: Res<crate::roguelite::RogueliteRun>,
 ) {
     if roguelite.is_waiting() || !run.auto_wave || !run.can_start_next_wave() {

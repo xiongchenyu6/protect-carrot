@@ -115,6 +115,26 @@ impl HeroGearSet {
             HeroGearSet::Workshop => "强化塔攻速光环、临时守卫与自身耐久，适合围绕塔群作战。",
         }
     }
+
+    pub fn keystone_name(self) -> &'static str {
+        match self {
+            HeroGearSet::Vanguard => "不屈战阵",
+            HeroGearSet::Spellweave => "奥术回响",
+            HeroGearSet::Hunt => "终猎印记",
+            HeroGearSet::Covenant => "远古盟约",
+            HeroGearSet::Workshop => "战地装配",
+        }
+    }
+
+    pub fn keystone_desc(self) -> &'static str {
+        match self {
+            HeroGearSet::Vanguard => "施放武器技能时恢复英雄生命，并修复、强化附近防御塔。",
+            HeroGearSet::Spellweave => "施放武器技能后，对最前方的敌群追加奥术回响与短暂冻结。",
+            HeroGearSet::Hunt => "施放武器技能后追击前线伤者，目标损失的生命越多，追加伤害越高。",
+            HeroGearSet::Covenant => "施放武器技能时额外召唤一只短时存在的神话眷属。",
+            HeroGearSet::Workshop => "施放武器技能时超频附近防御塔，并在前线组装一名定点守卫。",
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -312,7 +332,7 @@ impl HeroGear {
             HeroGear::SentryScope => "哨戒弩 / 猎影长弓 / 星火法杖",
             HeroGear::CarrotHalo => "全部武器",
             HeroGear::RiftIdol => "召唤法杖 / 雷暴法器",
-            HeroGear::BrassCompass => "猎影长弓 / 哨戒弩 / 工匠战锤",
+            HeroGear::BrassCompass => "猎影长弓 / 哨戒弩 / 夜刃匕首 / 工匠战锤",
             HeroGear::DragonheartCrown => "战旗长剑 / 誓约盾锤 / 召唤法杖",
             HeroGear::WayfarerBoots => "全部武器",
             HeroGear::BloodstepGreaves => "夜刃匕首 / 战旗长剑 / 工匠战锤",
@@ -429,7 +449,10 @@ impl HeroGear {
             HeroGear::RiftIdol => matches!(weapon, HeroWeapon::SummonStaff | HeroWeapon::StormOrb),
             HeroGear::BrassCompass => matches!(
                 weapon,
-                HeroWeapon::ShadowBow | HeroWeapon::SentryCrossbow | HeroWeapon::ForgeHammer
+                HeroWeapon::ShadowBow
+                    | HeroWeapon::SentryCrossbow
+                    | HeroWeapon::NightDagger
+                    | HeroWeapon::ForgeHammer
             ),
             HeroGear::DragonheartCrown => matches!(
                 weapon,
@@ -1704,6 +1727,18 @@ pub fn gear_set_count(slots: &[Option<HeroGear>; HeroGearSlot::COUNT], set: Hero
     gear_set_counts(slots)[set.idx()]
 }
 
+/// Exactly one four-piece keystone can be active because the paperdoll has four
+/// slots. Hybrid 2+2 builds keep both stat bonuses but deliberately gain no
+/// keystone, preserving a clear focused-vs-flexible build choice.
+pub fn active_four_piece_set(
+    slots: &[Option<HeroGear>; HeroGearSlot::COUNT],
+) -> Option<HeroGearSet> {
+    let counts = gear_set_counts(slots);
+    HeroGearSet::ALL
+        .into_iter()
+        .find(|set| counts[set.idx()] >= HeroGearSlot::COUNT)
+}
+
 pub fn gear_set_stats(slots: &[Option<HeroGear>; HeroGearSlot::COUNT]) -> HeroGearStats {
     let counts = gear_set_counts(slots);
     let mut stats = HeroGearStats::default();
@@ -1850,7 +1885,15 @@ pub fn gear_set_summary(slots: &[Option<HeroGear>; HeroGearSlot::COUNT]) -> Opti
         .filter_map(|set| {
             let count = counts[set.idx()];
             (count >= 2).then(|| {
-                crate::i18n::tf("{}{}件", &[&crate::i18n::t(set.name()), &count.to_string()])
+                let core = if count >= HeroGearSlot::COUNT {
+                    crate::i18n::tf("【{}】", &[&crate::i18n::t(set.keystone_name())])
+                } else {
+                    String::new()
+                };
+                crate::i18n::tf(
+                    "{}{}件{}",
+                    &[&crate::i18n::t(set.name()), &count.to_string(), &core],
+                )
             })
         })
         .collect::<Vec<_>>();
@@ -1930,7 +1973,7 @@ pub fn weapon_resonance_route(weapon: HeroWeapon) -> (&'static str, &'static str
         ),
         HeroWeapon::NightDagger => (
             "夜刃背刺",
-            "提高移动、穿甲和爆发，鼓励绕后处理首领和高护甲怪。",
+            "提高移动、穿甲和爆发；背击毒影飞溅，兼顾首领与贴身怪群。",
         ),
         HeroWeapon::SummonStaff => (
             "异界眷属",
@@ -1981,9 +2024,11 @@ mod tests {
         assert_eq!(HeroGear::ALL.len(), 33);
         assert_eq!(HeroGearSlot::COUNT, 4);
         assert_eq!(HeroGearSlot::Boots.idx(), 3);
-        assert!(HeroGear::ALL
-            .iter()
-            .any(|item| item.def().slot == HeroGearSlot::Boots));
+        assert!(
+            HeroGear::ALL
+                .iter()
+                .any(|item| item.def().slot == HeroGearSlot::Boots)
+        );
     }
 
     #[test]
@@ -2108,12 +2153,16 @@ mod tests {
         let two_piece = weapon_affinity_stats(&slots, HeroWeapon::SummonStaff);
         assert_eq!(weapon_affinity_count(&slots, HeroWeapon::SummonStaff), 2);
         assert!(two_piece.damage_mult > 1.0);
-        assert!(weapon_resonance_summary(&slots, HeroWeapon::SummonStaff)
-            .unwrap()
-            .contains("初鸣"));
-        assert!(weapon_resonance_detail(&slots, HeroWeapon::SummonStaff)
-            .unwrap()
-            .contains("异界眷属"));
+        assert!(
+            weapon_resonance_summary(&slots, HeroWeapon::SummonStaff)
+                .unwrap()
+                .contains("初鸣")
+        );
+        assert!(
+            weapon_resonance_detail(&slots, HeroWeapon::SummonStaff)
+                .unwrap()
+                .contains("异界眷属")
+        );
 
         equip(&mut slots, HeroGear::RiftIdol);
         let three_piece = weapon_affinity_stats(&slots, HeroWeapon::SummonStaff);
@@ -2122,9 +2171,11 @@ mod tests {
 
         equip(&mut slots, HeroGear::SummonerGreaves);
         assert_eq!(weapon_affinity_count(&slots, HeroWeapon::SummonStaff), 4);
-        assert!(weapon_resonance_summary(&slots, HeroWeapon::SummonStaff)
-            .unwrap()
-            .contains("满鸣"));
+        assert!(
+            weapon_resonance_summary(&slots, HeroWeapon::SummonStaff)
+                .unwrap()
+                .contains("满鸣")
+        );
     }
 
     #[test]
@@ -2259,6 +2310,34 @@ mod tests {
         let summary = gear_set_summary(&slots).unwrap();
         assert!(summary.contains(HeroGearSet::Spellweave.name()));
         assert!(summary.contains(HeroGearSet::Covenant.name()));
+        assert_eq!(active_four_piece_set(&slots), None);
+    }
+
+    #[test]
+    fn four_matching_slots_unlock_exactly_one_keystone() {
+        let slots = [
+            Some(HeroGear::StarweaveRobe),
+            Some(HeroGear::EmberPrayer),
+            Some(HeroGear::MeteorCodex),
+            Some(HeroGear::StarpathSandals),
+        ];
+
+        assert_eq!(active_four_piece_set(&slots), Some(HeroGearSet::Spellweave));
+        let summary = gear_set_summary(&slots).unwrap();
+        assert!(summary.contains(HeroGearSet::Spellweave.keystone_name()));
+    }
+
+    #[test]
+    fn three_matching_pieces_do_not_unlock_keystone() {
+        let slots = [
+            Some(HeroGear::VowPlate),
+            Some(HeroGear::CitadelSeal),
+            Some(HeroGear::DragonheartCrown),
+            None,
+        ];
+
+        assert_eq!(gear_set_count(&slots, HeroGearSet::Vanguard), 3);
+        assert_eq!(active_four_piece_set(&slots), None);
     }
 
     #[test]

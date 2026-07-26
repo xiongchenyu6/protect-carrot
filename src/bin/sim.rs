@@ -26,18 +26,19 @@ use std::time::Duration;
 use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
+use bevy_sequential_actions::SequentialActionsPlugin;
 use bevy_spritesheet_animation::prelude::SpritesheetAnimationPlugin;
 
 use protect_carrot::{
-    audio, bestiary, build, components, data, enemy, equipment as equipment_inv, game, hero,
-    hero_gear, i18n, meta, roguelite, states, tower, ui, vfx, Levels,
+    Levels, audio, bestiary, build, components, data, enemy, equipment as equipment_inv, game,
+    hero, hero_gear, i18n, meta, roguelite, states, tower, ui, vfx,
 };
 
 use build::spawn_tower;
-use data::{cell_center, levels, Behavior, TowerKind, UpgradeMul, BOARD_H, BOARD_W, TILE_SIZE};
+use data::{BOARD_H, BOARD_W, Behavior, TILE_SIZE, TowerKind, UpgradeMul, cell_center, levels};
 use game::{
-    load_level, tick_auto_wave, tick_message, CurrentLevel, GameDifficulty, GameMode, Paused, Rng,
-    RunState,
+    CurrentLevel, EncounterRng, GameDifficulty, GameMode, Paused, Rng, RunState, load_level,
+    tick_auto_wave, tick_message,
 };
 use protect_carrot::board::Board;
 use tower::{Damage, Tower};
@@ -54,6 +55,8 @@ struct KindStat {
 struct Report {
     per_kind: HashMap<TowerKind, KindStat>,
     hero_damage: f64,
+    hero_skill_casts: u32,
+    hero_backstabs: u32,
 }
 
 #[derive(Resource, Default)]
@@ -65,6 +68,13 @@ struct OnlyKind(Option<TowerKind>);
 
 #[derive(Resource)]
 struct SimHeroEnabled(bool);
+
+#[derive(Default)]
+struct SimSkillTiming {
+    wave: i32,
+    ready_for: f32,
+    pending: bool,
+}
 
 fn sim_hero_enabled(enabled: Res<SimHeroEnabled>) -> bool {
     enabled.0
@@ -81,19 +91,101 @@ fn sim_no_hero() -> bool {
     )
 }
 
+/// Exercise the same active-skill path a player uses instead of estimating skill
+/// damage inside the harness. Skills fire once a useful local target density is
+/// present, with a short fallback delay so support and summon weapons still act.
+fn sim_auto_cast_hero_skill(
+    time: Res<Time>,
+    run: Res<RunState>,
+    loadout: Res<hero::HeroLoadout>,
+    towers: Query<(Entity, &Tower)>,
+    enemies: Query<(&components::Enemy, &Transform)>,
+    mut actions: MessageWriter<ui::UiActionActivated>,
+    mut report: ResMut<Report>,
+    mut timing: Local<SimSkillTiming>,
+) {
+    if timing.pending {
+        if loadout.skill_cd > 0 {
+            report.hero_skill_casts += 1;
+        }
+        timing.pending = false;
+    }
+    if timing.wave != run.wave {
+        timing.wave = run.wave;
+        timing.ready_for = 0.0;
+    }
+    if !run.wave_in_progress || loadout.skill_cd > 0 {
+        timing.ready_for = 0.0;
+        return;
+    }
+
+    let Some((hero_entity, hero)) = towers
+        .iter()
+        .find(|(_, tower)| tower.hero && tower.hp > 0.0)
+    else {
+        return;
+    };
+    let hero_pos = hero.center();
+    let (radius, desired_targets, max_wait, can_precast) = match loadout.weapon {
+        hero::HeroWeapon::BannerSword => (130.0, 3, 2.0, false),
+        hero::HeroWeapon::StarfireStaff => (250.0, 4, 1.3, false),
+        hero::HeroWeapon::ShadowBow => (280.0, 2, 1.4, false),
+        hero::HeroWeapon::OathShield => (180.0, 1, 0.9, false),
+        hero::HeroWeapon::StormOrb => (260.0, 4, 0.9, false),
+        hero::HeroWeapon::SentryCrossbow => (260.0, 3, 0.8, false),
+        // Death Mark is global and can mark six targets in the benchmark build.
+        // Waiting for a pack avoids spending the wave's only cast on the opener.
+        hero::HeroWeapon::NightDagger => (f32::INFINITY, 5, 1.8, false),
+        hero::HeroWeapon::SummonStaff => (300.0, 0, 0.3, true),
+        hero::HeroWeapon::ForgeHammer => (170.0, 2, 0.9, false),
+    };
+    let mut nearby = 0usize;
+    let mut boss_in_reach = false;
+    let mut any_enemy = false;
+    for (enemy, tf) in &enemies {
+        if enemy.hp <= 0.0 {
+            continue;
+        }
+        any_enemy = true;
+        if tf.translation.truncate().distance(hero_pos) <= radius {
+            nearby += 1;
+            boss_in_reach |= enemy.boss;
+        }
+    }
+    timing.ready_for += time.delta_secs() * run.game_speed;
+    if !any_enemy && (!can_precast || timing.ready_for < max_wait) {
+        return;
+    }
+    if any_enemy && nearby < desired_targets && !boss_in_reach && timing.ready_for < max_wait {
+        return;
+    }
+    timing.ready_for = 0.0;
+    timing.pending = true;
+    actions.write(ui::UiActionActivated {
+        entity: hero_entity,
+        action: ui::UiAction::HeroSkill,
+    });
+}
+
 /// Headless equivalent of a basic player right-clicking the hero toward the
 /// current frontline. This keeps balance runs honest: the real game has a free
 /// hero, but a stationary headless hero becomes an artificial permanent wall.
 fn sim_hero_ai(
     time: Res<Time>,
     run: Res<RunState>,
+    board: Res<Board>,
     loadout: Res<hero::HeroLoadout>,
     enemies: Query<(&components::Enemy, &Transform)>,
     mut towers: ParamSet<(Query<&mut Tower>, Query<&Tower>)>,
     mut acc: Local<f32>,
 ) {
     *acc += time.delta_secs() * run.game_speed;
-    if *acc < 0.22 {
+    let decision_interval = if loadout.weapon == hero::HeroWeapon::NightDagger {
+        0.06
+    } else {
+        0.22
+    };
+    if *acc < decision_interval {
         return;
     }
     *acc = 0.0;
@@ -105,25 +197,111 @@ fn sim_hero_ai(
             | hero::HeroWeapon::SentryCrossbow
             | hero::HeroWeapon::SummonStaff
     );
-    let support_anchor = support_weapon
-        .then(|| {
-            towers
-                .p1()
-                .iter()
-                .filter(|tower| !tower.hero && tower.hp > 0.0)
-                .max_by(|a, b| {
-                    let dps_a = a.damage / a.cooldown.max(0.05) * behavior_mult(a.behavior) as f32;
-                    let dps_b = b.damage / b.cooldown.max(0.05) * behavior_mult(b.behavior) as f32;
-                    dps_a.total_cmp(&dps_b)
-                })
-                .map(Tower::center)
-        })
-        .flatten();
-    let coverage: Vec<(Vec2, f32)> = towers
+    let hero_aura = towers
         .p1()
         .iter()
-        .filter(|t| !t.hero && t.hp > 0.0)
-        .map(|t| (t.center(), t.range * 0.92))
+        .find(|tower| tower.hero && tower.hp > 0.0)
+        .map(|tower| tower.buff_range)
+        .unwrap_or(TILE_SIZE * 3.0)
+        .max(TILE_SIZE * 2.0);
+    let field: Vec<(Vec2, f32, f32)> = towers
+        .p1()
+        .iter()
+        .filter(|tower| !tower.hero && tower.hp > 0.0)
+        .map(|tower| {
+            let dps =
+                tower.damage / tower.cooldown.max(0.05) * behavior_mult(tower.behavior) as f32;
+            (tower.center(), tower.range * 0.92, dps)
+        })
+        .collect();
+    let active_enemies = enemies
+        .iter()
+        .filter(|(enemy, _)| enemy.hp > 0.0)
+        .map(|(_, tf)| tf.translation.truncate())
+        .collect::<Vec<_>>();
+    let hold_line = matches!(
+        loadout.weapon,
+        hero::HeroWeapon::BannerSword
+            | hero::HeroWeapon::OathShield
+            | hero::HeroWeapon::ForgeHammer
+    );
+    let path_len = board.path_world.len();
+    let killbox_anchor = board
+        .path_world
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index > 0 && index.saturating_add(1) < path_len)
+        .max_by(|(ai, a), (bi, b)| {
+            let score = |index: usize, point: Vec2| {
+                let covering = field
+                    .iter()
+                    .filter(|(center, range, _)| center.distance(point) <= *range)
+                    .map(|(_, _, dps)| *dps)
+                    .sum::<f32>();
+                let commanded = field
+                    .iter()
+                    .filter(|(center, _, _)| center.distance(point) <= hero_aura)
+                    .map(|(_, _, dps)| *dps)
+                    .sum::<f32>();
+                let depth = index as f32 / path_len.max(1) as f32;
+                covering + commanded * 0.8 + depth * 0.001
+            };
+            score(*ai, **a).total_cmp(&score(*bi, **b))
+        })
+        .map(|(index, point)| (index, *point));
+    let assassin_anchor = board
+        .path_world
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| {
+            let lower = (path_len / 4).max(1);
+            let upper = (path_len * 3 / 4).min(path_len.saturating_sub(2));
+            *index >= lower && *index <= upper
+        })
+        .max_by(|(_, a), (_, b)| {
+            let score = |point: Vec2| {
+                field
+                    .iter()
+                    .filter(|(center, range, _)| center.distance(point) <= *range)
+                    .map(|(_, _, dps)| *dps)
+                    .sum::<f32>()
+            };
+            score(**a).total_cmp(&score(**b))
+        })
+        .map(|(index, point)| (index, *point));
+    let hold_anchor = hold_line
+        .then(|| killbox_anchor.map(|(_, point)| point))
+        .flatten();
+    let support_anchor = support_weapon
+        .then(|| {
+            field
+                .iter()
+                .max_by(|(a, _, _), (b, _, _)| {
+                    let score = |candidate: Vec2| {
+                        field
+                            .iter()
+                            .filter(|(center, _, _)| center.distance(candidate) <= hero_aura)
+                            .map(|(center, range, dps)| {
+                                let active = active_enemies
+                                    .iter()
+                                    .any(|enemy| center.distance(*enemy) <= *range);
+                                let relevance = if active_enemies.is_empty() || active {
+                                    1.0
+                                } else {
+                                    0.08
+                                };
+                                *dps * relevance
+                            })
+                            .sum::<f32>()
+                    };
+                    score(*a).total_cmp(&score(*b))
+                })
+                .map(|(center, _, _)| *center)
+        })
+        .flatten();
+    let coverage: Vec<(Vec2, f32)> = field
+        .iter()
+        .map(|(center, range, _)| (*center, *range))
         .collect();
     let covered = |pos: Vec2| {
         coverage.is_empty()
@@ -131,14 +309,40 @@ fn sim_hero_ai(
                 .iter()
                 .any(|(center, r)| center.distance(pos) <= *r)
     };
-    let target_enemy = enemies
-        .iter()
-        .filter(|(e, tf)| e.hp > 0.0 && covered(tf.translation.truncate()))
-        .max_by(|(a, atf), (b, btf)| {
-            let ap = atf.translation.truncate();
-            let bp = btf.translation.truncate();
-            (a.path_index, (ap.x + ap.y) as i32).cmp(&(b.path_index, (bp.x + bp.y) as i32))
-        });
+    let target_enemy = if loadout.weapon == hero::HeroWeapon::NightDagger {
+        assassin_anchor.and_then(|(_, anchor)| {
+            enemies
+                .iter()
+                .filter(|(enemy, tf)| {
+                    enemy.hp > 0.0
+                        && covered(tf.translation.truncate())
+                        && tf.translation.truncate().distance(anchor) <= TILE_SIZE * 4.5
+                })
+                .max_by(|(a, atf), (b, btf)| {
+                    let score = |enemy: &components::Enemy, pos: Vec2| {
+                        let threat = if enemy.boss {
+                            2_000_000.0
+                        } else if enemy.elite {
+                            700_000.0
+                        } else {
+                            0.0
+                        };
+                        threat + enemy.max_hp * 0.5 - pos.distance(anchor) * 40.0
+                    };
+                    score(a, atf.translation.truncate())
+                        .total_cmp(&score(b, btf.translation.truncate()))
+                })
+        })
+    } else {
+        enemies
+            .iter()
+            .filter(|(e, tf)| e.hp > 0.0 && covered(tf.translation.truncate()))
+            .max_by(|(a, atf), (b, btf)| {
+                let ap = atf.translation.truncate();
+                let bp = btf.translation.truncate();
+                (a.path_index, (ap.x + ap.y) as i32).cmp(&(b.path_index, (bp.x + bp.y) as i32))
+            })
+    };
     let fallback = coverage.first().map(|(center, _)| *center);
 
     let mut heroes = towers.p0();
@@ -146,11 +350,28 @@ fn sim_hero_ai(
         return;
     };
     let hero_pos = hero.center();
+    if let Some(anchor) = hold_anchor {
+        hero.move_target = Some(anchor);
+        return;
+    }
     if let Some(anchor) = support_anchor {
         hero.move_target = Some(anchor);
         return;
     }
     let Some((enemy, tf)) = target_enemy else {
+        if loadout.weapon == hero::HeroWeapon::NightDagger {
+            if let Some((index, anchor)) = assassin_anchor {
+                let facing = board
+                    .path_world
+                    .get(index.saturating_add(1))
+                    .map(|next| (*next - anchor).normalize_or_zero())
+                    .filter(|dir| dir.length_squared() > 0.01)
+                    .unwrap_or(Vec2::X);
+                let reach = (hero.range * 0.78).clamp(TILE_SIZE * 0.42, TILE_SIZE * 0.68);
+                hero.move_target = Some(anchor - facing * reach);
+                return;
+            }
+        }
         if let Some(target) = fallback {
             hero.move_target = Some(target);
         }
@@ -158,24 +379,28 @@ fn sim_hero_ai(
     };
 
     let enemy_pos = tf.translation.truncate();
-    let facing = if enemy.facing.length_squared() > 0.01 {
-        enemy.facing.normalize()
-    } else {
-        Vec2::X
-    };
-    let line_holder = matches!(
-        loadout.weapon,
-        hero::HeroWeapon::BannerSword
-            | hero::HeroWeapon::OathShield
-            | hero::HeroWeapon::ForgeHammer
-    );
-    let target = if line_holder {
+    let facing = board
+        .path_world
+        .get(enemy.path_index.saturating_add(1))
+        .or_else(|| board.path_world.last())
+        .map(|next| (*next - enemy_pos).normalize_or_zero())
+        .filter(|dir| dir.length_squared() > 0.01)
+        .unwrap_or_else(|| {
+            if enemy.facing.length_squared() > 0.01 {
+                enemy.facing.normalize()
+            } else {
+                Vec2::X
+            }
+        });
+    let target = if hold_line {
         // Aim a little behind the enemy so melee heroes intercept the frontline.
         enemy_pos - facing * (TILE_SIZE * 0.35)
     } else if loadout.weapon == hero::HeroWeapon::NightDagger {
-        // Stay just outside the enemy engage radius while following its back.
-        // This lets the dagger exercise its actual backstab identity.
-        enemy_pos - facing * (TILE_SIZE * 0.98)
+        // Stay inside dagger reach on the path-facing rear arc. The gameplay
+        // backstab rule suppresses frontal retaliation only while this flank is
+        // maintained, so the faster steering cadence is part of competent play.
+        let backstab_reach = (hero.range * 0.78).clamp(TILE_SIZE * 0.42, TILE_SIZE * 0.68);
+        enemy_pos - facing * backstab_reach
     } else {
         // Ranged weapons should flank the path rather than accidentally becoming
         // melee blockers and compressing a wave into a single leaking pack.
@@ -227,6 +452,16 @@ fn collect_damage(towers: Query<&Tower>, mut report: ResMut<Report>) {
     // cumulative value observed while it existed so weak/suicidal builds do not
     // misleadingly report zero contribution.
     report.hero_damage = report.hero_damage.max(living_hero_damage);
+}
+
+fn collect_combat_vfx(mut events: MessageReader<vfx::VfxEvent>, mut report: ResMut<Report>) {
+    for event in events.read() {
+        if let vfx::VfxEvent::Text { text, .. } = event {
+            if text.contains("背击") || text.contains("Backstab") {
+                report.hero_backstabs += 1;
+            }
+        }
+    }
 }
 
 fn count_enemies(q: Query<(), With<components::Enemy>>, mut c: ResMut<EnemyCount>) {
@@ -637,6 +872,8 @@ fn auto_pick_roguelite(
 struct SimResult {
     per_kind: HashMap<TowerKind, KindStat>,
     hero_damage: f64,
+    hero_skill_casts: u32,
+    hero_backstabs: u32,
     outcome: &'static str,
     wave: i32,
     total_waves: i32,
@@ -779,76 +1016,102 @@ fn gear_slots(
     relic: hero_gear::HeroGear,
     boots: hero_gear::HeroGear,
 ) -> [Option<hero_gear::HeroGear>; hero_gear::HeroGearSlot::COUNT] {
-    [Some(armor), Some(charm), Some(relic), Some(boots)]
+    let items = [
+        (hero_gear::HeroGearSlot::Armor, armor),
+        (hero_gear::HeroGearSlot::Charm, charm),
+        (hero_gear::HeroGearSlot::Relic, relic),
+        (hero_gear::HeroGearSlot::Boots, boots),
+    ];
+    let mut slots = hero_gear::empty_gear();
+    for (expected, item) in items {
+        assert_eq!(
+            item.def().slot,
+            expected,
+            "invalid sim build: {} belongs in {}, not {}",
+            item.def().name,
+            item.def().slot.name(),
+            expected.name()
+        );
+        hero_gear::equip(&mut slots, item);
+    }
+    slots
 }
 
-fn hero_build_profiles() -> [HeroScenario; 10] {
+fn benchmark_hero_level(level_index: usize) -> u8 {
+    let last = levels().len().saturating_sub(1).max(1);
+    let progress = level_index.min(last) as f32 / last as f32;
+    (1.0 + progress * (hero::HeroLoadout::MAX_LEVEL - 1) as f32)
+        .round()
+        .clamp(1.0, hero::HeroLoadout::MAX_LEVEL as f32) as u8
+}
+
+fn hero_build_profiles(build_level: u8) -> [HeroScenario; 10] {
     use hero::HeroWeapon::*;
     use hero_gear::HeroGear::*;
-    const BUILD_LEVEL: u8 = 18;
+    let build_level = build_level.clamp(1, hero::HeroLoadout::MAX_LEVEL);
     [
         HeroScenario::Baseline,
         HeroScenario::Build {
             label: "banner-blood",
             race: hero::Race::Human,
             weapon: BannerSword,
-            level: BUILD_LEVEL,
+            level: build_level,
             gear: gear_slots(WarflagTabard, BloodBanner, DragonheartCrown, WayfarerBoots),
         },
         HeroScenario::Build {
             label: "starfire-burst",
             race: hero::Race::Elf,
             weapon: StarfireStaff,
-            level: BUILD_LEVEL,
+            level: build_level,
             gear: gear_slots(StarweaveRobe, EmberPrayer, MeteorCodex, StarpathSandals),
         },
         HeroScenario::Build {
             label: "shadow-bounty",
             race: hero::Race::Elf,
             weapon: ShadowBow,
-            level: BUILD_LEVEL,
+            level: build_level,
             gear: gear_slots(WindrunnerCloak, BountyQuiver, BrassCompass, CarrotWings),
         },
         HeroScenario::Build {
             label: "oath-bulwark",
             race: hero::Race::Human,
             weapon: OathShield,
-            level: BUILD_LEVEL,
-            gear: gear_slots(VowPlate, CitadelSeal, ForgeGauntlet, EngineerTreads),
+            level: build_level,
+            gear: gear_slots(VowPlate, CitadelSeal, DragonheartCrown, WayfarerBoots),
         },
         HeroScenario::Build {
             label: "storm-matrix",
             race: hero::Race::Elf,
             weapon: StormOrb,
-            level: BUILD_LEVEL,
+            level: build_level,
             gear: gear_slots(MoonthreadVest, ThunderCharm, TempestCore, StarpathSandals),
         },
         HeroScenario::Build {
             label: "sentry-array",
             race: hero::Race::Human,
             weapon: SentryCrossbow,
-            level: BUILD_LEVEL,
+            level: build_level,
             gear: gear_slots(WindrunnerCloak, BountyQuiver, SentryScope, CarrotWings),
         },
         HeroScenario::Build {
             label: "night-backstab",
             race: hero::Race::Orc,
             weapon: NightDagger,
-            level: BUILD_LEVEL,
-            gear: gear_slots(AssassinWraps, NightMask, NullMantle, BloodstepGreaves),
+            level: build_level,
+            gear: gear_slots(AssassinWraps, NightMask, BrassCompass, BloodstepGreaves),
         },
         HeroScenario::Build {
             label: "summon-pact",
             race: hero::Race::Elf,
             weapon: SummonStaff,
-            level: BUILD_LEVEL,
-            gear: gear_slots(StarweaveRobe, MythcallerTotem, RiftIdol, SummonerGreaves),
+            level: build_level,
+            gear: gear_slots(NullMantle, MythcallerTotem, RiftIdol, SummonerGreaves),
         },
         HeroScenario::Build {
             label: "forge-workshop",
             race: hero::Race::Orc,
             weapon: ForgeHammer,
-            level: BUILD_LEVEL,
+            level: build_level,
             gear: gear_slots(
                 WildhideHarness,
                 ClockworkBadge,
@@ -884,6 +1147,7 @@ fn run_sim_with_hero(
         meta_check: bevy::asset::AssetMetaCheck::Never,
         ..default()
     });
+    app.add_plugins(SequentialActionsPlugin);
     app.add_plugins(SpritesheetAnimationPlugin);
     app.init_asset::<Image>()
         .init_asset::<bevy::audio::AudioSource>()
@@ -901,6 +1165,7 @@ fn run_sim_with_hero(
     app.insert_resource(Levels(levels()))
         .insert_resource(CurrentLevel(level))
         .insert_resource(Rng(seed))
+        .insert_resource(EncounterRng::seeded(seed))
         .insert_resource(OnlyKind(only))
         .insert_resource(SimHeroEnabled(field_hero_enabled))
         .insert_resource(protect_carrot::lighting::LightingSettings::load())
@@ -909,6 +1174,7 @@ fn run_sim_with_hero(
         .init_resource::<GameDifficulty>()
         .init_resource::<tower::Snapshot>()
         .insert_resource(hero_profile.loadout())
+        .init_resource::<hero_gear::HeroGearInventory>()
         .init_resource::<meta::Talents>()
         .init_resource::<meta::Abilities>()
         .init_resource::<protect_carrot::roguelite::RogueliteRun>()
@@ -936,7 +1202,8 @@ fn run_sim_with_hero(
         .add_message::<tower::HealCarrot>()
         .add_message::<vfx::VfxEvent>()
         .add_message::<audio::SfxEvent>()
-        .add_message::<tower::EnemyDied>();
+        .add_message::<tower::EnemyDied>()
+        .add_message::<ui::UiActionActivated>();
 
     let assets = app.world().resource::<AssetServer>().clone();
     app.insert_resource(protect_carrot::sprites::build_sprites(&assets));
@@ -955,12 +1222,15 @@ fn run_sim_with_hero(
             (
                 sim_hero_ai.run_if(sim_hero_enabled),
                 build::hero_move.run_if(sim_hero_enabled),
+                sim_auto_cast_hero_skill.run_if(sim_hero_enabled),
+                ui::hero_buttons.run_if(sim_hero_enabled),
                 tower::build_snapshot,
                 hero::hero_doctrine,
                 tower::update_towers,
                 tower::update_projectiles,
                 tower::update_shot_fx,
                 tower::update_summons,
+                tower::tick_attack_actions,
                 tower::apply_buffs,
                 tower::apply_heal,
                 tower::apply_status,
@@ -995,6 +1265,7 @@ fn run_sim_with_hero(
             tower::compute_synergy,
             count_enemies,
             collect_damage,
+            collect_combat_vfx,
         ),
     );
     if greedy {
@@ -1111,8 +1382,8 @@ fn run_sim_with_hero(
             .map(|tower| {
                 let pos = tower.center();
                 format!(
-                    "alive hp={:.0}/{:.0} pos=({:.0},{:.0})",
-                    tower.hp, tower.max_hp, pos.x, pos.y
+                    "alive hp={:.0}/{:.0} dmg={:.0} range={:.0} cd={:.2} pos=({:.0},{:.0})",
+                    tower.hp, tower.max_hp, tower.damage, tower.range, tower.cooldown, pos.x, pos.y
                 )
             })
             .unwrap_or_else(|| "dead".to_string())
@@ -1127,6 +1398,8 @@ fn run_sim_with_hero(
     SimResult {
         per_kind: report.per_kind.clone(),
         hero_damage: report.hero_damage,
+        hero_skill_casts: report.hero_skill_casts,
+        hero_backstabs: report.hero_backstabs,
         outcome,
         wave: run.wave,
         total_waves: run.total_waves,
@@ -1144,13 +1417,14 @@ fn run_sim_with_hero(
 }
 
 /// Run the greedy player over `n` seeds of a level. Returns
-/// (wins, timeouts, avg_waves, avg_lives, total_waves, avg hero damage, tower-usage).
+/// (wins, timeouts, avg_waves, avg_lives, total_waves, avg hero damage,
+/// avg skill casts, tower-usage).
 fn greedy_winrate(
     level: usize,
     base_seed: u64,
     n: u64,
     econ: Option<(i32, f32)>,
-) -> (u32, u32, f32, f32, i32, f64, HashMap<TowerKind, u64>) {
+) -> (u32, u32, f32, f32, i32, f64, f32, HashMap<TowerKind, u64>) {
     greedy_winrate_with_hero(level, base_seed, n, econ, HeroScenario::from_env())
 }
 
@@ -1160,13 +1434,14 @@ fn greedy_winrate_with_hero(
     n: u64,
     econ: Option<(i32, f32)>,
     hero_profile: HeroScenario,
-) -> (u32, u32, f32, f32, i32, f64, HashMap<TowerKind, u64>) {
+) -> (u32, u32, f32, f32, i32, f64, f32, HashMap<TowerKind, u64>) {
     let mut wins = 0u32;
     let mut timeouts = 0u32;
     let mut waves = 0i64;
     let mut lives = 0i64;
     let mut total_waves = 0i32;
     let mut hero_damage = 0.0;
+    let mut hero_skill_casts = 0u64;
     let mut usage: HashMap<TowerKind, u64> = HashMap::new();
     for s in 0..n {
         let r = run_sim_with_hero(
@@ -1178,7 +1453,7 @@ fn greedy_winrate_with_hero(
         );
         if n == 1 && r.outcome != "VICTORY" {
             eprintln!(
-                "[sim/build-debug] {} outcome={} wave={}/{} lives={} gold={} enemies={} spawned={}/{} frames={} active={} draft={} hero={} front={}",
+                "[sim/build-debug] {} outcome={} wave={}/{} lives={} gold={} enemies={} spawned={}/{} frames={} active={} draft={} skills={} backstabs={} hero={} front={}",
                 hero_profile.label(),
                 r.outcome,
                 r.wave,
@@ -1191,6 +1466,8 @@ fn greedy_winrate_with_hero(
                 r.frames,
                 r.wave_in_progress,
                 r.draft_waiting,
+                r.hero_skill_casts,
+                r.hero_backstabs,
                 r.hero_debug,
                 r.enemy_debug,
             );
@@ -1205,6 +1482,7 @@ fn greedy_winrate_with_hero(
         lives += r.lives.max(0) as i64;
         total_waves = r.total_waves;
         hero_damage += r.hero_damage;
+        hero_skill_casts += r.hero_skill_casts as u64;
         for (k, st) in &r.per_kind {
             *usage.entry(*k).or_default() += st.count as u64;
         }
@@ -1216,6 +1494,7 @@ fn greedy_winrate_with_hero(
         lives as f32 / n as f32,
         total_waves,
         hero_damage / n as f64,
+        hero_skill_casts as f32 / n as f32,
         usage,
     )
 }
@@ -1416,21 +1695,23 @@ fn main() {
                 "[sim] WIN-RATE — greedy player, level {} ({}), {} seeds...",
                 level, level_name, n
             );
-            let (wins, timeouts, aw, al, tw, _, usage) = greedy_winrate(level, seed, n, None);
+            let (wins, timeouts, aw, al, tw, _, skill_casts, usage) =
+                greedy_winrate(level, seed, n, None);
             let mut us: Vec<(TowerKind, u64)> = usage.into_iter().filter(|(_, c)| *c > 0).collect();
             us.sort_by(|a, b| b.1.cmp(&a.1));
             println!(
                 "\n============== GREEDY WIN-RATE (level {level}: {level_name}) =============="
             );
             println!(
-                "win-rate {}/{} = {:.0}%   timeouts {}   avg waves {:.1}/{}   avg lives {:.1}",
+                "win-rate {}/{} = {:.0}%   timeouts {}   avg waves {:.1}/{}   avg lives {:.1}   avg skills {:.1}",
                 wins,
                 n,
                 wins as f32 / n as f32 * 100.0,
                 timeouts,
                 aw,
                 tw,
-                al
+                al,
+                skill_casts
             );
             println!("\ngreedy tower picks (total built across {n} runs):");
             for (k, c) in &us {
@@ -1442,9 +1723,10 @@ fn main() {
         "builds" => {
             let n: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(8);
             let filter = args.next();
+            let build_level = benchmark_hero_level(level);
             eprintln!(
-                "[sim] HERO BUILDS — level {} ({}), {} seeds/profile...",
-                level, level_name, n
+                "[sim] HERO BUILDS — level {} ({}), hero Lv{}, {} seeds/profile...",
+                level, level_name, build_level, n
             );
             if let Some(filter) = filter.as_deref() {
                 eprintln!("[sim] filtering profile: {filter}");
@@ -1453,7 +1735,7 @@ fn main() {
                 "\n============== HERO BUILD SWEEP (level {level}: {level_name}) =============="
             );
             println!(
-                "{:<17} {:<10} {:>6}  {:>11}  {:>9}  {:>6}  {:>10}  {:>6}  {}",
+                "{:<17} {:<10} {:>6}  {:>11}  {:>9}  {:>6}  {:>10}  {:>6}  {:>6}  {}",
                 "profile",
                 "weapon",
                 "win%",
@@ -1461,18 +1743,19 @@ fn main() {
                 "avg lives",
                 "power",
                 "hero dmg",
+                "skills",
                 "towers",
                 "resonance / set"
             );
             println!("{}", "-".repeat(104));
-            for profile in hero_build_profiles() {
+            for profile in hero_build_profiles(build_level) {
                 if filter
                     .as_deref()
                     .is_some_and(|wanted| wanted != profile.label())
                 {
                     continue;
                 }
-                let (wins, timeouts, aw, al, tw, hero_damage, usage) =
+                let (wins, timeouts, aw, al, tw, hero_damage, skill_casts, usage) =
                     greedy_winrate_with_hero(level, seed, n, None, profile);
                 let weapon = profile.weapon();
                 let gear = profile.gear();
@@ -1483,7 +1766,7 @@ fn main() {
                     .unwrap_or_else(|| "无".to_string());
                 let gear_set = hero_gear::gear_set_summary(&gear).unwrap_or_default();
                 println!(
-                    "{:<17} {:<10} {:>5.0}%  {:>6.1}/{:<4}  {:>9.1}  {:>5.2}  {:>10.0}  {:>6.1}  {}{}{}",
+                    "{:<17} {:<10} {:>5.0}%  {:>6.1}/{:<4}  {:>9.1}  {:>5.2}  {:>10.0}  {:>6.1}  {:>6.1}  {}{}{}",
                     profile.label(),
                     i18n::t(weapon.name()),
                     wins as f32 / n as f32 * 100.0,
@@ -1492,6 +1775,7 @@ fn main() {
                     al,
                     power,
                     hero_damage,
+                    skill_casts,
                     average_towers,
                     resonance.trim(),
                     gear_set,
@@ -1505,7 +1789,8 @@ fn main() {
             }
             println!("{}", "=".repeat(104));
             println!(
-                "(builds = Lv18 + rank-3 weapon talents + four matching hero gear pieces; greedy towers still play normally.)\n"
+                "(builds = campaign-expected Lv{} + rank-3 weapon talents + four matching hero gear pieces; greedy towers still play normally.)\n",
+                build_level
             );
         }
         "all" => {
@@ -1520,7 +1805,7 @@ fn main() {
             println!("{}", "-".repeat(56));
             for lvl in 0..count {
                 let name = i18n::t(levels()[lvl].name);
-                let (wins, timeouts, aw, al, tw, _, _) = greedy_winrate(lvl, seed, n, None);
+                let (wins, timeouts, aw, al, tw, _, _, _) = greedy_winrate(lvl, seed, n, None);
                 let winpct = wins as f32 / n as f32 * 100.0;
                 println!(
                     "{:>3}  {:<18} {:>5.0}%  {:>6.1}/{:<4}  {:>9.1}  {:>4}",
@@ -1567,8 +1852,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn campaign_build_benchmark_reaches_expected_progression_levels() {
+        assert_eq!(benchmark_hero_level(0), 1);
+        assert_eq!(benchmark_hero_level(59), 18);
+        assert_eq!(benchmark_hero_level(79), 24);
+        assert_eq!(benchmark_hero_level(99), hero::HeroLoadout::MAX_LEVEL);
+    }
+
+    #[test]
     fn hero_build_profiles_have_weapon_resonance() {
-        let profiles = hero_build_profiles();
+        let profiles = hero_build_profiles(18);
         assert_eq!(profiles.len(), 10);
         let mut labels = std::collections::HashSet::new();
         for profile in profiles {
@@ -1579,13 +1872,18 @@ mod tests {
             let weapon = profile.weapon();
             let gear = profile.gear();
             assert!(
-                hero_gear::weapon_affinity_count(&gear, weapon) >= 3,
-                "{} should activate at least a 3-piece weapon resonance",
+                hero_gear::weapon_affinity_count(&gear, weapon) == 4,
+                "{} should activate a full 4-piece weapon resonance",
                 profile.label()
             );
             assert!(
                 hero_gear::weapon_resonance_summary(&gear, weapon).is_some(),
                 "{} should have a resonance summary",
+                profile.label()
+            );
+            assert!(
+                hero_gear::active_four_piece_set(&gear).is_some(),
+                "{} should exercise a four-piece keystone",
                 profile.label()
             );
         }

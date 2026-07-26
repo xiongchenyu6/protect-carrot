@@ -12,12 +12,12 @@
 use crate::board::Board;
 use crate::components::{Enemy, FogHidden, LevelEntity, Particle, SummonHpBarFg};
 use crate::data::{
-    cell_center, Behavior, Category, Element, TowerDef, TowerKind, MOSS_TOWER_SENSE, TILE_SIZE,
-    TOWER_RAIDER_ENGAGE, TOWER_RAIDER_SENSE,
+    Behavior, Category, Element, MOSS_TOWER_SENSE, TILE_SIZE, TOWER_RAIDER_ENGAGE,
+    TOWER_RAIDER_SENSE, TowerDef, TowerKind, cell_center,
 };
 use crate::equipment::{
-    equipment_set_bonus, return_equipment_to_inventory, Equipment, EquipmentInventory,
-    EquipmentVisual, Rarity,
+    Equipment, EquipmentInventory, EquipmentVisual, Rarity, equipment_set_bonus,
+    return_equipment_to_inventory,
 };
 use crate::game::RunState;
 use crate::hero::HeroWeapon;
@@ -33,8 +33,10 @@ use std::collections::{HashMap, HashSet};
 pub const HERO_MELEE_ATTACK_TIME: f32 = 0.28;
 const HERO_MELEE_ATTACK_RANGE_CAP: f32 = 92.0;
 const TOWER_SUMMON_VISUAL_SCALE: f32 = 0.70;
+const SUPPORT_BUFF_STEP: f32 = 0.02;
+const SUPPORT_BUFF_CAP: f32 = 0.40;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TargetPriority {
     Nearest,
     Front,
@@ -106,6 +108,10 @@ pub struct Tower {
     pub kills: i32,
     /// Current adjacency synergy bonus fraction (0.0 = none), for the HUD.
     pub synergy: f32,
+    /// Persistent support-skill buildup for this battle. Each `BuffTower` adds a
+    /// small linear step up to a hard cap, avoiding exponential `base_damage`
+    /// growth from heal towers and repeated hero skills.
+    pub battle_focus: f32,
     /// Transient per-frame buffs projected by a nearby hero's doctrine aura
     /// (see `hero::hero_doctrine`). `aura_damage` folds into the `compute_synergy`
     /// damage formula; `aura_haste` speeds the cooldown tick. Reset to 0 each frame
@@ -187,6 +193,7 @@ impl Tower {
             damage_done: 0.0,
             kills: 0,
             synergy: 0.0,
+            battle_focus: 0.0,
             aura_damage: 0.0,
             aura_haste: 0.0,
             aura_range: 0.0,
@@ -691,6 +698,28 @@ fn effective_attack_range(tower: &Tower) -> f32 {
     }
 }
 
+fn path_forward(path: &[Vec2], path_index: usize, pos: Vec2, fallback: Vec2) -> Vec2 {
+    path.get(path_index.saturating_add(1))
+        .or_else(|| path.last())
+        .map(|next| (*next - pos).normalize_or_zero())
+        .filter(|dir| dir.length_squared() > 0.01)
+        .or_else(|| (fallback.length_squared() > 0.01).then(|| fallback.normalize()))
+        .unwrap_or(Vec2::X)
+}
+
+fn is_path_backstab(
+    path: &[Vec2],
+    path_index: usize,
+    enemy_pos: Vec2,
+    attacker_pos: Vec2,
+    fallback_facing: Vec2,
+) -> bool {
+    let to_attacker = attacker_pos - enemy_pos;
+    to_attacker.length_squared() > 1.0
+        && path_forward(path, path_index, enemy_pos, fallback_facing).dot(to_attacker.normalize())
+            < -0.2
+}
+
 fn hero_shot_style(tower: &Tower) -> Option<HeroShotStyle> {
     if !tower.hero || is_close_combat_hero(tower) {
         return None;
@@ -865,6 +894,17 @@ struct QueuedHeroSingleImpact {
     vfx: HeroMeleeVfx,
     statuses: Vec<StatusKind>,
     text: Option<QueuedHitText>,
+    splash: Option<QueuedHeroSplash>,
+}
+
+struct QueuedHeroSplash {
+    targets: Vec<Entity>,
+    amount: f32,
+    element: Element,
+    armor_pierce: f32,
+    radius: f32,
+    color: Color,
+    statuses: Vec<StatusKind>,
 }
 
 impl QueuedHeroSingleImpact {
@@ -912,6 +952,33 @@ impl QueuedHeroSingleImpact {
                 target: self.target,
                 kind: *kind,
             });
+        }
+        if let Some(splash) = &self.splash {
+            world.write_message(crate::vfx::VfxEvent::MeleeCleave {
+                pos: target_pos,
+                radius: splash.radius,
+                color: splash.color,
+            });
+            for target in &splash.targets {
+                if world.get::<Enemy>(*target).is_none() {
+                    continue;
+                }
+                world.write_message(Damage {
+                    source_tower: Some(self.source_tower),
+                    target: *target,
+                    amount: splash.amount,
+                    magic: self.magic,
+                    element: splash.element,
+                    armor_pierce: splash.armor_pierce,
+                });
+                for kind in &splash.statuses {
+                    world.write_message(Status {
+                        source_tower: Some(self.source_tower),
+                        target: *target,
+                        kind: *kind,
+                    });
+                }
+            }
         }
     }
 }
@@ -1693,18 +1760,20 @@ pub fn update_towers(
             && matches!(tower.behavior, Behavior::Single | Behavior::Poison)
         {
             // 背击 (backstab): the night dagger (toxic melee hero) deals bonus damage when
-            // striking an enemy from behind its facing — strongest against bosses, who
-            // walk in a straight line, so it rewards repositioning the hero. This is the
-            // night dagger's signature anti-boss play.
+            // striking from behind the enemy's path direction. Combat may turn the
+            // sprite toward a blocker, but that must not invalidate a real flank.
             let mut amount = tower.damage;
             let mut hit_text = None;
+            let mut backstab = false;
             if tower.element == Element::Toxic {
-                let to_attacker = c - target.pos;
-                // Hero is behind when the enemy faces away from it.
-                if to_attacker.length_squared() > 1.0
-                    && target.facing.length_squared() > 0.01
-                    && target.facing.dot(to_attacker.normalize()) < -0.2
-                {
+                if is_path_backstab(
+                    &board.path_world,
+                    target.path_index,
+                    target.pos,
+                    c,
+                    target.facing,
+                ) {
+                    backstab = true;
                     amount *= if target.boss { 2.6 } else { 1.8 };
                     hit_text = Some(QueuedHitText {
                         key: if target.boss {
@@ -1748,6 +1817,44 @@ pub fn update_towers(
                     });
                 }
             }
+            if backstab {
+                statuses.push(StatusKind::Slow { duration: 0.78 });
+            }
+            let splash = if backstab {
+                let targets = snap
+                    .enemies
+                    .iter()
+                    .filter(|enemy| {
+                        enemy.entity != target.entity
+                            && snap.can_target(&tower, enemy)
+                            && enemy.pos.distance(target.pos) <= TILE_SIZE * 1.15
+                    })
+                    .take(5)
+                    .map(|enemy| enemy.entity)
+                    .collect::<Vec<_>>();
+                (!targets.is_empty()).then(|| QueuedHeroSplash {
+                    targets,
+                    amount: amount * 0.55,
+                    element: Element::Toxic,
+                    armor_pierce: tower.armor_pierce * 0.70,
+                    radius: TILE_SIZE * 1.15,
+                    color: Color::srgb(0.72, 0.24, 0.88),
+                    statuses: [
+                        (tower.dot_damage > 0.0 && tower.poison_duration > 0.0).then(|| {
+                            StatusKind::Poison {
+                                dmg: tower.dot_damage * 0.50,
+                                duration: tower.poison_duration * 0.70,
+                            }
+                        }),
+                        Some(StatusKind::Slow { duration: 0.62 }),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect(),
+                })
+            } else {
+                None
+            };
             queue_attack_sequence(
                 &mut commands,
                 entity,
@@ -1764,6 +1871,7 @@ pub fn update_towers(
                     vfx: melee_vfx,
                     statuses,
                     text: hit_text,
+                    splash,
                 }),
             );
             continue;
@@ -3114,6 +3222,15 @@ pub fn update_summon_hp_bars(
     }
 }
 
+#[derive(Clone, Copy)]
+struct SummonPlacement {
+    entity: u64,
+    owner: u64,
+    pos: Vec2,
+    mythic: bool,
+    fixed: bool,
+}
+
 /// Allies seek the nearest enemy, march to melee range, and attack it.
 pub fn update_summons(
     mut commands: Commands,
@@ -3133,6 +3250,18 @@ pub fn update_summons(
     mut vfx: MessageWriter<crate::vfx::VfxEvent>,
 ) {
     let dt = time.delta_secs() * run.game_speed;
+    let summon_positions = summons
+        .iter_mut()
+        .map(
+            |(entity, summon, tf, _, mythic, fixed_home, _, _)| SummonPlacement {
+                entity: entity.to_bits(),
+                owner: summon.owner.to_bits(),
+                pos: tf.translation.truncate(),
+                mythic: mythic.is_some(),
+                fixed: fixed_home.is_some(),
+            },
+        )
+        .collect::<Vec<_>>();
 
     for (entity, mut s, mut tf, sprite, mythic, fixed_home, current_action, action_queue) in
         &mut summons
@@ -3231,11 +3360,53 @@ pub fn update_summons(
                     );
                 }
             }
-        } else if home_dist > TILE_SIZE * 0.35 {
-            s.facing = home_delta / home_dist.max(1.0);
-            let step = s.facing * (s.speed * dt).min(home_dist);
-            tf.translation.x += step.x;
-            tf.translation.y += step.y;
+        } else {
+            // Mobile summons idle in deterministic slots around their owner.
+            // Returning every ally to the owner's exact center made a full
+            // summon build read as one oversized sprite in the real renderer.
+            let idle_home = home_pos
+                + summon_formation_offset(
+                    entity.to_bits(),
+                    s.owner.to_bits(),
+                    mythic.is_some(),
+                    fixed_home.is_some(),
+                    summon_positions.as_slice(),
+                );
+            let idle_delta = idle_home - tf.translation.truncate();
+            let idle_dist = idle_delta.length();
+            if idle_dist > TILE_SIZE * 0.18 {
+                s.facing = idle_delta / idle_dist.max(1.0);
+                let step = s.facing * (s.speed * dt).min(idle_dist);
+                tf.translation.x += step.x;
+                tf.translation.y += step.y;
+            }
+        }
+
+        // Apply avoidance after pursuit/return movement so chasing the same
+        // target cannot immediately cancel the separating step. Fixed guards
+        // keep their authored formation and never drift from their anchor.
+        if fixed_home.is_none() {
+            let current = tf.translation.truncate();
+            let clearance = if mythic.is_some() {
+                TILE_SIZE * 1.35
+            } else {
+                TILE_SIZE * 0.72
+            };
+            let separation = summon_separation(
+                entity.to_bits(),
+                current,
+                clearance,
+                summon_positions.as_slice(),
+            );
+            if separation.length_squared() > 0.001 {
+                let strength = if mythic.is_some() { 1.15 } else { 0.82 };
+                let step = separation.normalize() * s.speed * dt * strength;
+                let candidate = current + step;
+                if candidate.distance(home_pos) <= home_range {
+                    tf.translation.x = candidate.x;
+                    tf.translation.y = candidate.y;
+                }
+            }
         }
         if mythic.is_some() && s.facing.x.abs() > 0.05 {
             if let Some(mut sprite) = sprite {
@@ -3245,11 +3416,75 @@ pub fn update_summons(
     }
 }
 
+fn summon_separation(
+    entity_index: u64,
+    pos: Vec2,
+    clearance: f32,
+    positions: &[SummonPlacement],
+) -> Vec2 {
+    positions
+        .iter()
+        .filter(|other| other.entity != entity_index)
+        .fold(Vec2::ZERO, |push, other| {
+            let delta = pos - other.pos;
+            let distance = delta.length();
+            if distance >= clearance {
+                return push;
+            }
+            let direction = if distance > 0.01 {
+                delta / distance
+            } else {
+                let angle = ((entity_index ^ other.entity) % 6_283) as f32 / 1_000.0;
+                let axis = Vec2::from_angle(angle);
+                if entity_index < other.entity {
+                    -axis
+                } else {
+                    axis
+                }
+            };
+            push + direction * (1.0 - distance / clearance.max(0.01))
+        })
+}
+
+fn summon_formation_offset(
+    entity_index: u64,
+    owner: u64,
+    mythic: bool,
+    fixed: bool,
+    positions: &[SummonPlacement],
+) -> Vec2 {
+    if fixed {
+        return Vec2::ZERO;
+    }
+    let mut group = positions
+        .iter()
+        .filter(|placement| {
+            !placement.fixed && placement.owner == owner && placement.mythic == mythic
+        })
+        .map(|placement| placement.entity)
+        .collect::<Vec<_>>();
+    group.sort_unstable();
+    if group.len() <= 1 {
+        return Vec2::ZERO;
+    }
+    let Some(index) = group
+        .iter()
+        .position(|candidate| *candidate == entity_index)
+    else {
+        return Vec2::ZERO;
+    };
+    let angle =
+        -std::f32::consts::FRAC_PI_2 + std::f32::consts::TAU * index as f32 / group.len() as f32;
+    let radius = TILE_SIZE * if mythic { 1.45 } else { 0.68 };
+    Vec2::from_angle(angle) * radius
+}
+
 /// Enemies fight back: an enemy adjacent to an allied unit stops advancing and
 /// deals melee damage to it (this is the "monsters attack each other" part).
 pub fn enemy_vs_ally(
     time: Res<Time>,
     run: Res<RunState>,
+    board: Res<Board>,
     mut commands: Commands,
     mut enemies: Query<(&mut Enemy, &Transform)>,
     mut summons: Query<(Entity, &mut Summon, &Transform)>,
@@ -3265,10 +3500,10 @@ pub fn enemy_vs_ally(
     // The hero (a movable Tower) joins the melee: enemies that reach it stop and
     // fight it, just like they do summon allies. A slightly larger engage radius lets
     // it "hold the line" on the path.
-    let hero: Option<(Entity, Vec2)> = heroes
+    let hero: Option<(Entity, Vec2, Option<HeroWeapon>)> = heroes
         .iter()
         .find(|(_, t)| t.hero)
-        .map(|(e, t)| (e, t.center()));
+        .map(|(e, t)| (e, t.center(), t.hero_weapon));
     let hero_engage = TILE_SIZE * 0.85;
 
     let mut hits: Vec<(Entity, f32)> = Vec::new();
@@ -3299,8 +3534,22 @@ pub fn enemy_vs_ally(
             }
             hits.push((ae, enemy.melee * dt));
         }
-        if let Some((_, hpos)) = hero {
+        if let Some((_, hpos, weapon)) = hero {
             if pos.distance(hpos) <= hero_engage {
+                // Night Dagger's core interaction is a manual flank. A hero who
+                // is genuinely behind the route neither body-blocks nor draws a
+                // frontal retaliation; side/front approaches still take full damage.
+                if weapon == Some(HeroWeapon::NightDagger)
+                    && is_path_backstab(
+                        &board.path_world,
+                        enemy.path_index,
+                        pos,
+                        hpos,
+                        enemy.facing,
+                    )
+                {
+                    continue;
+                }
                 enemy.blocked = true;
                 let delta = hpos - pos;
                 if delta.length_squared() > 1.0 {
@@ -3316,7 +3565,7 @@ pub fn enemy_vs_ally(
         }
     }
     if hero_dmg > 0.0 {
-        if let Some((he, hpos)) = hero {
+        if let Some((he, hpos, _)) = hero {
             if let Ok((_, mut t)) = heroes.get_mut(he) {
                 t.hp -= hero_dmg;
                 if t.hp <= 0.0 {
@@ -4422,9 +4671,13 @@ pub fn apply_heal(mut events: MessageReader<HealCarrot>, mut run: ResMut<RunStat
 pub fn apply_buffs(mut events: MessageReader<BuffTower>, mut towers: Query<&mut Tower>) {
     for b in events.read() {
         if let Ok(mut t) = towers.get_mut(b.target) {
-            t.base_damage = (t.base_damage * 1.02).floor();
+            t.battle_focus = next_battle_focus(t.battle_focus);
         }
     }
+}
+
+fn next_battle_focus(current: f32) -> f32 {
+    (current + SUPPORT_BUFF_STEP).min(SUPPORT_BUFF_CAP)
 }
 
 /// Recompute each tower's adjacency synergy and equipment set resonance.
@@ -4450,8 +4703,19 @@ pub fn compute_synergy(mut towers: Query<(Entity, &mut Tower)>) {
         let bonus = (0.12 * count as f32).min(0.6);
         let set_bonus = equipment_set_bonus(&t.equipment);
         t.synergy = bonus;
-        // Hero doctrine aura stacks additively with adjacency synergy.
-        t.damage = (t.base_damage * (1.0 + bonus + t.aura_damage) * set_bonus.damage_mult).floor();
+        // Hero doctrine and bounded support buildup stack additively with adjacency synergy.
+        t.damage = (t.base_damage
+            * (1.0 + bonus + t.aura_damage + t.battle_focus)
+            * set_bonus.damage_mult)
+            .floor();
+    }
+}
+
+fn freeze_control_durations(boss: bool, duration: f32) -> (f32, f32) {
+    if boss {
+        (0.0, duration * 0.45)
+    } else {
+        (duration, 0.0)
     }
 }
 
@@ -4465,10 +4729,23 @@ pub fn apply_status(
             continue;
         };
         match s.kind {
-            StatusKind::Slow { duration } => e.slow_timer = e.slow_timer.max(duration),
+            StatusKind::Slow { duration } => {
+                let duration = if e.boss { duration * 0.55 } else { duration };
+                e.slow_timer = e.slow_timer.max(duration);
+            }
             StatusKind::Freeze { duration } => {
-                e.frozen = true;
-                e.stun_timer = e.stun_timer.max(duration);
+                let (freeze_duration, slow_duration) = freeze_control_durations(e.boss, duration);
+                if freeze_duration <= 0.0 {
+                    // Bosses may be hindered, but never hard-locked at the spawn
+                    // portal by a fast freeze tower. Convert freeze into a short
+                    // slow so the encounter must advance into the defense line.
+                    e.frozen = false;
+                    e.stun_timer = 0.0;
+                    e.slow_timer = e.slow_timer.max(slow_duration);
+                } else {
+                    e.frozen = true;
+                    e.stun_timer = e.stun_timer.max(freeze_duration);
+                }
             }
             StatusKind::Poison { dmg, duration } => {
                 let replacing = e.poison_timer <= 0.0 || dmg >= e.poison_damage;
@@ -4498,6 +4775,12 @@ pub fn apply_status(
                 e.curse_timer = e.curse_timer.max(duration);
             }
             StatusKind::Knockback { dist, stun } => {
+                if e.boss {
+                    e.frozen = false;
+                    e.stun_timer = 0.0;
+                    e.slow_timer = e.slow_timer.max(stun.max(0.18) * 0.5);
+                    continue;
+                }
                 // Knock back along the path toward the previous waypoint.
                 let prev = board.path_world[e.path_index.min(board.path_world.len() - 1)];
                 let pos = tf.translation.truncate();
@@ -4634,5 +4917,98 @@ mod tests {
         assert_eq!(ranger_hunt_multiplier(36.0, 100.0), 1.0);
         assert_eq!(ranger_hunt_multiplier(35.0, 100.0), 3.0);
         assert_eq!(ranger_hunt_multiplier(1.0, 0.0), 1.0);
+    }
+
+    #[test]
+    fn night_backstab_uses_route_direction_not_combat_facing() {
+        let path = [Vec2::ZERO, Vec2::new(100.0, 0.0)];
+        let enemy = Vec2::new(40.0, 0.0);
+
+        assert!(is_path_backstab(
+            &path,
+            0,
+            enemy,
+            Vec2::new(10.0, 0.0),
+            Vec2::NEG_X,
+        ));
+        assert!(!is_path_backstab(
+            &path,
+            0,
+            enemy,
+            Vec2::new(70.0, 0.0),
+            Vec2::NEG_X,
+        ));
+    }
+
+    #[test]
+    fn boss_freeze_becomes_slow_instead_of_a_hard_lock() {
+        assert_eq!(freeze_control_durations(false, 1.2), (1.2, 0.0));
+        let (freeze, slow) = freeze_control_durations(true, 1.2);
+        assert_eq!(freeze, 0.0);
+        assert!((slow - 0.54).abs() < 0.001);
+    }
+
+    #[test]
+    fn support_buffs_are_linear_and_capped() {
+        let mut focus = 0.0;
+        for _ in 0..100 {
+            focus = next_battle_focus(focus);
+        }
+        assert!((focus - SUPPORT_BUFF_CAP).abs() < f32::EPSILON);
+        assert!((next_battle_focus(focus) - SUPPORT_BUFF_CAP).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn summon_separation_pushes_nearby_allies_apart() {
+        let positions = [
+            SummonPlacement {
+                entity: 1,
+                owner: 9,
+                pos: Vec2::ZERO,
+                mythic: true,
+                fixed: false,
+            },
+            SummonPlacement {
+                entity: 2,
+                owner: 9,
+                pos: Vec2::new(10.0, 0.0),
+                mythic: true,
+                fixed: false,
+            },
+        ];
+        let left = summon_separation(1, Vec2::ZERO, 40.0, &positions);
+        let right = summon_separation(2, Vec2::new(10.0, 0.0), 40.0, &positions);
+        assert!(left.x < 0.0);
+        assert!(right.x > 0.0);
+    }
+
+    #[test]
+    fn mobile_summons_receive_distinct_owner_formation_slots() {
+        let positions = (1..=4)
+            .map(|entity| SummonPlacement {
+                entity,
+                owner: 9,
+                pos: Vec2::ZERO,
+                mythic: true,
+                fixed: false,
+            })
+            .collect::<Vec<_>>();
+        let offsets = (1..=4)
+            .map(|entity| summon_formation_offset(entity, 9, true, false, &positions))
+            .collect::<Vec<_>>();
+
+        assert!(offsets.iter().all(|offset| offset.length() > TILE_SIZE));
+        for (index, offset) in offsets.iter().enumerate() {
+            assert!(
+                offsets
+                    .iter()
+                    .skip(index + 1)
+                    .all(|other| { offset.distance(*other) >= TILE_SIZE * 2.0 })
+            );
+        }
+        assert_eq!(
+            summon_formation_offset(1, 9, true, true, &positions),
+            Vec2::ZERO
+        );
     }
 }
