@@ -1145,19 +1145,28 @@ pub fn rotate_towers(
     time: Res<Time>,
     mut towers: Query<(&mut Tower, &mut Transform)>,
     mut last_hero: Local<Vec2>,
+    mut facing_smooth: Local<f32>,
+    mut move_smooth: Local<f32>,
 ) {
     let dt = time.delta_secs();
     for (mut t, mut tf) in &mut towers {
         tf.rotation = Quat::IDENTITY; // never spin
         if t.hero {
             let c = t.center();
-            let moving = c.distance(*last_hero) > 0.4;
+            // 平滑的移动量（px/帧的指数均值）：避免 0.4px 阈值附近的
+            // 走/停抖动让步伐效果高频开关。
+            let step = c.distance(*last_hero);
             *last_hero = c;
+            *move_smooth += (step - *move_smooth) * (dt * 10.0).min(1.0);
+            let moving = *move_smooth > 0.25;
             // Face the travel direction by mirroring horizontally (no rotation).
+            // t.angle 是瞄准角——战斗中会在左右目标间快速切换，直接取符号会
+            // 每帧翻面（看起来像剧烈震动）。先做低通滤波，再用大死区判向。
             let facing = t.angle.cos();
+            *facing_smooth += (facing - *facing_smooth) * (dt * 6.0).min(1.0);
             let current_sign = if tf.scale.x < 0.0 { -1.0 } else { 1.0 };
-            let facing_sign = if facing.abs() > 0.05 {
-                if facing < 0.0 { -1.0 } else { 1.0 }
+            let facing_sign = if facing_smooth.abs() > 0.25 {
+                if *facing_smooth < 0.0 { -1.0 } else { 1.0 }
             } else {
                 current_sign
             };
@@ -1173,9 +1182,12 @@ pub fn rotate_towers(
             };
             tf.scale.x = facing_sign * (1.0 + attack_pop * 0.10);
             tf.scale.y = 1.0 - attack_pop * 0.035;
-            // Bouncier walk bob while moving so the hero clearly strides, not floats.
+            // 行走步伐：柔和的低频起伏（8.5rad/s ≈ 每秒 1.3 步、2px 振幅），
+            // 用移动量平滑值渐入渐出——之前 16rad/s × 5.5px 的纯上跳在静态
+            // 立绘上看起来就是高频震动。
+            let bob_amp = (*move_smooth * 4.0).clamp(0.0, 1.0) * 2.0;
             let bob = if moving {
-                (time.elapsed_secs() * 16.0).sin().abs() * 5.5
+                (time.elapsed_secs() * 8.5).sin().abs() * bob_amp
             } else {
                 0.0
             };
