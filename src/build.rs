@@ -714,11 +714,13 @@ pub fn spawn_hero(
 ) {
     let pos = tower.hero_pos;
     let tint = tower.color;
+    // 战场英雄用 heroes_world 的 4×4 帧图（武器×种族，含待机/行走/攻击）——
+    // 逐帧动画的走路远比静态纸娃娃合成图滑行自然。纸娃娃合成图只用于
+    // 面板/HUD 头像；仅当没有帧图时才挂 HeroPaperdollSprite 让合成图兜底。
     let mut ec = commands.spawn((
         tower,
         Transform::from_translation(pos.extend(5.0)),
         SequentialActions,
-        crate::hero_paperdoll::HeroPaperdollSprite,
         LevelEntity,
     ));
     if let Some(cfg) = hero_world_cfg(walks, weapon, race) {
@@ -744,13 +746,17 @@ pub fn spawn_hero(
             },
         ));
     } else {
-        // Fallback: static portrait (weapons without a walk sheet yet).
-        ec.insert(Sprite {
-            image: sprites.heroes[&weapon].clone(),
-            color: tint,
-            custom_size: Some(Vec2::splat(HERO_WORLD_SIZE)),
-            ..default()
-        });
+        // Fallback: static portrait (weapons without a walk sheet yet)，并挂
+        // HeroPaperdollSprite 让纸娃娃合成图接管这个静态兜底。
+        ec.insert((
+            Sprite {
+                image: sprites.heroes[&weapon].clone(),
+                color: tint,
+                custom_size: Some(Vec2::splat(HERO_WORLD_SIZE)),
+                ..default()
+            },
+            crate::hero_paperdoll::HeroPaperdollSprite,
+        ));
     }
     let hero_entity = ec.id();
 
@@ -1182,15 +1188,10 @@ pub fn rotate_towers(
             };
             tf.scale.x = facing_sign * (1.0 + attack_pop * 0.10);
             tf.scale.y = 1.0 - attack_pop * 0.035;
-            // 行走步伐：柔和的低频起伏（8.5rad/s ≈ 每秒 1.3 步、2px 振幅），
-            // 用移动量平滑值渐入渐出——之前 16rad/s × 5.5px 的纯上跳在静态
-            // 立绘上看起来就是高频震动。
-            let bob_amp = (*move_smooth * 4.0).clamp(0.0, 1.0) * 2.0;
-            let bob = if moving {
-                (time.elapsed_secs() * 8.5).sin().abs() * bob_amp
-            } else {
-                0.0
-            };
+            // 战场英雄已恢复逐帧行走动画（heroes_world 帧图），步伐由帧图
+            // 自带——不再叠加程序化 bob，避免双重起伏。
+            let _ = moving;
+            let bob = 0.0;
             let attack_step = Vec2::from_angle(t.angle) * (attack_pop * 5.0);
             t.recoil *= (1.0 - 16.0 * dt).clamp(0.0, 1.0);
             if t.recoil.length_squared() < 0.05 {
