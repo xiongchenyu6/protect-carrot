@@ -1512,3 +1512,74 @@ pub fn draw_range_gizmos(
         gizmos.circle_2d(c, def.range, color.with_alpha(0.25));
     }
 }
+
+/// 换装即时反馈：面板里切武器/种族/装备时，战场上的英雄精灵立刻响应。
+/// - 武器或种族变化 → 热切换到对应的 heroes_world 帧图集（此前只在出生
+///   时选定，切换后战场毫无反应，像没换一样）。
+/// - 装备变化 → 英雄脚下金色脉冲 + 升级音效（属性本就实时生效，但缺少
+///   看得见的反馈）。
+pub fn refresh_hero_visual(
+    mut commands: Commands,
+    walks: Res<HeroWalks>,
+    loadout: Res<crate::hero::HeroLoadout>,
+    mut heroes: Query<(Entity, &Tower, &Transform)>,
+    mut last_kit: Local<Option<(HeroWeapon, Race)>>,
+    mut last_gear: Local<
+        Option<[Option<crate::hero_gear::HeroGear>; crate::hero_gear::HeroGearSlot::COUNT]>,
+    >,
+    mut vfx: MessageWriter<crate::vfx::VfxEvent>,
+    mut sfx: MessageWriter<crate::audio::SfxEvent>,
+) {
+    let kit = (loadout.weapon, loadout.race);
+    let kit_changed = last_kit.is_some() && *last_kit != Some(kit);
+    let gear_changed = last_gear.is_some() && *last_gear != Some(loadout.gear);
+    *last_kit = Some(kit);
+    *last_gear = Some(loadout.gear);
+    if !kit_changed && !gear_changed {
+        return;
+    }
+
+    for (entity, tower, tf) in &mut heroes {
+        if !tower.hero {
+            continue;
+        }
+        let pos = tf.translation.truncate();
+        if kit_changed {
+            if let Some(cfg) = hero_world_cfg(&walks, loadout.weapon, loadout.race) {
+                let mut sprite = Sprite::from_atlas_image(
+                    cfg.image.clone(),
+                    TextureAtlas {
+                        layout: cfg.layout.clone(),
+                        index: 0,
+                    },
+                );
+                sprite.color = tower.color;
+                sprite.custom_size = Some(Vec2::splat(cfg.size));
+                commands.entity(entity).insert((
+                    sprite,
+                    SpritesheetAnimation::new(cfg.idle_anim.clone()),
+                    HeroWalkAnim {
+                        idle: cfg.idle_anim.clone(),
+                        walk: cfg.walk_anim.clone(),
+                        attack: cfg.attack_anim.clone(),
+                        frames: cfg.frames,
+                        state: HeroAnimState::Idle,
+                    },
+                ));
+            }
+            vfx.write(crate::vfx::VfxEvent::ElementPulse {
+                pos,
+                color: Color::srgb(0.62, 0.86, 1.0),
+                strong: true,
+            });
+            sfx.write(crate::audio::SfxEvent(crate::audio::Sound::Summon));
+        } else if gear_changed {
+            vfx.write(crate::vfx::VfxEvent::ElementPulse {
+                pos,
+                color: Color::srgb(1.0, 0.85, 0.35),
+                strong: false,
+            });
+            sfx.write(crate::audio::SfxEvent(crate::audio::Sound::Upgrade));
+        }
+    }
+}
