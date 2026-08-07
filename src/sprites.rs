@@ -17,6 +17,11 @@ pub struct Sprites {
     pub enemies: HashMap<EnemyKind, Handle<Image>>,
     pub species: HashMap<usize, Handle<Image>>,
     pub equipment: HashMap<Equipment, Handle<Image>>,
+    /// 英雄装备图标：按纸娃娃 fragment id 索引——与娃娃身上穿的是同一套
+    /// AI 道具图，保证「背包图 = 角色实际穿戴」。
+    pub hero_gear_icons: HashMap<u32, Handle<Image>>,
+    /// 英雄武器实物图（同纸娃娃武器图层），用于已装备武器槽。
+    pub hero_weapon_props: HashMap<crate::hero_gear::HeroWeaponKind, Handle<Image>>,
     /// Active-ability icons (meteor / freeze / gold rush).
     pub abilities: HashMap<Ability, Handle<Image>>,
     /// Talent icons, keyed by "damage" / "range" / "speed".
@@ -52,6 +57,51 @@ pub struct Sprites {
 /// system) so the resource exists before the initial `OnEnter(Menu)` reads it —
 /// Startup loses the race with the first state transition (see the font in main.rs).
 pub fn build_sprites(assets: &AssetServer) -> Sprites {
+    // 英雄装备/武器图标（与 assets/paperdoll 图层同源的 AI 道具图）。
+    let gear_frag_files: [(u32, &str); 15] = [
+        (200, "gear_vow_plate"),
+        (201, "gear_starweave_robe"),
+        (202, "gear_windrunner_cloak"),
+        (210, "gear_thunder_charm"),
+        (211, "gear_saint_bell"),
+        (212, "gear_night_mask"),
+        (220, "gear_forge_gauntlet"),
+        (221, "gear_warden_scope"),
+        (222, "gear_carrot_halo"),
+        (230, "gear_wayfarer_boots"),
+        (231, "gear_bloodstep_greaves"),
+        (232, "gear_starpath_sandals"),
+        (233, "gear_engineer_treads"),
+        (234, "gear_summoner_greaves"),
+        (235, "gear_carrot_wings"),
+    ];
+    let mut hero_gear_icons = HashMap::new();
+    for (frag, file) in gear_frag_files {
+        hero_gear_icons.insert(
+            frag,
+            assets.load(format!("sprites/hero_gear/{file}.webp")),
+        );
+    }
+    use crate::hero_gear::HeroWeaponKind as WK;
+    let weapon_prop_files: [(WK, &str); 9] = [
+        (WK::Sword, "weapon_sword"),
+        (WK::Staff, "weapon_staff"),
+        (WK::Bow, "weapon_bow"),
+        (WK::Shield, "weapon_shield"),
+        (WK::StormOrb, "weapon_storm_orb"),
+        (WK::SentryBow, "weapon_sentry_bow"),
+        (WK::Dagger, "weapon_dagger"),
+        (WK::SummonStaff, "weapon_censer"),
+        (WK::Hammer, "weapon_hammer"),
+    ];
+    let mut hero_weapon_props = HashMap::new();
+    for (kind, file) in weapon_prop_files {
+        hero_weapon_props.insert(
+            kind,
+            assets.load(format!("sprites/hero_gear/{file}.webp")),
+        );
+    }
+
     let mut towers = HashMap::new();
     for k in TowerKind::ALL {
         towers.insert(
@@ -129,6 +179,8 @@ pub fn build_sprites(assets: &AssetServer) -> Sprites {
         enemies,
         species,
         equipment,
+        hero_gear_icons,
+        hero_weapon_props,
         abilities,
         talents,
         heroes,

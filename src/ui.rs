@@ -3,6 +3,10 @@
 //! the same `Selection`/`RunState` the keyboard shortcuts do.
 
 use crate::Levels;
+use crate::attributes::{
+    AttributeContribution, hero_attribute_report, selected_tower_attribute_report,
+    tower_global_attribute_report,
+};
 use crate::audio::AudioSettings;
 use crate::bestiary::{Bestiary, brief};
 use crate::build::{Selection, repair_tower, upgrade_tower, upgrade_unlock_note};
@@ -187,6 +191,39 @@ pub struct DockRoot;
 /// tower gem dock so hero equipment never shares tower upgrade/socket controls.
 #[derive(Component)]
 pub struct HeroPanelRoot;
+/// Dedicated in-run attribute ledger. It shows final accumulated stats and their
+/// sources without mixing global bonuses with selected-tower local conditions.
+#[derive(Component)]
+pub struct RunStatsRoot;
+#[derive(Component)]
+pub struct RunStatsHeroHeaderText;
+#[derive(Component)]
+pub struct RunStatsHeroDetailText;
+#[derive(Component)]
+pub struct RunStatsHeroSourcesText;
+#[derive(Component)]
+pub struct RunStatsTowerDetailText;
+#[derive(Component)]
+pub struct RunStatsCardsText;
+#[derive(Clone, Copy)]
+enum RunStatScope {
+    Hero,
+    Tower,
+}
+#[derive(Clone, Copy)]
+enum RunStatKind {
+    Damage,
+    AttackSpeed,
+    Range,
+    Health,
+    MoveSpeed,
+    SkillPower,
+}
+#[derive(Component)]
+pub struct RunStatTileText {
+    scope: RunStatScope,
+    kind: RunStatKind,
+}
 #[derive(Component)]
 pub struct HeroPaperdollPreview;
 #[derive(Component)]
@@ -220,6 +257,7 @@ pub struct SettingsGear;
 pub struct HudPanels {
     pub dock_open: bool,
     pub hero_open: bool,
+    pub stats_open: bool,
     pub settings_open: bool,
 }
 #[derive(Component)]
@@ -438,6 +476,8 @@ pub enum UiAction {
     ToggleDock,
     /// Show/hide the dedicated hero paperdoll panel.
     ToggleHeroPanel,
+    /// Show/hide the accumulated in-run hero/tower attribute ledger.
+    ToggleRunStats,
     /// Open/close the settings panel (gear icon, top-right).
     ToggleSettings,
     SummonHero,
@@ -1471,6 +1511,10 @@ fn icon_button(
 }
 
 fn hero_gear_icon(sprites: &Sprites, item: HeroGear) -> Handle<Image> {
+    // 优先用纸娃娃图层同源的道具图——背包/槽位里看到的就是穿上后的样子。
+    if let Some(icon) = sprites.hero_gear_icons.get(&item.def().paperdoll_fragment) {
+        return icon.clone();
+    }
     let fallback = match item {
         HeroGear::VowPlate => Equipment::BulwarkPlate,
         HeroGear::StarweaveRobe => Equipment::CultistManual,
@@ -2115,6 +2159,39 @@ fn equipment_button(
                 text_font(f, 7.0),
                 TextColor(Color::srgb(0.55, 0.55, 0.55)),
                 EquipmentButtonText { item },
+            ));
+        });
+}
+
+fn run_stat_tile(
+    parent: &mut ChildSpawnerCommands,
+    f: &Handle<Font>,
+    scope: RunStatScope,
+    kind: RunStatKind,
+    color: Color,
+) {
+    parent
+        .spawn((
+            Node {
+                width: Val::Px(110.0),
+                height: Val::Px(62.0),
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                padding: UiRect::all(Val::Px(4.0)),
+                flex_shrink: 0.0,
+                overflow: Overflow::clip(),
+                ..default()
+            },
+            BackgroundColor(color.with_alpha(0.22)),
+        ))
+        .with_children(|tile| {
+            tile.spawn((
+                Text::new("—"),
+                text_font(f, 10.0),
+                TextColor(UI_TEXT),
+                TextLayout::justify(Justify::Center),
+                RunStatTileText { scope, kind },
             ));
         });
 }
@@ -2849,6 +2926,206 @@ pub fn spawn_hud(
             panel_close_button(panel, f, UiAction::ToggleHeroPanel);
         });
 
+    // --- accumulated attribute ledger: final values first, then exact sources.
+    // This is independent from the paperdoll because it also owns global tower
+    // research, per-run cards, and selected-tower local conditions.
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(12.0),
+                top: Val::Px(52.0),
+                width: Val::Px(744.0),
+                height: Val::Px(520.0),
+                display: Display::None,
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(Val::Px(10.0)),
+                row_gap: Val::Px(8.0),
+                overflow: Overflow::clip(),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.025, 0.032, 0.030, 0.985)),
+            GlobalZIndex(30),
+            HudRoot,
+            RunStatsRoot,
+        ))
+        .with_children(|panel| {
+            panel
+                .spawn(Node {
+                    height: Val::Px(46.0),
+                    flex_direction: FlexDirection::Column,
+                    justify_content: JustifyContent::Center,
+                    row_gap: Val::Px(2.0),
+                    padding: UiRect::horizontal(Val::Px(4.0)),
+                    ..default()
+                })
+                .with_children(|header| {
+                    header.spawn((
+                        Text::new(crate::i18n::t("本局总属性")),
+                        text_font(f, 19.0),
+                        TextColor(UI_ACCENT_GOLD),
+                    ));
+                    header.spawn((
+                        Text::new(crate::i18n::t(
+                            "总加成相对当前种族与武器的1级裸装基础；范围光环和宝石共鸣单独列出。",
+                        )),
+                        text_font(f, 10.0),
+                        TextColor(UI_TEXT_DIM),
+                    ));
+                });
+
+            panel
+                .spawn(Node {
+                    flex_grow: 1.0,
+                    min_height: Val::Px(0.0),
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(8.0),
+                    overflow: Overflow::clip(),
+                    ..default()
+                })
+                .with_children(|columns| {
+                    columns
+                        .spawn((
+                            Node {
+                                width: Val::Percent(50.0),
+                                height: Val::Percent(100.0),
+                                flex_direction: FlexDirection::Column,
+                                padding: UiRect::all(Val::Px(8.0)),
+                                row_gap: Val::Px(7.0),
+                                overflow: Overflow::scroll_y(),
+                                ..default()
+                            },
+                            BackgroundColor(UI_CARD_SOFT),
+                            ScrollPosition::default(),
+                        ))
+                        .with_children(|hero_col| {
+                            hero_col.spawn((
+                                Text::new(crate::i18n::t("英雄总属性")),
+                                text_font(f, 15.0),
+                                TextColor(Color::srgb(0.62, 0.88, 1.0)),
+                            ));
+                            hero_col.spawn((
+                                Text::new(""),
+                                text_font(f, 10.0),
+                                TextColor(UI_TEXT),
+                                RunStatsHeroHeaderText,
+                            ));
+                            hero_col
+                                .spawn(Node {
+                                    width: Val::Percent(100.0),
+                                    flex_direction: FlexDirection::Row,
+                                    flex_wrap: FlexWrap::Wrap,
+                                    column_gap: Val::Px(5.0),
+                                    row_gap: Val::Px(5.0),
+                                    ..default()
+                                })
+                                .with_children(|tiles| {
+                                    for (kind, color) in [
+                                        (RunStatKind::Damage, UI_ACCENT_RED),
+                                        (RunStatKind::AttackSpeed, UI_ACCENT_GOLD),
+                                        (RunStatKind::Range, UI_ACCENT_TEAL),
+                                        (RunStatKind::Health, Color::srgb(0.45, 0.86, 0.48)),
+                                        (RunStatKind::MoveSpeed, Color::srgb(0.56, 0.72, 1.0)),
+                                        (RunStatKind::SkillPower, Color::srgb(0.72, 0.54, 0.96)),
+                                    ] {
+                                        run_stat_tile(tiles, f, RunStatScope::Hero, kind, color);
+                                    }
+                                });
+                            hero_col.spawn((
+                                Text::new(""),
+                                text_font(f, 10.0),
+                                TextColor(Color::srgb(0.82, 0.88, 0.80)),
+                                RunStatsHeroDetailText,
+                            ));
+                            hero_col.spawn((
+                                Text::new(crate::i18n::t("加成来源")),
+                                text_font(f, 12.0),
+                                TextColor(UI_ACCENT_GOLD),
+                            ));
+                            hero_col.spawn((
+                                Text::new(""),
+                                text_font(f, 10.0),
+                                TextColor(UI_TEXT),
+                                RunStatsHeroSourcesText,
+                            ));
+                        });
+
+                    columns
+                        .spawn((
+                            Node {
+                                width: Val::Percent(50.0),
+                                height: Val::Percent(100.0),
+                                flex_direction: FlexDirection::Column,
+                                padding: UiRect::all(Val::Px(8.0)),
+                                row_gap: Val::Px(7.0),
+                                overflow: Overflow::scroll_y(),
+                                ..default()
+                            },
+                            BackgroundColor(UI_CARD),
+                            ScrollPosition::default(),
+                        ))
+                        .with_children(|tower_col| {
+                            tower_col.spawn((
+                                Text::new(crate::i18n::t("防御塔全局属性")),
+                                text_font(f, 15.0),
+                                TextColor(Color::srgb(0.58, 1.0, 0.68)),
+                            ));
+                            tower_col
+                                .spawn(Node {
+                                    width: Val::Percent(100.0),
+                                    flex_direction: FlexDirection::Row,
+                                    flex_wrap: FlexWrap::Wrap,
+                                    column_gap: Val::Px(5.0),
+                                    row_gap: Val::Px(5.0),
+                                    ..default()
+                                })
+                                .with_children(|tiles| {
+                                    for (kind, color) in [
+                                        (RunStatKind::Damage, UI_ACCENT_RED),
+                                        (RunStatKind::AttackSpeed, UI_ACCENT_GOLD),
+                                        (RunStatKind::Range, UI_ACCENT_TEAL),
+                                    ] {
+                                        run_stat_tile(tiles, f, RunStatScope::Tower, kind, color);
+                                    }
+                                });
+                            tower_col.spawn((
+                                Text::new(""),
+                                text_font(f, 10.0),
+                                TextColor(UI_TEXT),
+                                RunStatsTowerDetailText,
+                            ));
+                        });
+                });
+
+            panel
+                .spawn((
+                    Node {
+                        min_height: Val::Px(64.0),
+                        max_height: Val::Px(82.0),
+                        flex_direction: FlexDirection::Column,
+                        padding: UiRect::all(Val::Px(7.0)),
+                        row_gap: Val::Px(3.0),
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.11, 0.13, 0.10, 0.94)),
+                ))
+                .with_children(|cards| {
+                    cards.spawn((
+                        Text::new(crate::i18n::t("本局构筑记录")),
+                        text_font(f, 12.0),
+                        TextColor(UI_ACCENT_GOLD),
+                    ));
+                    cards.spawn((
+                        Text::new(""),
+                        text_font(f, 10.0),
+                        TextColor(Color::srgb(0.78, 0.90, 0.78)),
+                        RunStatsCardsText,
+                    ));
+                });
+            panel_close_button(panel, f, UiAction::ToggleRunStats);
+        });
+
     // --- fixed feedback banner over the board. Hidden when empty, compact enough
     // to avoid the top-left controls and the right rail.
     commands
@@ -3281,8 +3558,34 @@ pub fn spawn_hud(
 
     // --- settings: a floating gear button (top-right) that opens a panel holding
     // all settings (quality, fullscreen, difficulty) instead of cluttering the rail.
-    // Floating hero-panel button (top-right, left of the gear): the hero portrait;
-    // tapping opens the dedicated hero paperdoll panel.
+    // Attribute ledger + hero-panel buttons sit left of the gear. They are kept
+    // separate because the ledger explains both hero and tower-wide modifiers.
+    commands
+        .spawn((
+            Button,
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(116.0),
+                top: Val::Px(6.0),
+                width: Val::Px(50.0),
+                height: Val::Px(34.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.19, 0.25, 0.18, 0.94)),
+            GlobalZIndex(60),
+            UiAction::ToggleRunStats,
+            HudRoot,
+        ))
+        .with_children(|button| {
+            button.spawn((
+                Text::new(crate::i18n::t("属性")),
+                text_font(f, 13.0),
+                TextColor(Color::srgb(0.82, 0.96, 0.78)),
+            ));
+        });
+
     commands
         .spawn((
             Button,
@@ -3591,6 +3894,7 @@ pub fn close_hud_panels_with_escape(
     }
 
     panels.hero_open = false;
+    panels.stats_open = false;
     panels.settings_open = false;
 }
 
@@ -3607,6 +3911,7 @@ pub fn update_panel_visibility(
             With<DockRoot>,
             Without<HeroPanelRoot>,
             Without<SettingsRoot>,
+            Without<RunStatsRoot>,
         ),
     >,
     mut hero_panel: Query<
@@ -3615,6 +3920,7 @@ pub fn update_panel_visibility(
             With<HeroPanelRoot>,
             Without<DockRoot>,
             Without<SettingsRoot>,
+            Without<RunStatsRoot>,
         ),
     >,
     mut settings: Query<
@@ -3623,6 +3929,16 @@ pub fn update_panel_visibility(
             With<SettingsRoot>,
             Without<DockRoot>,
             Without<HeroPanelRoot>,
+            Without<RunStatsRoot>,
+        ),
+    >,
+    mut stats: Query<
+        &mut Node,
+        (
+            With<RunStatsRoot>,
+            Without<DockRoot>,
+            Without<HeroPanelRoot>,
+            Without<SettingsRoot>,
         ),
     >,
 ) {
@@ -3630,7 +3946,8 @@ pub fn update_panel_visibility(
         .selected
         .and_then(|entity| towers.get(entity).ok())
         .is_some_and(|tower| !tower.hero);
-    let want = if selected_tower {
+    let full_overlay_open = panels.hero_open || panels.stats_open || panels.settings_open;
+    let want = if selected_tower && !full_overlay_open {
         Display::Flex
     } else {
         Display::None
@@ -3644,6 +3961,14 @@ pub fn update_panel_visibility(
         Display::None
     };
     for mut node in &mut hero_panel {
+        node.display = want;
+    }
+    let want = if panels.stats_open {
+        Display::Flex
+    } else {
+        Display::None
+    };
+    for mut node in &mut stats {
         node.display = want;
     }
     let want = if panels.settings_open {
@@ -4263,7 +4588,8 @@ pub fn update_hud(
     if let Ok(mut t) = texts.p3().single_mut() {
         t.0 = format!("x{}", run.game_speed as i32);
     }
-    let overlay_open = panels.hero_open || panels.settings_open || roguelite.is_waiting();
+    let overlay_open =
+        panels.hero_open || panels.stats_open || panels.settings_open || roguelite.is_waiting();
     let banner_visible = run.message_timer > 0.0 && !run.message.is_empty() && !overlay_open;
     let banner_display = if banner_visible {
         Display::Flex
@@ -4440,6 +4766,333 @@ pub fn update_unit_stats(
             }
             None => "—".to_string(),
         };
+    }
+}
+
+fn signed_percent(multiplier: f32) -> String {
+    let percent = (multiplier - 1.0) * 100.0;
+    if percent.abs() < 0.05 {
+        "0%".to_string()
+    } else {
+        format!("{percent:+.0}%")
+    }
+}
+
+fn signed_fraction(fraction: f32) -> String {
+    signed_percent(1.0 + fraction)
+}
+
+fn signed_number(value: f32) -> String {
+    if value.abs() < 0.05 {
+        "0".to_string()
+    } else {
+        format!("{value:+.0}")
+    }
+}
+
+fn contribution_summary(value: AttributeContribution) -> String {
+    let mut parts = Vec::new();
+    for (label, multiplier) in [
+        ("伤害", value.damage_mult),
+        ("攻速", value.attack_speed_mult),
+        ("射程", value.range_mult),
+        ("生命", value.hp_mult),
+        ("移速", value.move_mult),
+        ("技能", value.skill_mult),
+    ] {
+        if (multiplier - 1.0).abs() > 0.001 {
+            parts.push(format!(
+                "{}{}",
+                crate::i18n::t(label),
+                signed_percent(multiplier)
+            ));
+        }
+    }
+    if value.armor_add.abs() > 0.01 {
+        parts.push(format!(
+            "{}{}",
+            crate::i18n::t("护甲"),
+            signed_number(value.armor_add)
+        ));
+    }
+    if value.armor_pierce_add.abs() > 0.01 {
+        parts.push(format!(
+            "{}{}",
+            crate::i18n::t("穿甲"),
+            signed_number(value.armor_pierce_add)
+        ));
+    }
+    if value.skill_cooldown_reduction != 0 {
+        parts.push(crate::i18n::tf(
+            "技能冷却-{}波",
+            &[&value.skill_cooldown_reduction.to_string()],
+        ));
+    }
+    if parts.is_empty() {
+        crate::i18n::t("无额外加成")
+    } else {
+        parts.join("  ")
+    }
+}
+
+fn hero_stat_tile_text(
+    kind: RunStatKind,
+    report: &crate::attributes::HeroAttributeReport,
+) -> String {
+    let (label, bonus, final_value) = match kind {
+        RunStatKind::Damage => (
+            crate::i18n::t("伤害"),
+            signed_percent(report.total.damage_mult),
+            format!("{:.0}", report.current.damage),
+        ),
+        RunStatKind::AttackSpeed => (
+            crate::i18n::t("攻速"),
+            signed_percent(report.total.attack_speed_mult),
+            crate::i18n::tf("{}/秒", &[&format!("{:.2}", report.current.attack_speed)]),
+        ),
+        RunStatKind::Range => (
+            crate::i18n::t("射程"),
+            signed_percent(report.total.range_mult),
+            format!("{:.0}", report.current.range),
+        ),
+        RunStatKind::Health => (
+            crate::i18n::t("生命"),
+            signed_percent(report.total.hp_mult),
+            format!("{:.0}", report.current.max_hp),
+        ),
+        RunStatKind::MoveSpeed => (
+            crate::i18n::t("移速"),
+            signed_percent(report.total.move_mult),
+            format!("{:.0}", report.current.move_speed),
+        ),
+        RunStatKind::SkillPower => (
+            crate::i18n::t("技能"),
+            signed_percent(report.total.skill_mult),
+            crate::i18n::tf("倍率×{}", &[&format!("{:.2}", report.current.skill_power)]),
+        ),
+    };
+    crate::i18n::tf("{}\n{}\n当前 {}", &[&label, &bonus, &final_value])
+}
+
+fn tower_stat_tile_text(
+    kind: RunStatKind,
+    report: &crate::attributes::TowerGlobalAttributeReport,
+) -> String {
+    let (label, total, permanent, run) = match kind {
+        RunStatKind::Damage => (
+            "伤害",
+            report.total.damage_mult,
+            report.permanent.damage_mult,
+            report.run_cards.damage_mult,
+        ),
+        RunStatKind::AttackSpeed => (
+            "攻速",
+            report.total.attack_speed_mult,
+            report.permanent.attack_speed_mult,
+            report.run_cards.attack_speed_mult,
+        ),
+        RunStatKind::Range => (
+            "射程",
+            report.total.range_mult,
+            report.permanent.range_mult,
+            report.run_cards.range_mult,
+        ),
+        _ => return "—".to_string(),
+    };
+    crate::i18n::tf(
+        "{}\n{}\n永久{} / 本局{}",
+        &[
+            &crate::i18n::t(label),
+            &signed_percent(total),
+            &signed_percent(permanent),
+            &signed_percent(run),
+        ],
+    )
+}
+
+/// Refresh the player-facing attribute ledger from live combat resources. The
+/// report is only formatted while open; all modifier calculations remain cheap
+/// and deterministic in `attributes`.
+pub fn update_run_stats_panel(
+    panels: Res<HudPanels>,
+    hero: Res<HeroLoadout>,
+    talents: Res<Talents>,
+    roguelite: Res<RogueliteRun>,
+    selection: Res<Selection>,
+    towers: Query<&crate::tower::Tower>,
+    mut texts: ParamSet<(
+        Query<(&RunStatTileText, &mut Text)>,
+        Query<&mut Text, With<RunStatsHeroHeaderText>>,
+        Query<&mut Text, With<RunStatsHeroDetailText>>,
+        Query<&mut Text, With<RunStatsHeroSourcesText>>,
+        Query<&mut Text, With<RunStatsTowerDetailText>>,
+        Query<&mut Text, With<RunStatsCardsText>>,
+    )>,
+) {
+    if !panels.stats_open {
+        return;
+    }
+
+    let battlefield_hero = towers.iter().find(|tower| tower.hero);
+    let selected_tower = selection
+        .selected
+        .and_then(|entity| towers.get(entity).ok())
+        .filter(|tower| !tower.hero);
+    let hero_report = hero_attribute_report(&hero, battlefield_hero);
+    let tower_report = tower_global_attribute_report(&talents);
+
+    for (marker, mut text) in &mut texts.p0() {
+        text.0 = match marker.scope {
+            RunStatScope::Hero => hero_stat_tile_text(marker.kind, &hero_report),
+            RunStatScope::Tower => tower_stat_tile_text(marker.kind, &tower_report),
+        };
+    }
+
+    if let Ok(mut text) = texts.p1().single_mut() {
+        text.0 = crate::i18n::tf(
+            "{} · {} · Lv{}\n种族基础：{}",
+            &[
+                &crate::i18n::t(hero.race.name()),
+                &crate::i18n::t(hero.weapon.name()),
+                &hero.level.to_string(),
+                &crate::i18n::t(hero.race.blurb()),
+            ],
+        );
+    }
+
+    if let Ok(mut text) = texts.p2().single_mut() {
+        let conditional = hero_report.conditional;
+        let alive = if battlefield_hero.is_some() {
+            crate::i18n::t("已生效")
+        } else {
+            crate::i18n::t("英雄阵亡，暂未生效")
+        };
+        text.0 = crate::i18n::tf(
+            "护甲 {}（成长{}）  穿甲 {}  技能冷却 {}波\n战场条件伤害{}\n英雄存活：击杀金币{}  每秒回血{}\n英雄光环（{}）：塔伤害{}  塔攻速{}  塔射程{}\n召唤物强度{}",
+            &[
+                &format!("{:.0}", hero_report.current.armor),
+                &signed_number(hero_report.total.armor_add),
+                &format!("{:.0}", hero_report.current.armor_pierce),
+                &hero_report.current.skill_cooldown.to_string(),
+                &signed_percent(conditional.battlefield_damage_mult),
+                &signed_fraction(conditional.kill_gold),
+                &signed_fraction(conditional.regen_per_second),
+                &alive,
+                &signed_fraction(conditional.tower_aura_damage),
+                &signed_fraction(conditional.tower_aura_attack_speed),
+                &signed_fraction(conditional.tower_aura_range),
+                &signed_fraction(conditional.summon_power),
+            ],
+        );
+    }
+
+    if let Ok(mut text) = texts.p3().single_mut() {
+        text.0 = [
+            crate::i18n::tf("等级成长：{}", &[&contribution_summary(hero_report.level)]),
+            crate::i18n::tf(
+                "武器天赋：{}",
+                &[&contribution_summary(hero_report.weapon_talents)],
+            ),
+            crate::i18n::tf("装备套装：{}", &[&contribution_summary(hero_report.gear)]),
+            crate::i18n::tf(
+                "本局选牌：{}",
+                &[&contribution_summary(hero_report.run_cards)],
+            ),
+        ]
+        .join("\n");
+    }
+
+    if let Ok(mut text) = texts.p4().single_mut() {
+        let aura = hero_report.conditional;
+        let mut lines = vec![
+            crate::i18n::tf(
+                "永久强化：{}",
+                &[&contribution_summary(tower_report.permanent)],
+            ),
+            crate::i18n::tf(
+                "本局选牌：{}",
+                &[&contribution_summary(tower_report.run_cards)],
+            ),
+            crate::i18n::tf(
+                "英雄光环（存活且范围内）：伤害{}  攻速{}  射程{}",
+                &[
+                    &signed_fraction(aura.tower_aura_damage),
+                    &signed_fraction(aura.tower_aura_attack_speed),
+                    &signed_fraction(aura.tower_aura_range),
+                ],
+            ),
+        ];
+        if let Some(tower) = selected_tower {
+            let selected = selected_tower_attribute_report(tower);
+            lines.push(crate::i18n::t("当前选中塔"));
+            lines.push(crate::i18n::tf(
+                "{} Lv{}  伤害 {}  攻速 {}/秒  射程 {}",
+                &[
+                    &crate::i18n::t(tower.kind.def().name),
+                    &tower.level.to_string(),
+                    &format!("{:.0}", selected.damage),
+                    &format!("{:.2}", selected.attack_speed),
+                    &format!("{:.0}", selected.range),
+                ],
+            ));
+            lines.push(crate::i18n::tf(
+                "生命 {}  护甲 {}  局部伤害{}  局部攻速{}  局部射程{}",
+                &[
+                    &format!("{:.0}", selected.max_hp),
+                    &format!("{:.0}", selected.armor),
+                    &signed_percent(selected.local_damage_mult),
+                    &signed_percent(selected.local_attack_speed_mult),
+                    &signed_percent(selected.local_range_mult),
+                ],
+            ));
+            lines.push(crate::i18n::tf(
+                "局部来源：邻接{}  支援叠层{}  英雄光环伤害{} / 攻速{}",
+                &[
+                    &signed_fraction(selected.synergy_add),
+                    &signed_fraction(selected.battle_focus_add),
+                    &signed_fraction(selected.aura_damage_add),
+                    &signed_fraction(selected.aura_attack_speed_add),
+                ],
+            ));
+            let resonance = equipment_set_bonus_summary(&tower.equipment);
+            if !resonance.is_empty() {
+                lines.push(crate::i18n::tf("宝石{}", &[&resonance]));
+            }
+        } else {
+            lines.push(crate::i18n::t(
+                "选中一座防御塔后，这里会显示该塔的宝石、协同、支援与光环后的最终值。",
+            ));
+        }
+        text.0 = lines.join("\n");
+    }
+
+    if let Ok(mut text) = texts.p5().single_mut() {
+        if roguelite.picked.is_empty() {
+            text.0 = crate::i18n::t("尚未选择构筑天赋；每波结束后的选择会记录在这里。");
+        } else {
+            let mut grouped: Vec<(crate::roguelite::RogueliteTalent, usize)> = Vec::new();
+            for picked in &roguelite.picked {
+                if let Some((_, count)) = grouped.iter_mut().find(|(item, _)| item == picked) {
+                    *count += 1;
+                } else {
+                    grouped.push((*picked, 1));
+                }
+            }
+            text.0 = grouped
+                .into_iter()
+                .map(|(talent, count)| {
+                    crate::i18n::tf(
+                        "[{}] {} ×{}",
+                        &[
+                            &crate::i18n::t(talent.pool().label()),
+                            &crate::i18n::t(&talent.name(&hero)),
+                            &count.to_string(),
+                        ],
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("  |  ");
+        }
     }
 }
 
@@ -4688,6 +5341,7 @@ pub fn hud_buttons(
                 sel.grabbed_from_palette = false;
                 confirm_state.3.dock_open = false;
                 confirm_state.3.hero_open = false;
+                confirm_state.3.stats_open = false;
             }
             UiAction::StartWave => {
                 if confirm_state.4.is_waiting() {
@@ -4703,9 +5357,18 @@ pub fn hud_buttons(
             }
             UiAction::ToggleHeroPanel => {
                 confirm_state.3.hero_open = !confirm_state.3.hero_open;
+                confirm_state.3.stats_open = false;
+                confirm_state.3.settings_open = false;
+            }
+            UiAction::ToggleRunStats => {
+                confirm_state.3.stats_open = !confirm_state.3.stats_open;
+                confirm_state.3.hero_open = false;
+                confirm_state.3.settings_open = false;
             }
             UiAction::ToggleSettings => {
                 confirm_state.3.settings_open = !confirm_state.3.settings_open;
+                confirm_state.3.hero_open = false;
+                confirm_state.3.stats_open = false;
             }
             UiAction::CycleQuality => {
                 visuals.0.cycle();
@@ -5280,6 +5943,9 @@ fn tooltip_text(
         UiAction::RefineEquipment(_) => crate::i18n::t("精炼：消耗重复装备，合成更高品质"),
         UiAction::ToggleDock => crate::i18n::t("选中防御塔后显示升级与宝石镶嵌面板"),
         UiAction::ToggleHeroPanel => crate::i18n::t("打开 / 收起英雄面板（纸娃娃 · 背包 · 天赋）"),
+        UiAction::ToggleRunStats => {
+            crate::i18n::t("打开 / 收起本局总属性（英雄 · 防御塔 · 选牌来源）")
+        }
         UiAction::ToggleSettings => {
             crate::i18n::t("打开 / 收起设置（画质 · 亮度 · 全屏 · 难度 · 重新开始 · 返回主页）")
         }
@@ -6999,7 +7665,12 @@ pub fn update_hero_paperdoll_panel(
         image.color = Color::WHITE;
     }
 
-    let weapon = sprites.hero_skills[&hero.weapon].clone();
+    // 已装备武器槽用武器实物图（与纸娃娃/战场一致）；技能符文图标仍用于武器库。
+    let weapon = sprites
+        .hero_weapon_props
+        .get(&hero.weapon_kind())
+        .cloned()
+        .unwrap_or_else(|| sprites.hero_skills[&hero.weapon].clone());
     for mut image in &mut weapon_icons {
         image.image = weapon.clone();
         image.color = Color::WHITE;
