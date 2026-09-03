@@ -1,0 +1,20 @@
+(
+    laser: (
+        base_dps_mult: 1.0,
+        charge_rate: 1.0,
+        dps_cap: 3000.0,
+        visual_full_charge: 5.0,
+        width_bonus: 7.0,
+        hit_radius_base: 15.0,
+        hit_radius_bonus: 0.0,
+    ),
+    prism: (
+        base_dps_mult: 2.25,
+        charge_rate: 1.35,
+        dps_cap: 9000.0,
+        visual_full_charge: 4.0,
+        width_bonus: 14.0,
+        hit_radius_base: 18.0,
+        hit_radius_bonus: 16.0,
+    ),
+)
