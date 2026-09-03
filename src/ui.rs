@@ -8637,6 +8637,52 @@ pub fn hero_buttons(
                     &mut vfx,
                     &mut run,
                 ) {
+                    // 技能释放演出（多拍分层，参照线性施法的相位/滑环思路）：
+                    // 核心闪 → 主辉光 → 冲击拍；施法系再沿朝向滑环下行，
+                    // 近战补横扫弧；0.3/0.45s 余晖收尾。伤害时序不变。
+                    {
+                        use crate::hero::HeroWeapon as W;
+                        let col = loadout.weapon.skill_color();
+                        let pos = source.pos;
+                        let dir = source.facing;
+                        let mut ev: Vec<(f32, crate::vfx::VfxEvent)> = vec![
+                            (0.00, crate::vfx::VfxEvent::ElementPulse {
+                                pos, color: Color::WHITE, strong: false }),
+                            (0.05, crate::vfx::VfxEvent::Muzzle { pos, dir, color: col }),
+                            (0.08, crate::vfx::VfxEvent::ElementPulse {
+                                pos, color: col, strong: true }),
+                            (0.30, crate::vfx::VfxEvent::ElementPulse {
+                                pos, color: col, strong: false }),
+                            (0.48, crate::vfx::VfxEvent::ElementPulse {
+                                pos: pos + dir * 14.0, color: col, strong: false }),
+                        ];
+                        match loadout.weapon {
+                            W::StarfireStaff | W::StormOrb | W::SummonStaff
+                            | W::ShadowBow | W::SentryCrossbow => {
+                                for i in 1..=4 {
+                                    ev.push((
+                                        0.10 + i as f32 * 0.06,
+                                        crate::vfx::VfxEvent::ElementPulse {
+                                            pos: pos + dir * (i as f32 * 40.0),
+                                            color: col,
+                                            strong: i == 4,
+                                        },
+                                    ));
+                                }
+                            }
+                            W::ForgeHammer => ev.push((0.10,
+                                crate::vfx::VfxEvent::HammerImpact {
+                                    pos: pos + dir * 26.0,
+                                    angle: dir.to_angle(),
+                                    color: col })),
+                            _ => ev.push((0.08,
+                                crate::vfx::VfxEvent::MeleeCleave {
+                                    pos: pos + dir * 20.0,
+                                    radius: 46.0,
+                                    color: col })),
+                        }
+                        commands.spawn(crate::vfx::VfxTimeline { t: 0.0, events: ev });
+                    }
                     loadout.skill_cd = loadout.skill_cooldown_max();
                     sfx.write(crate::audio::SfxEvent(match loadout.weapon {
                         crate::hero::HeroWeapon::BannerSword => crate::audio::Sound::Boss,

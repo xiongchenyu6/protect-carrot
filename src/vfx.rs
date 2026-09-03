@@ -39,7 +39,7 @@ pub struct SwordSwing {
 }
 
 /// A request for a one-off visual effect at a world position.
-#[derive(Message)]
+#[derive(Message, Clone)]
 pub enum VfxEvent {
     /// Spark burst (a tower hit landed). `element` adds flavored particles
     /// (frost shards, toxic drips, fire embers, …) on top of the base impact.
@@ -1739,6 +1739,40 @@ pub fn enemy_hit_pop(time: Res<Time>, mut q: Query<(&mut Enemy, &mut Transform)>
             tf.scale = Vec3::splat(pop);
         } else if tf.scale != Vec3::ONE {
             tf.scale = Vec3::ONE;
+        }
+    }
+}
+
+
+/// 技能演出时间轴：把一串 VfxEvent 按相对时刻排布（蓄力→释放→冲击→余晖
+/// 的多拍分层观感，参照线性施法的相位机思路）。事件到点即写出，排空自毁。
+#[derive(Component)]
+pub struct VfxTimeline {
+    pub t: f32,
+    /// (触发时刻, 事件)，按时刻升序。
+    pub events: Vec<(f32, VfxEvent)>,
+}
+
+pub fn run_vfx_timelines(
+    mut commands: Commands,
+    time: Res<Time>,
+    run: Res<crate::game::RunState>,
+    mut timelines: Query<(Entity, &mut VfxTimeline)>,
+    mut vfx: MessageWriter<VfxEvent>,
+) {
+    let dt = time.delta_secs() * run.game_speed;
+    for (entity, mut tl) in &mut timelines {
+        tl.t += dt;
+        let t = tl.t;
+        while let Some((when, _)) = tl.events.first() {
+            if *when > t {
+                break;
+            }
+            let (_, ev) = tl.events.remove(0);
+            vfx.write(ev);
+        }
+        if tl.events.is_empty() {
+            commands.entity(entity).despawn();
         }
     }
 }

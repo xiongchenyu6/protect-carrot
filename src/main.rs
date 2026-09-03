@@ -541,6 +541,7 @@ fn main() {
             enemy::update_hp_bars,
             tower::update_summon_hp_bars,
             vfx::spawn_vfx,
+            vfx::run_vfx_timelines,
             vfx::update_particles,
             vfx::animate_sword_swing,
             vfx::update_float_text,
