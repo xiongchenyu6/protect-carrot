@@ -7,10 +7,10 @@
 
 use bevy::prelude::*;
 
-use crate::data::{episode_of, EPISODES, EPISODE_LEN};
+use crate::data::{EPISODE_LEN, EPISODES, episode_of};
 use crate::game::CurrentLevel;
 use crate::states::GameState;
-use crate::ui::UiFont;
+use crate::ui::{HudPanels, UiFont};
 
 const CARD_FADE_IN: f32 = 0.45;
 const CARD_HOLD: f32 = 1.9;
@@ -77,10 +77,7 @@ fn spawn_episode_card(
         ))
         .with_children(|card| {
             card.spawn((
-                Text::new(crate::i18n::tf(
-                    "第 {} 章",
-                    &[&(ep + 1).to_string()],
-                )),
+                Text::new(crate::i18n::tf("第 {} 章", &[&(ep + 1).to_string()])),
                 TextFont {
                     font: f.clone().into(),
                     font_size: bevy::text::FontSize::Px(26.0),
@@ -115,17 +112,26 @@ fn spawn_episode_card(
 fn tick_episode_card(
     mut commands: Commands,
     time: Res<Time>,
-    mut cards: Query<(Entity, &mut EpisodeCard, &mut BackgroundColor)>,
+    panels: Option<Res<HudPanels>>,
+    mut cards: Query<(Entity, &mut EpisodeCard, &mut BackgroundColor, &mut Node)>,
     mut texts: Query<&mut TextColor, With<EpisodeCardText>>,
 ) {
     let total = CARD_FADE_IN + CARD_HOLD + CARD_FADE_OUT;
-    for (entity, mut card, mut bg) in &mut cards {
+    let full_panel_open = panels.is_some_and(|panels| {
+        panels.hero_open || panels.stats_open || panels.settings_open || panels.dock_open
+    });
+    for (entity, mut card, mut bg, mut node) in &mut cards {
         card.timer += time.delta_secs();
         let t = card.timer;
         if t >= total {
             commands.entity(entity).despawn();
             continue;
         }
+        node.display = if full_panel_open {
+            Display::None
+        } else {
+            Display::Flex
+        };
         // alpha 包络：淡入 → 保持 → 淡出。
         let alpha = if t < CARD_FADE_IN {
             t / CARD_FADE_IN

@@ -30,35 +30,34 @@ impl Plugin for LightingPlugin {
         app.add_plugins(FogOfWarPlugin);
         #[cfg(target_arch = "wasm32")]
         app.add_message::<ResetFogOfWar>();
-        app
-            .add_systems(
-                Update,
-                (
-                    sync_firefly_camera,
-                    apply_brightness_to_lights,
-                    attach_shadow_casters,
-                    spawn_tower_lights,
-                    update_tower_lights,
-                    spawn_hero_weapon_lights,
-                    spawn_fire_ground_lights,
-                    update_follow_lights,
-                    update_hero_weapon_lights,
-                    spawn_projectile_shadows,
-                    spawn_contact_shadows,
-                    update_projectile_shadows,
-                    update_contact_shadows,
-                    update_timed_lights,
-                ),
+        app.add_systems(
+            Update,
+            (
+                sync_firefly_camera,
+                apply_brightness_to_lights,
+                attach_shadow_casters,
+                spawn_tower_lights,
+                update_tower_lights,
+                spawn_hero_weapon_lights,
+                spawn_fire_ground_lights,
+                update_follow_lights,
+                update_hero_weapon_lights,
+                spawn_projectile_shadows,
+                spawn_contact_shadows,
+                update_projectile_shadows,
+                update_contact_shadows,
+                update_timed_lights,
+            ),
+        )
+        .add_systems(
+            Update,
+            (
+                configure_fog_of_war,
+                sync_fog_source_enabled,
+                update_enemy_fog_visibility,
             )
-            .add_systems(
-                Update,
-                (
-                    configure_fog_of_war,
-                    sync_fog_source_enabled,
-                    update_enemy_fog_visibility,
-                )
-                    .chain(),
-            );
+                .chain(),
+        );
     }
 }
 

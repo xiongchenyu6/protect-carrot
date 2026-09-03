@@ -30,7 +30,7 @@ use crate::hero::{HeroLoadout, HeroWeapon, Race};
 use crate::hero_gear::{HeroGear, HeroGearInventory, HeroGearSet, HeroGearSlot};
 use crate::i18n::{Language, tr};
 use crate::lighting::LightingSettings;
-use crate::meta::{Abilities, Ability, Talents, talent_cost};
+use crate::meta::{Talents, talent_cost};
 use crate::monster::{
     BossSkill, MONSTER_SPECIES, boss_skill, elite_affix_pool, is_boss_wave, species_by_id,
 };
@@ -461,7 +461,6 @@ pub enum UiAction {
     TalentDamage,
     TalentRange,
     TalentSpeed,
-    Cast(Ability),
     CycleQuality,
     CycleBrightness,
     CycleVolume,
@@ -2344,36 +2343,6 @@ pub fn spawn_hud(
             // (Wave/pause/speed controls moved to the pinned top-left bar so they're
             // always reachable regardless of rail scroll.)
 
-            // --- abilities (icons; tap/hover for details). Hidden on touch since
-            // the bottom bar carries them. ---
-            p.spawn((
-                section_icon_node(sprites.ui["sec_skill"].clone()),
-                TouchHiddenRow,
-            ));
-            p.spawn((row_node(), TouchHiddenRow)).with_children(|row| {
-                icon_button(
-                    row,
-                    sprites.abilities[&Ability::Meteor].clone(),
-                    UiAction::Cast(Ability::Meteor),
-                    ability_color(Ability::Meteor),
-                    (),
-                );
-                icon_button(
-                    row,
-                    sprites.abilities[&Ability::Freeze].clone(),
-                    UiAction::Cast(Ability::Freeze),
-                    ability_color(Ability::Freeze),
-                    (),
-                );
-                icon_button(
-                    row,
-                    sprites.abilities[&Ability::GoldRush].clone(),
-                    UiAction::Cast(Ability::GoldRush),
-                    ability_color(Ability::GoldRush),
-                    (),
-                );
-            });
-
             // --- talents (icons; tap/hover for details) ---
             p.spawn(section_icon_node(sprites.ui["sec_talent"].clone()));
             p.spawn(row_node()).with_children(|row| {
@@ -3368,15 +3337,7 @@ pub fn spawn_hud(
                 UiAction::CycleSpeed,
                 BTN_BG,
             );
-            // Abilities + hero skill as icons (tap shows the tooltip; cooldown greys bg).
-            for ab in [Ability::Meteor, Ability::Freeze, Ability::GoldRush] {
-                side_icon_button(
-                    bar,
-                    sprites.abilities[&ab].clone(),
-                    UiAction::Cast(ab),
-                    ability_color(ab),
-                );
-            }
+            // 英雄技能（塔系全局技能已移除，主动技只保留英雄）。
             side_icon_button(
                 bar,
                 sprites.hero_skills[&hero.weapon].clone(),
@@ -5297,7 +5258,6 @@ pub fn hud_buttons(
     mut towers: Query<(Entity, &mut crate::tower::Tower)>,
     mut windows: Query<&mut Window>,
     mut talents: ResMut<Talents>,
-    mut abilities: ResMut<Abilities>,
     mut inv: ResMut<EquipmentInventory>,
     mut visuals: (ResMut<GraphicsQuality>, ResMut<LightingSettings>),
     // Bundled into one tuple param to stay within Bevy's 16-param system limit.
@@ -5573,9 +5533,6 @@ pub fn hud_buttons(
                     run.show(crate::i18n::t("金币不足"));
                 }
             }
-            UiAction::Cast(a) => {
-                abilities.pending = Some(*a);
-            }
             UiAction::Equip(item) => {
                 if let Some(e) = sel.selected {
                     if let Ok((_, mut t)) = towers.get_mut(e) {
@@ -5616,7 +5573,6 @@ pub fn tooltip_system(
     time: Res<Time>,
     buttons: Query<(&Interaction, &UiAction)>,
     talents: Res<Talents>,
-    abilities: Res<Abilities>,
     hero: Res<HeroLoadout>,
     gear_inv: Res<HeroGearInventory>,
     levels: Res<Levels>,
@@ -5640,7 +5596,7 @@ pub fn tooltip_system(
     // it; hover (desktop) shows it instantly and dismisses as soon as it ends.
     if let Some(s) = pressed
         .as_ref()
-        .and_then(|a| tooltip_text(a, &talents, &abilities, &hero, &gear_inv, &levels))
+        .and_then(|a| tooltip_text(a, &talents, &hero, &gear_inv, &levels))
     {
         text.0 = s;
         node.display = Display::Flex;
@@ -5649,7 +5605,7 @@ pub fn tooltip_system(
     }
     if let Some(s) = hovered
         .as_ref()
-        .and_then(|a| tooltip_text(a, &talents, &abilities, &hero, &gear_inv, &levels))
+        .and_then(|a| tooltip_text(a, &talents, &hero, &gear_inv, &levels))
     {
         text.0 = s;
         node.display = Display::Flex;
@@ -5668,7 +5624,6 @@ pub fn tooltip_system(
 fn tooltip_text(
     a: &UiAction,
     talents: &Talents,
-    abilities: &Abilities,
     hero: &HeroLoadout,
     gear_inv: &HeroGearInventory,
     levels: &Levels,
@@ -5676,48 +5631,6 @@ fn tooltip_text(
     // Info icons carry their tooltip text directly.
     if let UiAction::Info(s) = a {
         return Some(crate::i18n::t(s));
-    }
-    // For an ability, append its live cooldown status.
-    if let UiAction::Cast(ab) = a {
-        let cd = abilities.cd(*ab);
-        let (name, base) = match ab {
-            Ability::Meteor => (
-                "陨石",
-                crate::i18n::tf(
-                    "花费{}金 · 冷却{}回合\n轰炸血量最高的敌人及周围",
-                    &[
-                        &Abilities::METEOR_COST.to_string(),
-                        &Abilities::METEOR_MAX.to_string(),
-                    ],
-                ),
-            ),
-            Ability::Freeze => (
-                "冰封",
-                crate::i18n::tf(
-                    "花费{}金 · 冷却{}回合\n全场敌人冻结 2.5 秒",
-                    &[
-                        &Abilities::FREEZE_COST.to_string(),
-                        &Abilities::FREEZE_MAX.to_string(),
-                    ],
-                ),
-            ),
-            Ability::GoldRush => (
-                "金币潮",
-                crate::i18n::tf(
-                    "献祭1生命 · 冷却{}回合\n立即获得 120 金币",
-                    &[&Abilities::GOLD_MAX.to_string()],
-                ),
-            ),
-        };
-        let status = if cd > 0 {
-            crate::i18n::tf("\n[冷却中] 还需 {} 回合", &[&cd.to_string()])
-        } else {
-            crate::i18n::t("\n[就绪] 可释放")
-        };
-        return Some(crate::i18n::tf(
-            "{} · {}{}",
-            &[&crate::i18n::t(name), &base, &status],
-        ));
     }
     Some(match a {
         UiAction::Build(kind) => {
@@ -5953,28 +5866,13 @@ fn tooltip_text(
     })
 }
 
-fn ability_color(a: Ability) -> Color {
-    match a {
-        Ability::Meteor => Color::srgb(0.6, 0.3, 0.2),
-        Ability::Freeze => Color::srgb(0.2, 0.45, 0.6),
-        Ability::GoldRush => Color::srgb(0.5, 0.45, 0.15),
-    }
-}
-
 /// Grey out ability buttons while on cooldown; restore their color when ready.
 pub fn update_ability_buttons(
-    abilities: Res<Abilities>,
     hero: Res<HeroLoadout>,
     mut q: Query<(&UiAction, &mut BackgroundColor)>,
 ) {
     for (a, mut bg) in &mut q {
-        if let UiAction::Cast(ab) = a {
-            bg.0 = if abilities.cd(*ab) > 0 {
-                Color::srgb(0.16, 0.16, 0.18)
-            } else {
-                ability_color(*ab)
-            };
-        } else if matches!(a, UiAction::HeroSkill) {
+        if matches!(a, UiAction::HeroSkill) {
             bg.0 = if hero.skill_cd > 0 {
                 Color::srgb(0.16, 0.16, 0.18)
             } else {

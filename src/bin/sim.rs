@@ -1176,7 +1176,6 @@ fn run_sim_with_hero(
         .insert_resource(hero_profile.loadout())
         .init_resource::<hero_gear::HeroGearInventory>()
         .init_resource::<meta::Talents>()
-        .init_resource::<meta::Abilities>()
         .init_resource::<protect_carrot::roguelite::RogueliteRun>()
         .insert_resource(if matches!(hero_profile, HeroScenario::Saved) {
             equipment_inv::EquipmentInventory::default()

@@ -6,7 +6,6 @@
 use crate::data::{EnemyKind, TowerKind};
 use crate::equipment::Equipment;
 use crate::hero::{HeroLoadout, HeroWeapon, Race};
-use crate::meta::Ability;
 use crate::monster::{BossSkill, MONSTER_SPECIES};
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -23,7 +22,6 @@ pub struct Sprites {
     /// 英雄武器实物图（同纸娃娃武器图层），用于已装备武器槽。
     pub hero_weapon_props: HashMap<crate::hero_gear::HeroWeaponKind, Handle<Image>>,
     /// Active-ability icons (meteor / freeze / gold rush).
-    pub abilities: HashMap<Ability, Handle<Image>>,
     /// Talent icons, keyed by "damage" / "range" / "speed".
     pub talents: HashMap<&'static str, Handle<Image>>,
     /// Hero weapon portraits keyed by weapon.
@@ -131,14 +129,6 @@ pub fn build_sprites(assets: &AssetServer) -> Sprites {
             assets.load(format!("sprites/equipment/{}.webp", item.sprite_name())),
         );
     }
-    let mut abilities = HashMap::new();
-    for (ab, file) in [
-        (Ability::Meteor, "meteor"),
-        (Ability::Freeze, "freeze"),
-        (Ability::GoldRush, "goldrush"),
-    ] {
-        abilities.insert(ab, assets.load(format!("sprites/abilities/{}.webp", file)));
-    }
     let mut talents = HashMap::new();
     for key in ["damage", "range", "speed"] {
         talents.insert(key, assets.load(format!("sprites/talents/{}.webp", key)));
@@ -181,7 +171,6 @@ pub fn build_sprites(assets: &AssetServer) -> Sprites {
         equipment,
         hero_gear_icons,
         hero_weapon_props,
-        abilities,
         talents,
         heroes,
         hero_skills,

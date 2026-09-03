@@ -300,7 +300,6 @@ fn main() {
     .init_resource::<hero_gear::HeroGearInventory>()
     .init_resource::<ui::TooltipHold>()
     .init_resource::<meta::Talents>()
-    .init_resource::<meta::Abilities>()
     .init_resource::<roguelite::RogueliteRun>()
     .init_resource::<equipment::EquipmentInventory>()
     .init_resource::<bestiary::Bestiary>()
@@ -541,9 +540,6 @@ fn main() {
         (
             enemy::update_hp_bars,
             tower::update_summon_hp_bars,
-            meta::tick_cooldowns,
-            meta::ability_keys,
-            meta::cast_abilities,
             vfx::spawn_vfx,
             vfx::update_particles,
             vfx::animate_sword_swing,

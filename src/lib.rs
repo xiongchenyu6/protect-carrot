@@ -4,6 +4,7 @@
 //! headless balance simulator (`bin/sim.rs`) can share the exact same logic —
 //! the simulator must never diverge from what players actually run.
 
+pub mod attributes;
 pub mod audio;
 pub mod bestiary;
 pub mod board;
@@ -22,12 +23,12 @@ pub mod i18n;
 pub mod lighting;
 pub mod meta;
 pub mod monster;
+pub mod mutators;
+pub mod polish;
 pub mod quality;
 pub mod roguelite;
 pub mod sprites;
 pub mod states;
-pub mod mutators;
-pub mod polish;
 pub mod tower;
 pub mod tuning;
 pub mod tutorial;

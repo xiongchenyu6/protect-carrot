@@ -126,6 +126,7 @@ enum CaptureScenario {
     HeroSkillSmoke,
     RogueliteDraft,
     RoguelitePick,
+    RunStats,
 }
 
 #[derive(Clone)]
@@ -221,7 +222,6 @@ fn main() -> AppExit {
     .init_resource::<hero_gear::HeroGearInventory>()
     .init_resource::<ui::TooltipHold>()
     .init_resource::<meta::Talents>()
-    .init_resource::<meta::Abilities>()
     .init_resource::<roguelite::RogueliteRun>()
     .init_resource::<equipment::EquipmentInventory>()
     .init_resource::<bestiary::Bestiary>()
@@ -359,7 +359,6 @@ fn main() -> AppExit {
             build::update_tower_hp_bars,
             enemy::update_hp_bars,
             tower::update_summon_hp_bars,
-            meta::tick_cooldowns,
             vfx::spawn_vfx,
             vfx::update_particles,
             vfx::animate_sword_swing,
@@ -387,6 +386,7 @@ fn main() -> AppExit {
             ui::update_roguelite_draft_panel
                 .after(prepare_roguelite_draft_capture)
                 .after(drive_hero_skill_smoke),
+            ui::update_run_stats_panel.after(prepare_capture_level),
             press_capture_escape_once.before(ui::close_hud_panels_with_escape),
             ui::close_hud_panels_with_escape,
             ui::update_panel_visibility.after(prepare_capture_level),
@@ -406,6 +406,9 @@ fn main() -> AppExit {
             verify_roguelite_draft.after(ui::update_roguelite_draft_panel),
             verify_roguelite_pick.after(prepare_roguelite_draft_capture),
             verify_fog_of_war.after(prepare_capture_level),
+            verify_run_stats
+                .after(ui::update_run_stats_panel)
+                .after(ui::update_panel_visibility),
         )
             .run_if(in_state(GameState::Playing)),
     )
@@ -616,6 +619,9 @@ fn capture_scenario_from_env() -> CaptureScenario {
             CaptureScenario::RogueliteDraft
         }
         Some("roguelite_pick") | Some("roguelite-pick") => CaptureScenario::RoguelitePick,
+        Some("run_stats") | Some("run-stats") | Some("stats") | Some("attributes") => {
+            CaptureScenario::RunStats
+        }
         _ => CaptureScenario::Default,
     }
 }
@@ -1273,6 +1279,74 @@ fn verify_fog_of_war(
     );
 }
 
+fn verify_run_stats(
+    scenario: Res<CaptureScenario>,
+    prepared: Res<CapturePrepared>,
+    roots: Query<&Node, With<ui::RunStatsRoot>>,
+    tiles: Query<&Text, With<ui::RunStatTileText>>,
+    hero_sources: Query<&Text, With<ui::RunStatsHeroSourcesText>>,
+    tower_details: Query<&Text, With<ui::RunStatsTowerDetailText>>,
+    cards: Query<&Text, With<ui::RunStatsCardsText>>,
+    mut done: Local<bool>,
+) {
+    if *done || *scenario != CaptureScenario::RunStats || !prepared.scenario_ready {
+        return;
+    }
+
+    let root = roots
+        .single()
+        .expect("[capture/stats] missing run attribute panel root");
+    assert_ne!(
+        root.display,
+        Display::None,
+        "[capture/stats] run attribute panel is hidden"
+    );
+
+    let tile_texts: Vec<&str> = tiles.iter().map(|text| text.0.as_str()).collect();
+    assert_eq!(
+        tile_texts.len(),
+        9,
+        "[capture/stats] expected six hero and three tower tiles"
+    );
+    assert!(
+        tile_texts
+            .iter()
+            .all(|text| !text.is_empty() && text.contains('%')),
+        "[capture/stats] one or more total tiles were not populated: {tile_texts:?}"
+    );
+
+    let hero_sources = hero_sources
+        .single()
+        .expect("[capture/stats] missing hero source breakdown");
+    let tower_details = tower_details
+        .single()
+        .expect("[capture/stats] missing tower source breakdown");
+    let cards = cards
+        .single()
+        .expect("[capture/stats] missing run card history");
+    assert!(
+        hero_sources.0.contains("本局选牌") || hero_sources.0.contains("Run cards"),
+        "[capture/stats] hero run-card source is absent: {}",
+        hero_sources.0
+    );
+    assert!(
+        tower_details.0.contains("宝石") || tower_details.0.contains("Gem"),
+        "[capture/stats] selected tower gem source is absent: {}",
+        tower_details.0
+    );
+    assert!(
+        cards.0.contains("×2"),
+        "[capture/stats] duplicate card stacking is absent: {}",
+        cards.0
+    );
+
+    *done = true;
+    println!(
+        "[capture/stats] ledger passed: {} populated tiles, duplicate card stack and selected-tower gem source visible",
+        tile_texts.len()
+    );
+}
+
 fn prepare_roguelite_draft_capture(
     scenario: Res<CaptureScenario>,
     mut prepared: ResMut<CapturePrepared>,
@@ -1521,7 +1595,6 @@ fn prepare_capture_level(
     mut commands: Commands,
     board: Option<Res<Board>>,
     sprites: Res<sprites::Sprites>,
-    talents: Res<meta::Talents>,
     current: Res<CurrentLevel>,
     scenario: Res<CaptureScenario>,
     mut encounter_rng: ResMut<EncounterRng>,
@@ -1530,11 +1603,17 @@ fn prepare_capture_level(
     mut panels: ResMut<ui::HudPanels>,
     mut inventory: ResMut<equipment::EquipmentInventory>,
     mut gear_inventory: ResMut<hero_gear::HeroGearInventory>,
-    mut loadout: ResMut<hero::HeroLoadout>,
+    build_state: (
+        ResMut<meta::Talents>,
+        ResMut<hero::HeroLoadout>,
+        ResMut<roguelite::RogueliteRun>,
+    ),
     mut escape: ResMut<CaptureEscapeAfterScenario>,
     mut towers: Query<(Entity, &mut tower::Tower, &mut Transform)>,
     mut prepared: ResMut<CapturePrepared>,
 ) {
+    let (mut talents, mut loadout, mut roguelite_run) = build_state;
+
     if !prepared.level_ready {
         let Some(board) = board else {
             return;
@@ -1611,6 +1690,8 @@ fn prepare_capture_level(
         &mut inventory,
         &mut gear_inventory,
         &mut loadout,
+        &mut talents,
+        &mut roguelite_run,
         &mut escape,
         &mut towers,
     ) {
@@ -1627,6 +1708,8 @@ fn apply_capture_scenario(
     inventory: &mut equipment::EquipmentInventory,
     gear_inventory: &mut hero_gear::HeroGearInventory,
     loadout: &mut hero::HeroLoadout,
+    talents: &mut meta::Talents,
+    roguelite_run: &mut roguelite::RogueliteRun,
     escape: &mut CaptureEscapeAfterScenario,
     towers: &mut Query<(Entity, &mut tower::Tower, &mut Transform)>,
 ) -> bool {
@@ -1636,9 +1719,118 @@ fn apply_capture_scenario(
         CaptureScenario::HeroSkillSmoke => false,
         CaptureScenario::RogueliteDraft => false,
         CaptureScenario::RoguelitePick => false,
+        CaptureScenario::RunStats => {
+            loadout.race = hero::Race::Human;
+            loadout.weapon = hero::HeroWeapon::OathShield;
+            loadout.level = 18;
+            loadout.talent_points = 7;
+            loadout.weapon_talents =
+                [[0; hero::HeroLoadout::TALENT_SLOTS]; hero::HeroWeapon::ALL.len()];
+            let weapon_index = loadout.weapon_index();
+            loadout.weapon_talents[weapon_index] = [2, 2, 1, 1, 0, 0];
+            loadout.gear = [None; hero_gear::HeroGearSlot::COUNT];
+            for item in [
+                hero_gear::HeroGear::VowPlate,
+                hero_gear::HeroGear::BloodBanner,
+                hero_gear::HeroGear::CarrotHalo,
+                hero_gear::HeroGear::EngineerTreads,
+            ] {
+                gear_inventory.ensure_runtime_owned(item);
+                loadout.gear[item.def().slot.idx()] = Some(item);
+            }
+            loadout.run_mods.damage_mult = 1.10 * 1.15;
+            loadout.run_mods.cooldown_mult = 0.90;
+            loadout.run_mods.hp_mult = 1.08;
+            loadout.run_mods.move_mult = 1.08;
+            loadout.run_mods.armor_add = 3.0;
+            loadout.alive = true;
+
+            talents.damage_mult = 1.15;
+            talents.range_mult = 1.12;
+            talents.firerate_mult = 0.90;
+            talents.rogue_damage_mult = 1.05 * 1.08;
+            talents.rogue_range_mult = 1.05;
+            talents.rogue_firerate_mult = 0.95 * 0.90 * 0.90;
+            talents.dmg_lvl = 1;
+            talents.rng_lvl = 1;
+            talents.spd_lvl = 1;
+
+            roguelite_run.draft = None;
+            roguelite_run.picked = vec![
+                roguelite::RogueliteTalent::HumanFormation,
+                roguelite::RogueliteTalent::HumanLogistics,
+                roguelite::RogueliteTalent::WeaponMastery,
+                roguelite::RogueliteTalent::WeaponTempo,
+                roguelite::RogueliteTalent::TowerOverclock,
+                roguelite::RogueliteTalent::TowerOverclock,
+                roguelite::RogueliteTalent::GemResonance,
+            ];
+
+            let mut hero_entity = None;
+            let mut fallback = None;
+            let mut preferred = None;
+            for (entity, mut tower, _) in towers.iter_mut() {
+                if tower.hero {
+                    hero_entity = Some(entity);
+                    continue;
+                }
+                let def = tower.kind.def();
+                tower.base_damage = def.damage * talents.damage_mult * talents.rogue_damage_mult;
+                tower.damage = tower.base_damage;
+                tower.range = def.range * talents.range_mult * talents.rogue_range_mult;
+                tower.cooldown =
+                    def.cooldown_ms / 1000.0 * talents.firerate_mult * talents.rogue_firerate_mult;
+                fallback.get_or_insert(entity);
+                if matches!(tower.kind, TowerKind::Thunder | TowerKind::Magic) {
+                    preferred = Some(entity);
+                }
+            }
+            let Some(selected) = preferred.or(fallback) else {
+                return false;
+            };
+
+            let gems = [
+                equipment::Equipment::PrismShard,
+                equipment::Equipment::VoidCapacitor,
+                equipment::Equipment::AzathothEye,
+            ];
+            for item in gems {
+                inventory.counts[item.idx()] = inventory.counts[item.idx()].max(1);
+            }
+            let selected_center = if let Ok((_, mut tower, _)) = towers.get_mut(selected) {
+                tower.equipment = [None; 3];
+                for item in gems {
+                    let _ = equipment::equip_into(&mut *tower, item);
+                }
+                tower.battle_focus = 0.10;
+                tower.center()
+            } else {
+                return false;
+            };
+
+            if let Some(hero_entity) = hero_entity {
+                if let Ok((_, mut tower, _)) = towers.get_mut(hero_entity) {
+                    tower.hero_pos = selected_center + Vec2::new(56.0, 0.0);
+                    tower.move_target = None;
+                    hero::apply_loadout_to_tower(loadout, &mut tower);
+                    tower.hp = tower.max_hp;
+                }
+            }
+
+            selection.build_kind = None;
+            selection.selected = Some(selected);
+            selection.preview_cell = None;
+            panels.dock_open = false;
+            panels.hero_open = false;
+            panels.stats_open = true;
+            panels.settings_open = false;
+            run.show(crate::i18n::t("capture: 本局属性账本已打开"));
+            true
+        }
         CaptureScenario::Fog => {
             panels.dock_open = false;
             panels.hero_open = false;
+            panels.stats_open = false;
             panels.settings_open = false;
             false
         }

@@ -18,7 +18,7 @@ use bevy::prelude::*;
 
 use crate::board::Board;
 use crate::components::{Enemy, LevelEntity};
-use crate::data::{episode_of, BOARD_H, BOARD_W, TILE_SIZE};
+use crate::data::{BOARD_H, BOARD_W, TILE_SIZE, episode_of};
 use crate::game::{CurrentLevel, Rng, RunState};
 
 /// 星陨间隔（秒，游戏时间）。
@@ -260,7 +260,6 @@ pub fn draw_mutators(
         );
     }
 }
-
 
 /// 沙暴波氛围：沙幕透明度朝目标值渐变（激活 0.16，平息 0）。
 pub fn sandstorm_overlay(
