@@ -26,11 +26,11 @@ pub struct Sprites {
     pub talents: HashMap<&'static str, Handle<Image>>,
     /// Hero weapon portraits keyed by weapon.
     pub heroes: HashMap<HeroWeapon, Handle<Image>>,
-    /// Hero active skill icons keyed by weapon.
+    /// Hero passive icons keyed by weapon.
     pub hero_skills: HashMap<HeroWeapon, Handle<Image>>,
     /// Hero talent icons keyed by (weapon, talent index).
     pub hero_talents: HashMap<(HeroWeapon, usize), Handle<Image>>,
-    /// Independent allied creature sprite used by the summon-staff active skill.
+    /// Independent allied creature sprite used by the summon-staff passive.
     pub mythic_summon: Handle<Image>,
     /// Boss portraits keyed by the boss's signature skill.
     pub bosses: HashMap<BossSkill, Handle<Image>>,
@@ -75,10 +75,7 @@ pub fn build_sprites(assets: &AssetServer) -> Sprites {
     ];
     let mut hero_gear_icons = HashMap::new();
     for (frag, file) in gear_frag_files {
-        hero_gear_icons.insert(
-            frag,
-            assets.load(format!("sprites/hero_gear/{file}.webp")),
-        );
+        hero_gear_icons.insert(frag, assets.load(format!("sprites/hero_gear/{file}.webp")));
     }
     use crate::hero_gear::HeroWeaponKind as WK;
     let weapon_prop_files: [(WK, &str); 9] = [
@@ -94,10 +91,7 @@ pub fn build_sprites(assets: &AssetServer) -> Sprites {
     ];
     let mut hero_weapon_props = HashMap::new();
     for (kind, file) in weapon_prop_files {
-        hero_weapon_props.insert(
-            kind,
-            assets.load(format!("sprites/hero_gear/{file}.webp")),
-        );
+        hero_weapon_props.insert(kind, assets.load(format!("sprites/hero_gear/{file}.webp")));
     }
 
     let mut towers = HashMap::new();

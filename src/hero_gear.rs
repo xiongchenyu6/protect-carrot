@@ -109,9 +109,9 @@ impl HeroGearSet {
     pub fn desc(self) -> &'static str {
         match self {
             HeroGearSet::Vanguard => "生命与护甲起步，成套后强化英雄和附近防御塔的正面守线能力。",
-            HeroGearSet::Spellweave => "强化射程、技能爆发和施法循环，适合主动清理密集敌群。",
+            HeroGearSet::Spellweave => "强化射程、被动爆发和触发频率，适合清理密集敌群。",
             HeroGearSet::Hunt => "强化机动、攻速、穿甲与赏金，适合游走补刀和追猎首领。",
-            HeroGearSet::Covenant => "强化神话召唤物、主动技能与生存，适合召唤协同构筑。",
+            HeroGearSet::Covenant => "强化神话召唤物、被动效果与生存，适合召唤协同构筑。",
             HeroGearSet::Workshop => "强化塔攻速光环、临时守卫与自身耐久，适合围绕塔群作战。",
         }
     }
@@ -128,11 +128,15 @@ impl HeroGearSet {
 
     pub fn keystone_desc(self) -> &'static str {
         match self {
-            HeroGearSet::Vanguard => "施放武器技能时恢复英雄生命，并修复、强化附近防御塔。",
-            HeroGearSet::Spellweave => "施放武器技能后，对最前方的敌群追加奥术回响与短暂冻结。",
-            HeroGearSet::Hunt => "施放武器技能后追击前线伤者，目标损失的生命越多，追加伤害越高。",
-            HeroGearSet::Covenant => "施放武器技能时额外召唤一只短时存在的神话眷属。",
-            HeroGearSet::Workshop => "施放武器技能时超频附近防御塔，并在前线组装一名定点守卫。",
+            HeroGearSet::Vanguard => "武器被动触发时恢复英雄生命，并修复、强化附近防御塔。",
+            HeroGearSet::Spellweave => "武器被动触发后，对最前方敌群追加奥术回响与短暂冻结。",
+            HeroGearSet::Hunt => "武器被动触发后追击前线伤者，目标损失生命越多，追加伤害越高。",
+            HeroGearSet::Covenant => {
+                "武器被动触发时额外召唤短时神话眷属，与其他友军共享12名存活上限。"
+            }
+            HeroGearSet::Workshop => {
+                "武器被动触发时超频附近塔并组装定点守卫，与其他友军共享12名存活上限。"
+            }
         }
     }
 }
@@ -556,7 +560,7 @@ pub struct HeroGearDef {
     pub armor_pierce: f32,
     pub move_mult: f32,
     pub skill_mult: f32,
-    pub skill_cooldown_reduction: i32,
+    pub passive_interval_reduction: i32,
     pub summon_power_add: f32,
     pub aura_damage_add: f32,
     pub tower_haste_add: f32,
@@ -574,7 +578,7 @@ pub struct HeroGearStats {
     pub armor_pierce: f32,
     pub move_mult: f32,
     pub skill_mult: f32,
-    pub skill_cooldown_reduction: i32,
+    pub passive_interval_reduction: i32,
     pub summon_power_add: f32,
     pub aura_damage_add: f32,
     pub tower_haste_add: f32,
@@ -592,7 +596,7 @@ impl Default for HeroGearStats {
             armor_pierce: 0.0,
             move_mult: 1.0,
             skill_mult: 1.0,
-            skill_cooldown_reduction: 0,
+            passive_interval_reduction: 0,
             summon_power_add: 0.0,
             aura_damage_add: 0.0,
             tower_haste_add: 0.0,
@@ -611,7 +615,7 @@ impl HeroGearStats {
         self.armor_pierce += other.armor_pierce;
         self.move_mult *= other.move_mult;
         self.skill_mult *= other.skill_mult;
-        self.skill_cooldown_reduction += other.skill_cooldown_reduction;
+        self.passive_interval_reduction += other.passive_interval_reduction;
         self.summon_power_add += other.summon_power_add;
         self.aura_damage_add += other.aura_damage_add;
         self.tower_haste_add += other.tower_haste_add;
@@ -628,7 +632,7 @@ impl HeroGearStats {
         self.armor_pierce += def.armor_pierce;
         self.move_mult *= def.move_mult;
         self.skill_mult *= def.skill_mult;
-        self.skill_cooldown_reduction += def.skill_cooldown_reduction;
+        self.passive_interval_reduction += def.passive_interval_reduction;
         self.summon_power_add += def.summon_power_add;
         self.aura_damage_add += def.aura_damage_add;
         self.tower_haste_add += def.tower_haste_add;
@@ -659,7 +663,7 @@ impl HeroGearStats {
                 self.range_mult *= 1.03;
                 if count >= 3 {
                     self.cooldown_mult *= 0.95;
-                    self.skill_cooldown_reduction += 1;
+                    self.passive_interval_reduction += 2;
                 }
                 if count >= 4 {
                     self.skill_mult *= 1.08;
@@ -697,7 +701,7 @@ impl HeroGearStats {
                 self.armor_add += 2.0;
                 if count >= 3 {
                     self.hp_mult *= 1.05;
-                    self.skill_cooldown_reduction += 1;
+                    self.passive_interval_reduction += 2;
                 }
                 if count >= 4 {
                     self.damage_mult *= 1.05;
@@ -734,7 +738,7 @@ impl HeroGearStats {
             }
             HeroGear::MoonthreadVest => {
                 self.range_mult *= 1.03;
-                self.skill_cooldown_reduction += 1;
+                self.passive_interval_reduction += 2;
             }
             HeroGear::NullMantle => {
                 self.armor_pierce += 5.0;
@@ -762,7 +766,7 @@ impl HeroGearStats {
             }
             HeroGear::ClockworkBadge => {
                 self.tower_haste_add += 0.04;
-                self.skill_cooldown_reduction += 1;
+                self.passive_interval_reduction += 2;
             }
             HeroGear::ForgeGauntlet => {
                 self.damage_mult *= 1.06;
@@ -819,7 +823,7 @@ impl HeroGearStats {
             HeroGear::MeteorCodex => {
                 self.range_mult *= 1.03;
                 self.skill_mult *= 1.12;
-                self.skill_cooldown_reduction += 1;
+                self.passive_interval_reduction += 2;
             }
             HeroGear::BountyQuiver => {
                 self.armor_pierce += 14.0;
@@ -852,12 +856,12 @@ impl HeroGearStats {
             HeroGear::MythcallerTotem => {
                 self.summon_power_add += 0.26;
                 self.skill_mult *= 1.08;
-                self.skill_cooldown_reduction += 1;
+                self.passive_interval_reduction += 2;
             }
             HeroGear::GolemBlueprint => {
                 self.hp_mult *= 1.04;
                 self.tower_haste_add += 0.07;
-                self.skill_cooldown_reduction += 1;
+                self.passive_interval_reduction += 2;
             }
         }
     }
@@ -888,7 +892,7 @@ impl HeroGearStats {
                     self.hp_mult *= 1.05;
                     self.armor_add += 3.0;
                     self.tower_haste_add += 0.06;
-                    self.skill_cooldown_reduction += 1;
+                    self.passive_interval_reduction += 2;
                 }
                 HeroWeapon::StarfireStaff => {
                     self.range_mult *= 1.04;
@@ -976,7 +980,7 @@ const fn gear_base(
         armor_pierce: 0.0,
         move_mult: 1.0,
         skill_mult: 1.0,
-        skill_cooldown_reduction: 0,
+        passive_interval_reduction: 0,
         summon_power_add: 0.0,
         aura_damage_add: 0.0,
         tower_haste_add: 0.0,
@@ -1001,7 +1005,7 @@ pub static HERO_GEAR_DEFS: &[HeroGearDef] = &[
         armor_pierce: 0.0,
         move_mult: 0.96,
         skill_mult: 1.0,
-        skill_cooldown_reduction: 0,
+        passive_interval_reduction: 0,
         summon_power_add: 0.0,
         aura_damage_add: 0.0,
         tower_haste_add: 0.0,
@@ -1013,7 +1017,7 @@ pub static HERO_GEAR_DEFS: &[HeroGearDef] = &[
         slot: HeroGearSlot::Armor,
         name: "星织法袍",
         short: "星袍",
-        desc: "给法术与圣光武器准备的轻甲，提升技能伤害和射程。",
+        desc: "给法术与圣光武器准备的轻甲，提升被动伤害和射程。",
         rarity: Rarity::Uncommon,
         damage_mult: 1.10,
         range_mult: 1.06,
@@ -1023,7 +1027,7 @@ pub static HERO_GEAR_DEFS: &[HeroGearDef] = &[
         armor_pierce: 0.0,
         move_mult: 1.0,
         skill_mult: 1.08,
-        skill_cooldown_reduction: 0,
+        passive_interval_reduction: 0,
         summon_power_add: 0.0,
         aura_damage_add: 0.0,
         tower_haste_add: 0.0,
@@ -1045,7 +1049,7 @@ pub static HERO_GEAR_DEFS: &[HeroGearDef] = &[
         armor_pierce: 0.0,
         move_mult: 1.12,
         skill_mult: 1.0,
-        skill_cooldown_reduction: 0,
+        passive_interval_reduction: 0,
         summon_power_add: 0.0,
         aura_damage_add: 0.0,
         tower_haste_add: 0.0,
@@ -1067,7 +1071,7 @@ pub static HERO_GEAR_DEFS: &[HeroGearDef] = &[
         armor_pierce: 4.0,
         move_mult: 1.0,
         skill_mult: 1.0,
-        skill_cooldown_reduction: 0,
+        passive_interval_reduction: 0,
         summon_power_add: 0.0,
         aura_damage_add: 0.0,
         tower_haste_add: 0.0,
@@ -1089,7 +1093,7 @@ pub static HERO_GEAR_DEFS: &[HeroGearDef] = &[
         armor_pierce: 0.0,
         move_mult: 1.0,
         skill_mult: 1.0,
-        skill_cooldown_reduction: 0,
+        passive_interval_reduction: 0,
         summon_power_add: 0.10,
         aura_damage_add: 0.0,
         tower_haste_add: 0.0,
@@ -1111,7 +1115,7 @@ pub static HERO_GEAR_DEFS: &[HeroGearDef] = &[
         armor_pierce: 10.0,
         move_mult: 1.08,
         skill_mult: 1.12,
-        skill_cooldown_reduction: 0,
+        passive_interval_reduction: 0,
         summon_power_add: 0.0,
         aura_damage_add: 0.0,
         tower_haste_add: 0.0,
@@ -1133,7 +1137,7 @@ pub static HERO_GEAR_DEFS: &[HeroGearDef] = &[
         armor_pierce: 6.0,
         move_mult: 0.98,
         skill_mult: 1.06,
-        skill_cooldown_reduction: 0,
+        passive_interval_reduction: 0,
         summon_power_add: 0.0,
         aura_damage_add: 0.0,
         tower_haste_add: 0.04,
@@ -1155,7 +1159,7 @@ pub static HERO_GEAR_DEFS: &[HeroGearDef] = &[
         armor_pierce: 12.0,
         move_mult: 1.04,
         skill_mult: 1.0,
-        skill_cooldown_reduction: 0,
+        passive_interval_reduction: 0,
         summon_power_add: 0.0,
         aura_damage_add: 0.0,
         tower_haste_add: 0.0,
@@ -1177,7 +1181,7 @@ pub static HERO_GEAR_DEFS: &[HeroGearDef] = &[
         armor_pierce: 10.0,
         move_mult: 1.05,
         skill_mult: 1.12,
-        skill_cooldown_reduction: 1,
+        passive_interval_reduction: 2,
         summon_power_add: 0.10,
         aura_damage_add: 0.04,
         tower_haste_add: 0.03,
@@ -1204,13 +1208,13 @@ pub static HERO_GEAR_DEFS: &[HeroGearDef] = &[
         range_mult: 1.12,
         cooldown_mult: 0.96,
         move_mult: 1.06,
-        skill_cooldown_reduction: 1,
+        passive_interval_reduction: 2,
         ..gear_base(
             HeroGear::MoonthreadVest,
             HeroGearSlot::Armor,
             "月线轻甲",
             "月甲",
-            "精灵游走装束，缩短主动技能循环，适合弓、弩、法器频繁换位。",
+            "精灵游走装束，缩短被动间隔，适合弓、弩、法器频繁换位。",
             Rarity::Rare,
             202,
         )
@@ -1254,7 +1258,7 @@ pub static HERO_GEAR_DEFS: &[HeroGearDef] = &[
             HeroGearSlot::Charm,
             "余烬祷文",
             "烬文",
-            "主动技能爆发护符，法杖、雷暴和圣光武器能明显放大清场窗口。",
+            "被动爆发护符，强化法杖、雷暴和圣光武器的清场效果。",
             Rarity::Epic,
             210,
         )
@@ -1263,13 +1267,13 @@ pub static HERO_GEAR_DEFS: &[HeroGearDef] = &[
         hp_mult: 1.05,
         tower_haste_add: 0.06,
         gold_bonus_add: 0.06,
-        skill_cooldown_reduction: 1,
+        passive_interval_reduction: 2,
         ..gear_base(
             HeroGear::ClockworkBadge,
             HeroGearSlot::Charm,
             "发条工牌",
             "工牌",
-            "工匠与塔联动核心，缩短主动技能循环并提高附近塔攻速。",
+            "工匠与塔联动核心，缩短被动间隔并提高附近塔攻速。",
             Rarity::Legendary,
             212,
         )
@@ -1278,13 +1282,13 @@ pub static HERO_GEAR_DEFS: &[HeroGearDef] = &[
         hp_mult: 1.10,
         summon_power_add: 0.18,
         skill_mult: 1.10,
-        skill_cooldown_reduction: 1,
+        passive_interval_reduction: 2,
         ..gear_base(
             HeroGear::RiftIdol,
             HeroGearSlot::Relic,
             "裂隙神像",
             "裂像",
-            "召唤法杖和召唤塔的专用追求，显著提高召唤物强度与主动频率。",
+            "召唤法杖的专用追求，提高神话眷属与幽魂强度并缩短被动间隔。",
             Rarity::Legendary,
             222,
         )
@@ -1345,7 +1349,7 @@ pub static HERO_GEAR_DEFS: &[HeroGearDef] = &[
             HeroGearSlot::Boots,
             "血步胫甲",
             "血靴",
-            "近战与背击路线的突进靴，提升穿甲、移动和主动爆发。",
+            "近战与背击路线的突进靴，提升穿甲、移动和被动爆发。",
             Rarity::Rare,
             231,
         )
@@ -1354,13 +1358,13 @@ pub static HERO_GEAR_DEFS: &[HeroGearDef] = &[
         range_mult: 1.08,
         cooldown_mult: 0.97,
         skill_mult: 1.12,
-        skill_cooldown_reduction: 1,
+        passive_interval_reduction: 2,
         ..gear_base(
             HeroGear::StarpathSandals,
             HeroGearSlot::Boots,
             "星路便鞋",
             "星履",
-            "远程施法与控场武器的循环靴，扩展射程并缩短主动技能节奏。",
+            "远程施法与控场武器的循环靴，扩展射程并缩短被动间隔。",
             Rarity::Epic,
             232,
         )
@@ -1368,7 +1372,7 @@ pub static HERO_GEAR_DEFS: &[HeroGearDef] = &[
     HeroGearDef {
         hp_mult: 1.08,
         move_mult: 1.05,
-        skill_cooldown_reduction: 1,
+        passive_interval_reduction: 2,
         tower_haste_add: 0.05,
         ..gear_base(
             HeroGear::EngineerTreads,
@@ -1390,7 +1394,7 @@ pub static HERO_GEAR_DEFS: &[HeroGearDef] = &[
             HeroGearSlot::Boots,
             "唤灵胫靴",
             "唤靴",
-            "召唤法杖和召唤塔的靴履分支，让神话怪物与塔召唤物更耐打。",
+            "召唤法杖的靴履分支，让神话眷属与幽魂友军更耐打。",
             Rarity::Legendary,
             234,
         )
@@ -1433,13 +1437,13 @@ pub static HERO_GEAR_DEFS: &[HeroGearDef] = &[
         damage_mult: 1.08,
         range_mult: 1.06,
         skill_mult: 1.20,
-        skill_cooldown_reduction: 1,
+        passive_interval_reduction: 2,
         ..gear_base(
             HeroGear::MeteorCodex,
             HeroGearSlot::Relic,
             "陨星法典",
             "星典",
-            "星火法杖签名圣物，把主动技能推向大范围爆发，适合围绕清屏窗口构筑。",
+            "星火法杖签名圣物，强化被动范围爆发，适合清场构筑。",
             Rarity::Epic,
             221,
         )
@@ -1489,7 +1493,7 @@ pub static HERO_GEAR_DEFS: &[HeroGearDef] = &[
             HeroGearSlot::Relic,
             "风暴核心",
             "暴核",
-            "雷暴法器签名圣物，强化连锁节奏和雷云技能，把怪线拖进塔火力。",
+            "雷暴法器签名圣物，强化连锁节奏和雷链被动，把怪线拖进塔火力。",
             Rarity::Legendary,
             222,
         )
@@ -1530,7 +1534,7 @@ pub static HERO_GEAR_DEFS: &[HeroGearDef] = &[
     HeroGearDef {
         hp_mult: 1.12,
         skill_mult: 1.12,
-        skill_cooldown_reduction: 1,
+        passive_interval_reduction: 2,
         summon_power_add: 0.28,
         tower_haste_add: 0.02,
         ..gear_base(
@@ -1538,7 +1542,7 @@ pub static HERO_GEAR_DEFS: &[HeroGearDef] = &[
             HeroGearSlot::Charm,
             "唤神图腾",
             "神图",
-            "召唤法杖签名护符，专注神话眷属和召唤塔协同，强化召唤物存在感。",
+            "召唤法杖签名护符，专注神话眷属与幽魂协同，强化召唤物存在感。",
             Rarity::Legendary,
             211,
         )
@@ -1547,7 +1551,7 @@ pub static HERO_GEAR_DEFS: &[HeroGearDef] = &[
         damage_mult: 1.06,
         hp_mult: 1.10,
         armor_add: 4.0,
-        skill_cooldown_reduction: 1,
+        passive_interval_reduction: 2,
         tower_haste_add: 0.08,
         summon_power_add: 0.06,
         ..gear_base(
@@ -1861,7 +1865,7 @@ pub fn summary_for_weapon(
         .collect::<Vec<_>>()
         .join("/");
     crate::i18n::tf(
-        "英雄装备：{}{}  伤害×{}  HP×{}  攻速×{}  技能×{}  召唤+{}%  光环+{}%",
+        "英雄装备：{}{}  伤害×{}  HP×{}  攻速×{}  被动×{}  召唤+{}%  光环+{}%",
         &[
             &names,
             &format!("{weapon_resonance}{set_resonance}"),
@@ -1953,7 +1957,7 @@ pub fn weapon_resonance_route(weapon: HeroWeapon) -> (&'static str, &'static str
         ),
         HeroWeapon::StarfireStaff => (
             "星火核爆",
-            "把装备共鸣转化为射程和主动技能爆发，适合清理密集波次。",
+            "把装备共鸣转化为射程和被动爆发，适合清理密集波次。",
         ),
         HeroWeapon::ShadowBow => (
             "猎影赏金",
@@ -1965,7 +1969,7 @@ pub fn weapon_resonance_route(weapon: HeroWeapon) -> (&'static str, &'static str
         ),
         HeroWeapon::StormOrb => (
             "雷暴矩阵",
-            "提高技能循环、范围和光环压制，把敌线拖在防御塔火力里。",
+            "缩短被动间隔、扩大范围和光环压制，把敌线拖在防御塔火力里。",
         ),
         HeroWeapon::SentryCrossbow => (
             "哨戒阵列",
@@ -1977,11 +1981,11 @@ pub fn weapon_resonance_route(weapon: HeroWeapon) -> (&'static str, &'static str
         ),
         HeroWeapon::SummonStaff => (
             "异界眷属",
-            "把装备共鸣集中到召唤强度，让神话召唤物和召唤塔一起变强。",
+            "把装备共鸣集中到召唤强度，让神话眷属和幽魂友军一起变强。",
         ),
         HeroWeapon::ForgeHammer => (
             "守卫工坊",
-            "提高塔攻速联动与主动循环，让工匠围绕临时守卫和塔群作战。",
+            "提高塔攻速联动并缩短被动间隔，让工匠围绕临时守卫和塔群作战。",
         ),
     }
 }
@@ -2117,7 +2121,7 @@ mod tests {
         let engineer = gear_stats(&slots);
         assert!(engineer.move_mult > 1.0);
         assert!(engineer.tower_haste_add > 0.0);
-        assert!(engineer.skill_cooldown_reduction > 0);
+        assert!(engineer.passive_interval_reduction > 0);
 
         equip(&mut slots, HeroGear::SummonerGreaves);
         let summoner = gear_stats(&slots);
@@ -2214,7 +2218,7 @@ mod tests {
         assert!(shadow.gold_bonus_add > hammer.gold_bonus_add);
         assert!(shadow.armor_pierce > hammer.armor_pierce);
         assert!(hammer.tower_haste_add > shadow.tower_haste_add);
-        assert!(hammer.skill_cooldown_reduction > shadow.skill_cooldown_reduction);
+        assert!(hammer.passive_interval_reduction > shadow.passive_interval_reduction);
 
         assert!(
             weapon_resonance_detail(&shadow_slots, HeroWeapon::ShadowBow)
@@ -2237,7 +2241,7 @@ mod tests {
         equip(&mut summon_slots, HeroGear::SummonerGreaves);
         let summon = active_stats_for_weapon(&summon_slots, HeroWeapon::SummonStaff);
         assert!(summon.summon_power_add >= 0.85);
-        assert!(summon.skill_cooldown_reduction >= 2);
+        assert!(summon.passive_interval_reduction >= 2);
 
         let mut forge_slots = empty_gear();
         equip(&mut forge_slots, HeroGear::WildhideHarness);
@@ -2246,7 +2250,7 @@ mod tests {
         equip(&mut forge_slots, HeroGear::EngineerTreads);
         let forge = active_stats_for_weapon(&forge_slots, HeroWeapon::ForgeHammer);
         assert!(forge.tower_haste_add >= 0.35);
-        assert!(forge.skill_cooldown_reduction >= 4);
+        assert!(forge.passive_interval_reduction >= 4);
 
         let mut bounty_slots = empty_gear();
         equip(&mut bounty_slots, HeroGear::WindrunnerCloak);

@@ -55,7 +55,7 @@ struct KindStat {
 struct Report {
     per_kind: HashMap<TowerKind, KindStat>,
     hero_damage: f64,
-    hero_skill_casts: u32,
+    hero_passive_triggers: u32,
     hero_backstabs: u32,
 }
 
@@ -68,13 +68,6 @@ struct OnlyKind(Option<TowerKind>);
 
 #[derive(Resource)]
 struct SimHeroEnabled(bool);
-
-#[derive(Default)]
-struct SimSkillTiming {
-    wave: i32,
-    ready_for: f32,
-    pending: bool,
-}
 
 fn sim_hero_enabled(enabled: Res<SimHeroEnabled>) -> bool {
     enabled.0
@@ -91,83 +84,13 @@ fn sim_no_hero() -> bool {
     )
 }
 
-/// Exercise the same active-skill path a player uses instead of estimating skill
-/// damage inside the harness. Skills fire once a useful local target density is
-/// present, with a short fallback delay so support and summon weapons still act.
-fn sim_auto_cast_hero_skill(
-    time: Res<Time>,
-    run: Res<RunState>,
-    loadout: Res<hero::HeroLoadout>,
-    towers: Query<(Entity, &Tower)>,
-    enemies: Query<(&components::Enemy, &Transform)>,
-    mut actions: MessageWriter<ui::UiActionActivated>,
+/// Observe the real simulation system; the harness never requests a skill.
+fn collect_passive_triggers(
+    mut events: MessageReader<protect_carrot::hero_passives::HeroSkillCastEvent>,
     mut report: ResMut<Report>,
-    mut timing: Local<SimSkillTiming>,
 ) {
-    if timing.pending {
-        if loadout.skill_cd > 0 {
-            report.hero_skill_casts += 1;
-        }
-        timing.pending = false;
-    }
-    if timing.wave != run.wave {
-        timing.wave = run.wave;
-        timing.ready_for = 0.0;
-    }
-    if !run.wave_in_progress || loadout.skill_cd > 0 {
-        timing.ready_for = 0.0;
-        return;
-    }
-
-    let Some((hero_entity, hero)) = towers
-        .iter()
-        .find(|(_, tower)| tower.hero && tower.hp > 0.0)
-    else {
-        return;
-    };
-    let hero_pos = hero.center();
-    let (radius, desired_targets, max_wait, can_precast) = match loadout.weapon {
-        hero::HeroWeapon::BannerSword => (130.0, 3, 2.0, false),
-        hero::HeroWeapon::StarfireStaff => (250.0, 4, 1.3, false),
-        hero::HeroWeapon::ShadowBow => (280.0, 2, 1.4, false),
-        hero::HeroWeapon::OathShield => (180.0, 1, 0.9, false),
-        hero::HeroWeapon::StormOrb => (260.0, 4, 0.9, false),
-        hero::HeroWeapon::SentryCrossbow => (260.0, 3, 0.8, false),
-        // Death Mark is global and can mark six targets in the benchmark build.
-        // Waiting for a pack avoids spending the wave's only cast on the opener.
-        hero::HeroWeapon::NightDagger => (f32::INFINITY, 5, 1.8, false),
-        hero::HeroWeapon::SummonStaff => (300.0, 0, 0.3, true),
-        hero::HeroWeapon::ForgeHammer => (170.0, 2, 0.9, false),
-    };
-    let mut nearby = 0usize;
-    let mut boss_in_reach = false;
-    let mut any_enemy = false;
-    for (enemy, tf) in &enemies {
-        if enemy.hp <= 0.0 {
-            continue;
-        }
-        any_enemy = true;
-        if tf.translation.truncate().distance(hero_pos) <= radius {
-            nearby += 1;
-            boss_in_reach |= enemy.boss;
-        }
-    }
-    timing.ready_for += time.delta_secs() * run.game_speed;
-    if !any_enemy && (!can_precast || timing.ready_for < max_wait) {
-        return;
-    }
-    if any_enemy && nearby < desired_targets && !boss_in_reach && timing.ready_for < max_wait {
-        return;
-    }
-    timing.ready_for = 0.0;
-    timing.pending = true;
-    actions.write(ui::UiActionActivated {
-        entity: hero_entity,
-        action: ui::UiAction::HeroSkill,
-    });
+    report.hero_passive_triggers += events.read().count() as u32;
 }
-
-/// Headless equivalent of a basic player right-clicking the hero toward the
 /// current frontline. This keeps balance runs honest: the real game has a free
 /// hero, but a stationary headless hero becomes an artificial permanent wall.
 fn sim_hero_ai(
@@ -541,12 +464,11 @@ enum RunMode {
 /// Behavior weight: AoE/DoT/utility deal more than their per-target number implies.
 fn behavior_mult(b: Behavior) -> f64 {
     match b {
-        Behavior::Aoe | Behavior::Fire => 3.0,
-        Behavior::Summon => 2.5,
+        Behavior::Aoe => 3.0,
         Behavior::Chain => 2.0,
         Behavior::Poison | Behavior::Curse => 1.6,
-        Behavior::Slow | Behavior::Freeze | Behavior::Knockback => 1.2,
-        Behavior::Heal | Behavior::Detect => 0.05,
+        Behavior::Slow | Behavior::Knockback => 1.2,
+        Behavior::Detect => 0.05,
         _ => 1.0,
     }
 }
@@ -563,13 +485,7 @@ fn greedy_kind_priority(kind: TowerKind) -> f64 {
         TowerKind::Arrow => 0.72,
         TowerKind::Cannon => 1.24,
         TowerKind::Magic => 1.16,
-        TowerKind::Thunder => 1.20,
-        TowerKind::Laser | TowerKind::Prism => 1.34,
-        TowerKind::Sniper | TowerKind::Missile | TowerKind::Fortress => 1.24,
-        TowerKind::Ice | TowerKind::Wind | TowerKind::FrostNova | TowerKind::Shadow => 1.10,
-        TowerKind::Poison | TowerKind::Fire => 1.12,
-        TowerKind::Summon | TowerKind::Necromancer => 1.18,
-        TowerKind::Holy => 0.92,
+        TowerKind::Ice => 1.10,
         TowerKind::Detection => 0.0,
     }
 }
@@ -579,21 +495,11 @@ fn greedy_tower_plan() -> &'static [TowerKind] {
         TowerKind::Arrow,
         TowerKind::Cannon,
         TowerKind::Magic,
-        TowerKind::Thunder,
         TowerKind::Ice,
         TowerKind::Arrow,
-        TowerKind::Fire,
-        TowerKind::Wind,
-        TowerKind::Poison,
-        TowerKind::Laser,
         TowerKind::Cannon,
-        TowerKind::Summon,
-        TowerKind::Shadow,
-        TowerKind::Prism,
-        TowerKind::Missile,
-        TowerKind::FrostNova,
-        TowerKind::Necromancer,
-        TowerKind::Fortress,
+        TowerKind::Magic,
+        TowerKind::Ice,
     ]
 }
 
@@ -772,7 +678,7 @@ fn greedy_player(
     let up_gain = (UpgradeMul::DAMAGE as f64 / UpgradeMul::COOLDOWN as f64) - 1.0; // ≈0.76
     let mut best_up: Option<(f64, Entity, i32)> = None;
     for (e, t) in towers.iter() {
-        if t.hero || t.level >= 9 {
+        if t.hero || t.level >= 3 {
             continue;
         }
         let uc = t.upgrade_cost();
@@ -872,7 +778,7 @@ fn auto_pick_roguelite(
 struct SimResult {
     per_kind: HashMap<TowerKind, KindStat>,
     hero_damage: f64,
-    hero_skill_casts: u32,
+    hero_passive_triggers: u32,
     hero_backstabs: u32,
     outcome: &'static str,
     wave: i32,
@@ -972,7 +878,7 @@ fn baseline_hero_loadout() -> hero::HeroLoadout {
         talent_points: 0,
         weapon_talents: [[0; hero::HeroLoadout::TALENT_SLOTS]; hero::HeroWeapon::ALL.len()],
         gear: hero_gear::empty_gear(),
-        skill_cd: 0,
+        skill_cooldowns: [0.0; hero::HeroLoadout::TALENT_SLOTS],
         run_mods: hero::HeroRunMods::default(),
         alive: false,
         respawn_waves: 0,
@@ -1003,7 +909,7 @@ fn trained_hero_loadout(
         talent_points: 0,
         weapon_talents: talents,
         gear,
-        skill_cd: 0,
+        skill_cooldowns: [0.0; hero::HeroLoadout::TALENT_SLOTS],
         run_mods: hero::HeroRunMods::default(),
         alive: false,
         respawn_waves: 0,
@@ -1196,12 +1102,12 @@ fn run_sim_with_hero(
     }
 
     app.add_message::<Damage>()
+        .add_message::<protect_carrot::hero_passives::HeroSkillCastEvent>()
         .add_message::<tower::Status>()
         .add_message::<tower::BuffTower>()
         .add_message::<tower::HealCarrot>()
         .add_message::<vfx::VfxEvent>()
         .add_message::<audio::SfxEvent>()
-        .add_message::<tower::EnemyDied>()
         .add_message::<ui::UiActionActivated>();
 
     let assets = app.world().resource::<AssetServer>().clone();
@@ -1221,10 +1127,11 @@ fn run_sim_with_hero(
             (
                 sim_hero_ai.run_if(sim_hero_enabled),
                 build::hero_move.run_if(sim_hero_enabled),
-                sim_auto_cast_hero_skill.run_if(sim_hero_enabled),
-                ui::hero_buttons.run_if(sim_hero_enabled),
                 tower::build_snapshot,
                 hero::hero_doctrine,
+                protect_carrot::hero_passives::update_hero_passives.run_if(sim_hero_enabled),
+                protect_carrot::hero_skill_effects::update_skill_fields.run_if(sim_hero_enabled),
+                collect_passive_triggers.run_if(sim_hero_enabled),
                 tower::update_towers,
                 tower::update_projectiles,
                 tower::update_shot_fx,
@@ -1243,7 +1150,6 @@ fn run_sim_with_hero(
                 tower::update_fire_grounds,
                 enemy::spawn_enemies,
                 enemy::update_enemies,
-                tower::necromancer_raise,
                 enemy::heal_auras,
                 enemy::incubation,
                 protect_carrot::mutators::starfall,
@@ -1397,7 +1303,7 @@ fn run_sim_with_hero(
     SimResult {
         per_kind: report.per_kind.clone(),
         hero_damage: report.hero_damage,
-        hero_skill_casts: report.hero_skill_casts,
+        hero_passive_triggers: report.hero_passive_triggers,
         hero_backstabs: report.hero_backstabs,
         outcome,
         wave: run.wave,
@@ -1417,7 +1323,7 @@ fn run_sim_with_hero(
 
 /// Run the greedy player over `n` seeds of a level. Returns
 /// (wins, timeouts, avg_waves, avg_lives, total_waves, avg hero damage,
-/// avg skill casts, tower-usage).
+/// avg passive triggers, tower-usage).
 fn greedy_winrate(
     level: usize,
     base_seed: u64,
@@ -1440,7 +1346,7 @@ fn greedy_winrate_with_hero(
     let mut lives = 0i64;
     let mut total_waves = 0i32;
     let mut hero_damage = 0.0;
-    let mut hero_skill_casts = 0u64;
+    let mut hero_passive_triggers = 0u64;
     let mut usage: HashMap<TowerKind, u64> = HashMap::new();
     for s in 0..n {
         let r = run_sim_with_hero(
@@ -1452,7 +1358,7 @@ fn greedy_winrate_with_hero(
         );
         if n == 1 && r.outcome != "VICTORY" {
             eprintln!(
-                "[sim/build-debug] {} outcome={} wave={}/{} lives={} gold={} enemies={} spawned={}/{} frames={} active={} draft={} skills={} backstabs={} hero={} front={}",
+                "[sim/build-debug] {} outcome={} wave={}/{} lives={} gold={} enemies={} spawned={}/{} frames={} active={} draft={} passives={} backstabs={} hero={} front={}",
                 hero_profile.label(),
                 r.outcome,
                 r.wave,
@@ -1465,7 +1371,7 @@ fn greedy_winrate_with_hero(
                 r.frames,
                 r.wave_in_progress,
                 r.draft_waiting,
-                r.hero_skill_casts,
+                r.hero_passive_triggers,
                 r.hero_backstabs,
                 r.hero_debug,
                 r.enemy_debug,
@@ -1481,7 +1387,7 @@ fn greedy_winrate_with_hero(
         lives += r.lives.max(0) as i64;
         total_waves = r.total_waves;
         hero_damage += r.hero_damage;
-        hero_skill_casts += r.hero_skill_casts as u64;
+        hero_passive_triggers += r.hero_passive_triggers as u64;
         for (k, st) in &r.per_kind {
             *usage.entry(*k).or_default() += st.count as u64;
         }
@@ -1493,7 +1399,7 @@ fn greedy_winrate_with_hero(
         lives as f32 / n as f32,
         total_waves,
         hero_damage / n as f64,
-        hero_skill_casts as f32 / n as f32,
+        hero_passive_triggers as f32 / n as f32,
         usage,
     )
 }
@@ -1694,7 +1600,7 @@ fn main() {
                 "[sim] WIN-RATE — greedy player, level {} ({}), {} seeds...",
                 level, level_name, n
             );
-            let (wins, timeouts, aw, al, tw, _, skill_casts, usage) =
+            let (wins, timeouts, aw, al, tw, _, passive_triggers, usage) =
                 greedy_winrate(level, seed, n, None);
             let mut us: Vec<(TowerKind, u64)> = usage.into_iter().filter(|(_, c)| *c > 0).collect();
             us.sort_by(|a, b| b.1.cmp(&a.1));
@@ -1702,7 +1608,7 @@ fn main() {
                 "\n============== GREEDY WIN-RATE (level {level}: {level_name}) =============="
             );
             println!(
-                "win-rate {}/{} = {:.0}%   timeouts {}   avg waves {:.1}/{}   avg lives {:.1}   avg skills {:.1}",
+                "win-rate {}/{} = {:.0}%   timeouts {}   avg waves {:.1}/{}   avg lives {:.1}   avg passives {:.1}",
                 wins,
                 n,
                 wins as f32 / n as f32 * 100.0,
@@ -1710,7 +1616,7 @@ fn main() {
                 aw,
                 tw,
                 al,
-                skill_casts
+                passive_triggers
             );
             println!("\ngreedy tower picks (total built across {n} runs):");
             for (k, c) in &us {
@@ -1742,7 +1648,7 @@ fn main() {
                 "avg lives",
                 "power",
                 "hero dmg",
-                "skills",
+                "passives",
                 "towers",
                 "resonance / set"
             );
@@ -1754,7 +1660,7 @@ fn main() {
                 {
                     continue;
                 }
-                let (wins, timeouts, aw, al, tw, hero_damage, skill_casts, usage) =
+                let (wins, timeouts, aw, al, tw, hero_damage, passive_triggers, usage) =
                     greedy_winrate_with_hero(level, seed, n, None, profile);
                 let weapon = profile.weapon();
                 let gear = profile.gear();
@@ -1774,7 +1680,7 @@ fn main() {
                     al,
                     power,
                     hero_damage,
-                    skill_casts,
+                    passive_triggers,
                     average_towers,
                     resonance.trim(),
                     gear_set,
@@ -1895,13 +1801,10 @@ mod tests {
             .iter()
             .copied()
             .collect::<std::collections::HashSet<_>>();
-        assert!(unique.len() >= 12);
+        assert_eq!(unique.len(), 4);
+        assert!(unique.contains(&TowerKind::Arrow));
         assert!(unique.contains(&TowerKind::Cannon));
+        assert!(unique.contains(&TowerKind::Magic));
         assert!(unique.contains(&TowerKind::Ice));
-        assert!(unique.contains(&TowerKind::Thunder));
-        assert!(unique.contains(&TowerKind::Summon));
-        assert!(unique.contains(&TowerKind::Prism));
-        assert!(unique.contains(&TowerKind::Necromancer));
-        assert!(unique.contains(&TowerKind::Fortress));
     }
 }

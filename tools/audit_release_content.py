@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Audit release-scope content promises for Protect Carrot.
 
-This complements `verify_sprite_assets.py`: that script proves PNG coverage,
+This complements `verify_sprite_assets.py`: that script proves runtime WebP coverage,
 while this one proves the main game catalogs and connected screens still match
 the intended commercial-content scope.
 
@@ -34,8 +34,10 @@ ENEMY = SRC / "enemy.rs"
 BUILD = SRC / "build.rs"
 VFX = SRC / "vfx.rs"
 GAME = SRC / "game.rs"
-META = SRC / "meta.rs"
 COMPONENTS = SRC / "components.rs"
+HERO_PASSIVES = SRC / "hero_passives.rs"
+HERO = SRC / "hero.rs"
+HERO_EFFECTS = SRC / "hero_skill_effects.rs"
 
 
 def read(path: Path) -> str:
@@ -126,8 +128,28 @@ def audit() -> dict[str, object]:
     build = read(BUILD)
     vfx = read(VFX)
     game = read(GAME)
-    meta = read(META)
     components = read(COMPONENTS)
+    hero_passives = read(HERO_PASSIVES)
+    hero = read(HERO)
+    hero_effects = read(HERO_EFFECTS)
+    class_effects = "\n".join(read(SRC / "hero_skill_effects" / f"{name}.rs") for name in ["martial", "magic", "support"])
+    hero_names = block_after(hero, "pub fn talent_name(")
+    hero_descriptions = block_after(hero, "pub fn talent_desc(")
+    ultimate_names = block_after(hero, "pub fn ultimate_name(")
+    ultimate_descriptions = block_after(hero, "pub fn ultimate_desc(")
+    basic_skills = re.findall(r'\(HeroWeapon::(\w+), ([01])\) => "([^"]+)"', hero_names)
+    ultimates = re.findall(r'HeroWeapon::(\w+) => "([^"]+)"', ultimate_names)
+    class_names = {weapon for weapon, _ in ultimates}
+    described_skills = re.findall(r'\(HeroWeapon::(\w+), ([01])\) =>\s*(?:\{\s*)?"([^"]+)"', hero_descriptions)
+    described_ultimates = re.findall(r'HeroWeapon::(\w+) =>\s*(?:\{\s*)?"([^"]+)"', ultimate_descriptions)
+    implemented_skills = {
+        (weapon, int(slot))
+        for weapon, slots in re.findall(r'\(HeroWeapon::(\w+), ([012](?: \| [012])*)\)', class_effects)
+        for slot in slots.split(" | ")
+    }
+    expected_skills = {(weapon, slot) for weapon in class_names for slot in range(3)}
+    skill_icons = re.findall(r'=> "([^"]+)"', block_after(hero, "pub fn talent_sprite_name("))[:-1]
+    ultimate_icons = re.findall(r'=> "([^"]+)"', block_after(hero, "pub fn ultimate_sprite_name("))
 
     checks: list[dict[str, object]] = []
 
@@ -145,20 +167,20 @@ def audit() -> dict[str, object]:
 
     checks.extend(
         [
-            check("tower catalog", tower_count == 19, f"{tower_count}/19 towers in TowerKind::ALL"),
-            check("enemy archetypes", enemy_count == 16, f"{enemy_count}/16 EnemyKind archetypes"),
+            check("tower catalog", tower_count == 5, f"{tower_count}/5 towers in TowerKind::ALL"),
+            check("enemy archetypes", enemy_count == 18, f"{enemy_count}/18 EnemyKind archetypes"),
             check("equipment catalog", equipment_count == 20, f"{equipment_count}/20 relics"),
             check("element catalog", element_count == 7, f"{element_count}/7 elements"),
-            check("monster species", len(species) == 100, f"{len(species)}/100 species"),
+            check("monster species", len(species) == 101, f"{len(species)}/101 species"),
             check(
                 "species ids",
-                species_ids == list(range(100)),
-                "ids are contiguous 0..99" if species_ids == list(range(100)) else str(species_ids[:10]),
+                species_ids == list(range(101)),
+                "ids are contiguous 0..100" if species_ids == list(range(101)) else str(species_ids[:10]),
             ),
-            check("boss species", len(boss_species) == 10, f"{len(boss_species)}/10 boss species"),
+            check("boss species", len(boss_species) == 11, f"{len(boss_species)}/11 boss species"),
             check(
                 "boss skills",
-                boss_skill_ids == list(range(90, 100)) and len(unique_skill_names) == 10,
+                boss_skill_ids == list(range(90, 101)) and len(unique_skill_names) == 11,
                 f"ids={boss_skill_ids}, unique skills={len(unique_skill_names)}",
             ),
             check(
@@ -252,11 +274,11 @@ def audit() -> dict[str, object]:
                     ]
                 )
                 and all(token in build for token in ["KeyCode::KeyT", "目标优先"])
-                and all(token in ui for token in ["CycleTargetPriority", '"目标(T)"']),
+                and all(token in ui for token in ["UiAction::CycleTargetPriority", "切换选中防御塔的目标优先级", "t.cycle_target_priority()"]),
                 "selected towers can cycle targeting priorities for late-wave control",
             ),
             check(
-                "tower contribution stats",
+                "tower damage attribution and kill tally",
                 all(
                     token in tower
                     for token in [
@@ -267,8 +289,8 @@ def audit() -> dict[str, object]:
                     ]
                 )
                 and all(token in enemy for token in ["last_hit_tower", "tower.kills += 1"])
-                and "本局输出" in ui,
-                "selected tower HUD shows per-run damage and kill attribution, including DoT sources",
+                and "tw.kills" in ui,
+                "damage counters retain DoT attribution and the selected tower HUD shows credited kills",
             ),
             check(
                 "carrot seal feedback",
@@ -292,7 +314,7 @@ def audit() -> dict[str, object]:
                 "perfect wave rewards",
                 all(token in game for token in ["wave_start_lives", "wave_perfect"])
                 and all(token in enemy for token in ["perfect_bonus", "VfxEvent::PerfectWave", "完美防守"])
-                and all(token in meta for token in ["GoldRush", "wave_perfect = false"])
+                and all(token in enemy for token in ["run.lives >= run.wave_start_lives", "wave_perfect = false"])
                 and all(token in vfx for token in ["VfxEvent::PerfectWave", "Sound::Gold", "完美防守"]),
                 "flawless waves grant readable bonus gold and carrot-side reward VFX",
             ),
@@ -303,7 +325,7 @@ def audit() -> dict[str, object]:
             ),
             check(
                 "combat readability badges",
-                all(token in enemy for token in ["special_trait_badge", '"攻城"', '"静默"', "Text2d::new(label)"])
+                all(token in enemy for token in ["special_trait_badge", '"攻城"', '"静默"', "Text2d::new(crate::i18n::t(label))"])
                 and "draw_elite_auras" in main,
                 "special enemy trait badges and elite aura rendering found",
             ),
@@ -346,7 +368,7 @@ def audit() -> dict[str, object]:
                         "boss_skill_threatens_towers",
                         "draw_boss_cast_telegraphs",
                         "gizmos.line_2d(pos, tower_pos",
-                        'label: "首领"',
+                        '"首领"',
                         '"停火"',
                     ]
                 )
@@ -370,21 +392,79 @@ def audit() -> dict[str, object]:
                 "rapid kills build combo pressure with milestone gold and HUD/settlement feedback",
             ),
             check(
-                "active ability impact feedback",
+                "automatic hero cast sequencing",
                 all(
-                    token in meta
+                    token in hero_passives
                     for token in [
                         "MessageWriter<crate::vfx::VfxEvent>",
-                        "VfxEvent::Explosion",
-                        "陨石命中",
-                        "全场冰封",
-                        "+120 金",
-                        "技能冷却中，还需",
+                        "trigger_weapon_skill",
+                        "loadout.skill_cooldowns[cast.slot] = loadout.skill_interval(cast.slot)",
+                        "impl Action for CastAction",
+                        "CastPhase::Windup",
+                        "CastPhase::Release",
+                        "CastPhase::Recovery",
+                        "cast.released",
+                        "time.delta_secs() * run.game_speed",
+                        "paused.0",
+                        "!run.wave_in_progress",
+                        "MAX_HERO_SUMMONS",
                     ]
                 )
-                and all(token in ui for token in ["UiAction::Cast", "update_ability_buttons"])
-                and all(token in main for token in ["meta::ability_keys", "meta::cast_abilities"]),
-                "active skills show world impact VFX, cooldown feedback, and live button readiness",
+                and "bevy_sequential_actions" in hero_passives
+                and "hero_cast_visuals::pose_casts" in main
+                and "hero_cast_visuals::draw_casts" in main
+                and not any(
+                    token in ui or token in main
+                    for token in ["UiAction::HeroSkill", "SummonHero", "update_ability_buttons"]
+                )
+                and "hero_passives::update_hero_passives" in main
+                and "run.show(" not in hero_passives,
+                "class casts use the ordinary attack queue with windup/release/recovery, independent game-time cooldowns, visible cast hooks, pause gates and no manual controls",
+            ),
+            check(
+                "27 class-specific hero skills",
+                len(class_names) == 9
+                and len(basic_skills) == 18
+                and len(ultimates) == 9
+                and len({name for _, _, name in basic_skills} | {name for _, name in ultimates}) == 27
+                and len(described_skills) == 18
+                and len(described_ultimates) == 9
+                and implemented_skills == expected_skills
+                and "pub const TALENT_SLOTS: usize = 3;" in hero,
+                f"{len(implemented_skills)}/27 release branches, 18 trainable base casts and 9 level-30 ultimates",
+            ),
+            check(
+                "skill training is not attribute filler",
+                "talent_rank" not in block_after(hero, "pub fn apply_loadout_to_tower(")
+                and "talent_rank" not in block_after(hero, "pub fn hero_move_speed(")
+                and "talent_rank" not in block_after(hero, "pub fn skill_damage_mult(")
+                and "MAX_LEVEL" not in block_after(hero, "pub fn apply_loadout_to_tower(")
+                and not any(re.match(r"提高|强化|增加|缩短|延长", desc) or "+" in desc for *_, desc in described_skills + described_ultimates)
+                and "loadout.run_mods.skill_interval_mult *= 0.90" in read(SRC / "roguelite.rs")
+                and "loadout.run_mods.skill_power_mult *= 1.15" in read(SRC / "roguelite.rs"),
+                "training changes cast-local effects; baseline stats and stat-only ultimates are excluded; speed and skill tempo remain Hex modifiers",
+            ),
+            check(
+                "class skill icon assets",
+                len(skill_icons) == 18
+                and len(ultimate_icons) == 9
+                and all((ROOT / "assets" / "sprites" / "hero_talents" / f"{icon}.webp").is_file() for icon in skill_icons + ultimate_icons),
+                f"{len(skill_icons) + len(ultimate_icons)}/27 skill icons resolve to existing runtime assets",
+            ),
+            check(
+                "summoner class only casts summons",
+                all(
+                    "spawn_ally(" in block_after(class_effects, f"(HeroWeapon::SummonStaff, {slot}) =>")
+                    or "spawn_mythic_ally(" in block_after(class_effects, f"(HeroWeapon::SummonStaff, {slot}) =>")
+                    for slot in range(3)
+                )
+                and all(
+                    not any(token in block_after(class_effects, f"(HeroWeapon::SummonStaff, {slot}) =>") for token in ["dmg.write(", "buff.write(", "fields::spawn("])
+                    for slot in range(3)
+                )
+                and "run.fallen_enemies.drain(..count)" in class_effects
+                and "MAX_HERO_SUMMONS" in hero_effects,
+                "all three summoner releases spawn actual allies, with bounded fallen-soul consumption and a shared living-unit capacity",
             ),
             check(
                 "auto wave pacing",
@@ -399,7 +479,7 @@ def audit() -> dict[str, object]:
                         "KeyCode::KeyA",
                     ]
                 )
-                and all(token in ui for token in ["ToggleAutoWave", '"自动波(A)"'])
+                and all(token in ui for token in ["UiAction::ToggleAutoWave", "toggle_auto_wave(&mut run)", "自动下一波（A键）"])
                 and "tick_auto_wave" in main
                 and all(token in enemy for token in ["自动下一波", "AUTO_WAVE_DELAY"]),
                 "players can enable auto-start with visible between-wave countdown",
@@ -420,10 +500,12 @@ def audit() -> dict[str, object]:
     checks.append(
         check(
             "sprite assets",
-            sprite_manifest["ok"] == 155
+            sprite_run.returncode == 0
+            and sprite_manifest["format"] == "webp"
+            and sprite_manifest["ok"] == 141
             and sprite_manifest["failed"] == 0
             and sprite_groups == {
-                "towers": {"total": 19, "ok": 19, "failed": 0},
+                "towers": {"total": 5, "ok": 5, "failed": 0},
                 "enemies": {"total": 16, "ok": 16, "failed": 0},
                 "species": {"total": 100, "ok": 100, "failed": 0},
                 "equipment": {"total": 20, "ok": 20, "failed": 0},
@@ -440,9 +522,10 @@ def audit() -> dict[str, object]:
     checks.append(
         check(
             "StoryOS/Comfy prompt coverage",
-            prompt_manifest["total"] == 155
+            prompt_run.returncode == 0
+            and prompt_manifest["total"] == 141
             and prompt_groups == {
-                "towers": 19,
+                "towers": 5,
                 "enemies": 16,
                 "equipment": 20,
                 "species": 100,

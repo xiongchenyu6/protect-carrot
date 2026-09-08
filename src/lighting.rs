@@ -12,9 +12,9 @@ use crate::states::GameState;
 use crate::tower::{HERO_MELEE_ATTACK_TIME, ProjKind, Projectile, ProjectileVisual, Summon, Tower};
 use bevy::prelude::*;
 use bevy_firefly::prelude::*;
-use bevy_fog_of_war::prelude::{
-    FogMapSettings, FogOfWarPlugin, ResetFogOfWar, VisionShape, VisionSource,
-};
+#[cfg(not(target_arch = "wasm32"))]
+use bevy_fog_of_war::prelude::FogOfWarPlugin;
+use bevy_fog_of_war::prelude::{FogMapSettings, ResetFogOfWar, VisionShape, VisionSource};
 
 pub struct LightingPlugin;
 
@@ -309,6 +309,7 @@ fn configure_fog_of_war(
     mut reset: MessageWriter<ResetFogOfWar>,
     mut last: Local<Option<(usize, bool)>>,
 ) {
+    #[cfg(not(target_arch = "wasm32"))]
     let enabled = matches!(game_state.get(), GameState::Playing) && fog_of_war_level(current.0);
     // wasm 上无雾渲染管线（见 LightingPlugin::build），必须保持禁用，否则
     // update_enemy_fog_visibility 会把"雾外"敌人隐藏而屏幕上又没有雾。
@@ -652,33 +653,6 @@ fn tower_light_spec(tower: &Tower) -> Option<TowerLightSpec> {
     let body = TILE_SIZE * tower.footprint.max(1) as f32;
     let offset = Vec2::new(0.0, body * 0.12);
     let spec = match tower.kind {
-        TowerKind::Fire => TowerLightSpec {
-            color: Color::srgb(1.0, 0.46, 0.12),
-            radius: TILE_SIZE * 4.2,
-            intensity: 2.15,
-            level_radius: 0.20,
-            height: 70.0,
-            offset,
-            cast_shadows: true,
-        },
-        TowerKind::Thunder => TowerLightSpec {
-            color: Color::srgb(0.52, 0.86, 1.0),
-            radius: TILE_SIZE * 2.8,
-            intensity: 0.72,
-            level_radius: 0.18,
-            height: 76.0,
-            offset,
-            cast_shadows: false,
-        },
-        TowerKind::Prism | TowerKind::Laser => TowerLightSpec {
-            color: Color::srgb(0.54, 0.96, 1.0),
-            radius: TILE_SIZE * 3.0,
-            intensity: 0.88,
-            level_radius: 0.22,
-            height: 86.0,
-            offset,
-            cast_shadows: false,
-        },
         TowerKind::Magic => TowerLightSpec {
             color: Color::srgb(0.72, 0.44, 1.0),
             radius: TILE_SIZE * 2.45,
@@ -912,8 +886,8 @@ fn projectile_shadow_style(projectile: &Projectile, tower_kind: Option<TowerKind
         ProjKind::Normal => Vec2::new(20.0, 7.0),
     };
     let scaled = match tower_kind {
-        Some(TowerKind::Sniper | TowerKind::Arrow | TowerKind::Wind) => base * 0.82,
-        Some(TowerKind::Missile | TowerKind::Magic) => base * 1.12,
+        Some(TowerKind::Arrow) => base * 0.82,
+        Some(TowerKind::Magic) => base * 1.12,
         _ => base,
     };
     (scaled, 0.30)

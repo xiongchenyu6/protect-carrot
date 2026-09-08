@@ -4,7 +4,8 @@ use crate::Levels;
 use crate::board::Board;
 use crate::components::{Carrot, CarrotSealBar, LevelEntity};
 use crate::data::{
-    BOARD_H, BOARD_W, BOSS_WAVE_INTERVAL, COLS, LEVEL_THEMES, ROWS, TILE_SIZE, cell_center,
+    BOARD_H, BOARD_W, BOSS_WAVE_INTERVAL, COLS, EnemyKind, LEVEL_THEMES, ROWS, TILE_SIZE,
+    cell_center,
 };
 use crate::equipment::{EquipmentInventory, unequip_all_to_inventory};
 use crate::monster::{boss_skill, is_boss_wave, next_boss_wave, pick_boss};
@@ -114,6 +115,14 @@ pub fn not_paused(p: Res<Paused>) -> bool {
     !p.0
 }
 
+/// A defeated enemy whose soul can be consumed by the Summon Staff.
+#[derive(Clone, Copy)]
+pub struct FallenEnemy {
+    pub kind: EnemyKind,
+    pub max_hp: f32,
+    pub pos: Vec2,
+}
+
 /// Mutable per-run state, mirroring the original global game variables.
 #[derive(Resource)]
 pub struct RunState {
@@ -142,6 +151,8 @@ pub struct RunState {
     pub pending_boss_species: Option<usize>,
     /// Species already announced during this run; does not affect persistent kill counts.
     pub encountered_species: HashSet<usize>,
+    /// Recent non-boss kills available to the Summon Staff, consumed once on revival.
+    pub fallen_enemies: VecDeque<FallenEnemy>,
     pub kill_combo: i32,
     pub kill_combo_timer: f32,
     pub kill_combo_window: f32,
@@ -174,6 +185,7 @@ impl Default for RunState {
             auto_wave_timer: 0.0,
             pending_boss_species: None,
             encountered_species: HashSet::new(),
+            fallen_enemies: VecDeque::new(),
             kill_combo: 0,
             kill_combo_timer: 0.0,
             kill_combo_window: 0.0,
@@ -186,6 +198,20 @@ impl Default for RunState {
 }
 
 impl RunState {
+    pub fn remember_fallen_enemy(&mut self, enemy: &crate::components::Enemy, pos: Vec2) {
+        if enemy.hp > 0.0 || enemy.boss {
+            return;
+        }
+        self.fallen_enemies.push_back(FallenEnemy {
+            kind: enemy.kind,
+            max_hp: enemy.max_hp,
+            pos,
+        });
+        if self.fallen_enemies.len() > 8 {
+            self.fallen_enemies.pop_front();
+        }
+    }
+
     pub fn is_endless(&self) -> bool {
         self.total_waves <= 0
     }

@@ -6,7 +6,6 @@
 
 use bevy::prelude::*;
 use bevy_paperdoll::{PaperdollAsset, PaperdollId};
-use bevy_spritesheet_animation::prelude::SpritesheetAnimation;
 
 use crate::data::TILE_SIZE;
 use crate::hero::{HeroLoadout, HeroWeapon, Race};
@@ -184,7 +183,10 @@ fn apply_hero_paperdoll_image(
     runtime: Res<HeroPaperdollRuntime>,
     mut heroes: Query<
         (Entity, &Tower, &mut Sprite, Option<&HeroPaperdollApplied>),
-        With<HeroPaperdollSprite>,
+        (
+            With<HeroPaperdollSprite>,
+            Without<crate::build::HeroWalkAnim>,
+        ),
     >,
 ) {
     let (Some(key), Some(image)) = (runtime.key, runtime.image()) else {
@@ -202,9 +204,6 @@ fn apply_hero_paperdoll_image(
         sprite.color = Color::WHITE;
         sprite.custom_size = Some(Vec2::splat(HERO_PAPERDOLL_WORLD_SIZE));
 
-        commands
-            .entity(entity)
-            .remove::<(crate::build::HeroWalkAnim, SpritesheetAnimation)>()
-            .insert(HeroPaperdollApplied { key });
+        commands.entity(entity).insert(HeroPaperdollApplied { key });
     }
 }

@@ -74,8 +74,7 @@ sprites are WebP, and all runtime audio is WAV.
 | `A` / 自动波 button | toggle auto-start with a short between-wave countdown |
 | `P` / 暂停 | pause |
 | `F` / 倍速 | cycle speed 1× → 2× → 3× |
-| `Q` / `W` / `E` | cast meteor, full-field freeze, or gold-rush sacrifice |
-| Number keys `1`–`0` | quick-pick the first ten tower types |
+| Number keys `1`–`5` | quick-pick Arrow, Cannon, Magic, Ice, or Detection |
 
 ---
 
@@ -88,7 +87,7 @@ The original game keeps everything in module-level mutable globals and one big
 | File | Role | Bevy concept |
 |------|------|--------------|
 | `data.rs` | tower/enemy archetype/level/lore tables | plain `const`/`static` design data |
-| `monster.rs` | 100 monster species layered over enemy archetypes | content catalog + spawn pools |
+| `monster.rs` | 101 monster species layered over enemy archetypes | content catalog + spawn pools |
 | `equipment.rs` | 20 named equipment drops across rarities | loot/inventory tuning data + sprite keys |
 | `components.rs` | `Enemy`, `Carrot`, `LevelEntity` | `#[derive(Component)]` data on entities |
 | `board.rs` | path + buildable cells for a level | a `Resource` |
@@ -120,10 +119,11 @@ The original game keeps everything in module-level mutable globals and one big
 
 ### Content scope
 
-Current scope: **19 towers** across attack/control/support/special categories,
-**16 enemy behavior archetypes**, **100 named monster species**, **20 named equipment
+Current scope: **5 buildable towers** (Arrow, Cannon, Magic, Ice, and Detection),
+with the removed tower identities consolidated into **27 automatic skills across 9 hero classes**,
+**16 enemy behavior archetypes**, **101 named monster species**, **20 named equipment
 drops**, elemental damage/resistance, tower HP/armor, tower-raider enemies, silencer
-enemies, MOSS-style tower-eating bosses, ten species-specific boss skills, and
+enemies, MOSS-style tower-eating bosses, eleven species-specific boss skills, and
 **20 levels** with their paths and Lovecraftian lore. Two JS quirks were
 deliberately *not* reproduced (they read like bugs): permanent `baseSpeed` decay
 from stacked slows, and double-subtracted curse armor — here slow is a timer and
@@ -135,8 +135,8 @@ reserved for the sealed sleeping god.
 
 Build buttons show each tower's element marker, and tower/equipment hover tooltips
 summarize which catalog monsters are notably weak or resistant to that element.
-Fire towers now ignite enemies hit by the initial blast and leave a lingering
-burning patch, while both burn paths respect fire resistance.
+Starfire Staff separately casts a lingering burning corridor, a frost prison,
+and a level-30 meteor shower. Burning ground respects fire resistance.
 Shielded enemies and bosses show blue shield bars above HP, making absorbed damage
 visible during fights.
 The carrot seal itself has a board-space life bar, hit pulse, breach ring, and
@@ -177,7 +177,7 @@ a skill charge/cast meter, so cooldown pressure remains readable in crowded wave
 At low HP, bosses enter a visible `狂怒` phase: they shed control, gain a shield,
 move faster, charge skills more quickly, pulse red, shake the world, and update
 the HUD status/cooldown line.
-Summoned and necromancer-raised allies use archetype-tinted sprites and compact HP
+Hero-summoned mythic and spectral allies use archetype-tinted sprites and compact HP
 bars, making front-line blocking and ally losses readable during crowded waves.
 The HUD includes wave intel for the active or next wave: notable monsters, special
 traits, boss skill details, resistances, and recommended counter-elements.
@@ -202,9 +202,16 @@ Flawless waves add a visible `完美防守` gold bonus at the carrot seal, turni
 clean path control into a readable payout moment.
 Explosions, boss casts/deaths, and rare relic drops add a short world-camera
 shake, keeping high-impact moments physical while the UI stays stable.
-Active skills on `Q/W/E` now create board-space impact VFX: meteor marks its
-blast and hit count, freeze flashes the whole field, and gold rush shows the
-instant payout; cooldown failures report remaining seconds.
+Every hero class has two automatic skills available from the start and one
+level-30 ultimate. Each cast has its own cooldown, windup, delayed release, and
+recovery. Training improves only that skill's effects, never baseline hero stats.
+Attack speed, movement speed, and skill-cooldown bonuses belong to Hex choices
+and equipment. Timers follow game speed and stop while paused, between waves, or
+dead. Ready skills wait silently for valid targets. Charge and blink casts yield
+to player movement. All three Summon Staff skills create fighting allies, and
+allied summons share a 12-unit living owner cap. Heroes deploy and respawn
+automatically, with no manual cast or instant-respawn buttons. See
+[the current class-skill specification](docs/changes/2026-09-07-class-auto-casts.md).
 Equipment buttons show live inventory counts and dim to zero-stock labels, so
 socketing decisions are visible without opening a separate inventory screen.
 The in-run equipment palette also renders relic icons, with unavailable items
@@ -212,7 +219,7 @@ visually dimmed.
 Selected towers show live socket icons for their three equipped relic slots, so
 loadouts are readable while tuning or replacing gear; clicking one socket removes
 only that relic and returns it to inventory.
-The main menu includes a tower archive with all 19 towers, sprites, element
+The main menu includes a tower archive with all five buildable towers, sprites, element
 types, costs, combat stats, durability, behavior roles, and counter examples.
 The main menu includes an equipment armory that lists all 20 relics, owned
 counts, stat lines, rarity colors, drop sources, set-bonus rules, and duplicate

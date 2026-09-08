@@ -123,7 +123,7 @@ impl RogueliteTalent {
                     "远程额外获得射程 +8%"
                 };
                 crate::i18n::tf(
-                    "{}伤害 +15%；{}",
+                    "{}伤害与技能威力 +15%；{}",
                     &[
                         &crate::i18n::t(loadout.weapon_kind().name()),
                         &crate::i18n::t(extra),
@@ -131,7 +131,7 @@ impl RogueliteTalent {
                 )
             }
             RogueliteTalent::WeaponTempo => crate::i18n::tf(
-                "{}攻速 +10%、移速 +8%",
+                "{}攻速 +10%、移速 +8%、技能冷却 -10%",
                 &[&crate::i18n::t(loadout.weapon_kind().name())],
             ),
             RogueliteTalent::WeaponSignature => signature_desc(loadout.weapon),
@@ -185,6 +185,7 @@ impl RogueliteTalent {
             }
             RogueliteTalent::WeaponMastery => {
                 loadout.run_mods.damage_mult *= 1.15;
+                loadout.run_mods.skill_power_mult *= 1.15;
                 if weapon_is_melee(loadout.weapon) {
                     loadout.run_mods.hp_mult *= 1.08;
                     loadout.run_mods.armor_add += 3.0;
@@ -195,6 +196,7 @@ impl RogueliteTalent {
             RogueliteTalent::WeaponTempo => {
                 loadout.run_mods.cooldown_mult *= 0.90;
                 loadout.run_mods.move_mult *= 1.08;
+                loadout.run_mods.skill_interval_mult *= 0.90;
             }
             RogueliteTalent::WeaponSignature => apply_signature(loadout),
             RogueliteTalent::TowerOverclock => apply_tower_cooldown(talents, towers, 0.90),

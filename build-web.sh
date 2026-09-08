@@ -45,10 +45,10 @@ WASM_BINDGEN_BIN="$(resolve_wasm_bindgen)"
 
 echo ">> cargo build ($PROFILE, WebGPU) for $TARGET"
 if [ "$PROFILE" = "release" ]; then
-  cargo build --target "$TARGET" --release --features webgpu
+  cargo build --bin "$NAME" --target "$TARGET" --release --features webgpu
   WASM="target/$TARGET/release/$NAME.wasm"
 else
-  cargo build --target "$TARGET" --features webgpu
+  cargo build --bin "$NAME" --target "$TARGET" --features webgpu
   WASM="target/$TARGET/debug/$NAME.wasm"
 fi
 

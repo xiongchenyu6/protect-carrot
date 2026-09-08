@@ -25,21 +25,8 @@ TOWERS = {
     "arrow": "a stone archer tower with a crossbow on top, red roof",
     "cannon": "a stone tower with a black iron cannon, orange trim",
     "magic": "a purple wizard spire with a glowing magic crystal orb",
-    "sniper": "a tall green watchtower with a long sniper ballista",
-    "thunder": "a tesla coil tower crackling with yellow lightning",
-    "laser": "a sleek tech tower with a glowing pink laser lens",
-    "missile": "a large fortified rocket battery with missiles, orange",
-    "fortress": "a massive fortified bunker with a huge brown artillery cannon",
     "ice": "a blue crystalline ice tower radiating frost",
-    "wind": "a turquoise tower with spinning turbine cyclone blades",
-    "frostnova": "a light-blue crystal obelisk pulsing an icy aura",
-    "shadow": "a dark obsidian tower leaking purple shadow mist",
-    "holy": "a golden ornate holy spire with a radiant halo",
     "detection": "a lavender tower with a large mystical watching eye",
-    "poison": "a tower with bubbling green toxic vials, dripping ooze",
-    "fire": "a tower with a flame nozzle spewing orange fire",
-    "summon": "a grey wooden totem tower with a spectral wolf aura",
-    "prism": "a tall cyan crystalline prism tower splitting light beams",
 }
 
 

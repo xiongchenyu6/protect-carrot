@@ -3,9 +3,9 @@
 # Billed against your ChatGPT plan (run `codex login` first) — no API key.
 #
 # Usage (from project root):
-#   ./tools/gen_sprites_ai.sh towers      # only towers (19)
+#   ./tools/gen_sprites_ai.sh towers      # only towers (5)
 #   ./tools/gen_sprites_ai.sh enemies     # only enemies (16)
-#   ./tools/gen_sprites_ai.sh all         # everything (35)  [default]
+#   ./tools/gen_sprites_ai.sh all         # everything (21)  [default]
 #   ./tools/gen_sprites_ai.sh one towers arrow "an archer tower ..."  # single
 #
 # Each sprite overwrites assets/sprites/{towers,enemies}/<name>.png so the game
@@ -35,22 +35,8 @@ declare -A TOWERS=(
   [arrow]="an archer/arrow tower: round stone turret base with a mounted crossbow"
   [cannon]="a cannon tower: stone base with a stubby black iron cannon barrel"
   [magic]="a wizard magic tower: arcane spire with a glowing purple crystal orb"
-  [sniper]="a sniper tower: tall watchtower with a long precision rifle/ballista, green accents"
-  [thunder]="a lightning tower: tesla-coil spire crackling with yellow electricity"
-  [laser]="a laser tower: sleek tech turret emitting a thin pink energy beam lens"
-  [missile]="a heavy 2x2 missile battery: bunker with multiple rockets pointing up, orange"
-  [fortress]="a massive 2x2 fortress cannon: fortified bunker with a giant brown artillery gun"
   [ice]="an ice tower: blue crystalline turret radiating frost"
-  [wind]="a wind tower: turquoise turret with spinning turbine/cyclone blades"
-  [frostnova]="a frost-nova tower: light-blue crystal obelisk pulsing an icy shockwave"
-  [shadow]="a shadow tower: dark obsidian turret leaking purple-black shadow mist"
-  [holy]="a holy light tower: golden ornate spire with a radiant glowing halo, warm yellow"
   [detection]="a detection/watch tower: lavender turret with a large mystical eye lens"
-  [poison]="a poison tower: turret with bubbling green toxic vials and dripping ooze"
-  [fire]="a fire tower: turret with a flame nozzle spewing orange fire, ember sparks"
-  [summon]="a summoner totem tower: grey wooden totem with spectral wolf spirit aura"
-  [prism]="a grand 3x3 prism laser tower: crystalline obelisk splitting bright cyan beams"
-  [necromancer]="a necromancer bone tower: skull lantern, green soul flame, raises fallen enemies"
 )
 
 declare -A ENEMIES=(

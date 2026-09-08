@@ -82,7 +82,7 @@ struct RaceMods {
 }
 
 /// Hero weapon — base combat profile and attack behavior.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum HeroWeapon {
     BannerSword,
     StarfireStaff,
@@ -138,22 +138,9 @@ impl HeroWeapon {
         }
     }
 
-    /// The talent slot repurposed as this weapon's level-30 ULTIMATE. It is the weapon's
-    /// weakest old talent (so converting it removes the least): it can no longer be
-    /// invested (its old per-rank effect therefore stays at 0 = removed), and instead
-    /// auto-activates as the ultimate once the hero hits level 30.
+    /// Every class reserves its third skill for the level-30 ultimate.
     pub fn ult_slot(self) -> usize {
-        match self {
-            HeroWeapon::BannerSword => 3,    // was 血性反击
-            HeroWeapon::StarfireStaff => 4,  // was 元素亲和
-            HeroWeapon::ShadowBow => 3,      // was 连珠追猎
-            HeroWeapon::OathShield => 3,     // was 壁垒修复 (slot was unused in stats anyway)
-            HeroWeapon::StormOrb => 4,       // was 充能矩阵
-            HeroWeapon::SentryCrossbow => 4, // was 补给信标 (slot was unused in stats anyway)
-            HeroWeapon::NightDagger => 4,    // was 破甲诅咒
-            HeroWeapon::SummonStaff => 1,    // old support slot repurposed as the ultimate
-            HeroWeapon::ForgeHammer => 1,    // old overclock slot repurposed as the ultimate
-        }
+        2
     }
 
     /// Sprite file (under `sprites/hero_talents/`) for the ultimate talent slot.
@@ -174,11 +161,11 @@ impl HeroWeapon {
     /// The weapon's level-30 ultimate name (shown on the ult talent slot).
     pub fn ultimate_name(self) -> &'static str {
         match self {
-            HeroWeapon::BannerSword => "不死战神",
+            HeroWeapon::BannerSword => "裂地连斩",
             HeroWeapon::StarfireStaff => "群星坠落",
             HeroWeapon::ShadowBow => "万箭风暴",
-            HeroWeapon::OathShield => "不灭壁垒",
-            HeroWeapon::StormOrb => "诸神黄昏",
+            HeroWeapon::OathShield => "圣域庇护",
+            HeroWeapon::StormOrb => "雷霆风暴",
             HeroWeapon::SentryCrossbow => "永恒哨域",
             HeroWeapon::NightDagger => "绝命刺杀",
             HeroWeapon::SummonStaff => "旧日眷属",
@@ -189,17 +176,23 @@ impl HeroWeapon {
     /// The weapon's level-30 ultimate description.
     pub fn ultimate_desc(self) -> &'static str {
         match self {
-            HeroWeapon::BannerSword => "30级解锁：伤害+50%、生命+60%、护甲大幅提升，真正的单刷战神",
-            HeroWeapon::StarfireStaff => "30级解锁：伤害+60%、爆炸范围剧增，一发清屏",
-            HeroWeapon::ShadowBow => "30级解锁：攻速翻倍并获得巨额穿甲，万箭覆盖全场",
-            HeroWeapon::OathShield => "30级解锁：生命翻倍、护甲暴涨，不可撼动的壁垒",
-            HeroWeapon::StormOrb => "30级解锁：雷链+5次跳跃、伤害+40%，连锁吞噬全场",
-            HeroWeapon::SentryCrossbow => "30级解锁：自身射程+50%，戍卫之眼笼罩战场",
-            HeroWeapon::NightDagger => "30级解锁：伤害+80%、巨额穿甲，背击必致命，专斩BOSS",
-            HeroWeapon::SummonStaff => {
-                "30级解锁：神话眷属数量+1，召唤物伤害、生命和存在时间大幅提升"
+            HeroWeapon::BannerSword => "30级解锁：蓄力挥剑，连续震裂周围地面，击退并震晕敌群",
+            HeroWeapon::StarfireStaff => "30级解锁：展开星阵，召下五颗陨星爆炸轰击敌群并附加灼烧",
+            HeroWeapon::ShadowBow => "30级解锁：向空中射出箭群，多轮箭雨覆盖敌军阵地",
+            HeroWeapon::OathShield => {
+                "30级解锁：举盾展开圣域，持续修复英雄与防御塔并震退侵入的敌人"
             }
-            HeroWeapon::ForgeHammer => "30级解锁：临时守卫更耐打，组装数量+1，并强化周围防御塔攻速",
+            HeroWeapon::StormOrb => "30级解锁：引导雷云，多轮落雷轰击并麻痹目标",
+            HeroWeapon::SentryCrossbow => "30级解锁：部署三处哨戒阵位，持续发射远程哨箭封锁防线",
+            HeroWeapon::NightDagger => {
+                "30级解锁：锁定重伤目标，双刃交叉处决，按目标已损生命追加伤害"
+            }
+            HeroWeapon::SummonStaff => {
+                "30级解锁：开启旧日之门，召唤远古眷属与两名护卫独立作战；共享12名存活上限"
+            }
+            HeroWeapon::ForgeHammer => {
+                "30级解锁：展开守卫工坊，组装四座重装守卫并持续修复周围英雄与防御塔"
+            }
         }
     }
 
@@ -277,21 +270,20 @@ impl HeroWeapon {
                 regen_pct: 0.02,
                 ..Doctrine::ZERO
             },
-            // Summon support: the weapon itself calls mobile mythic allies, and
-            // its doctrine makes 召唤塔 / 复活塔 builds scale harder.
+            // Summon support: the weapon calls mythic allies and spectral copies.
             HeroWeapon::SummonStaff => Doctrine {
                 name: "异界契约",
-                desc: "强化所有召唤物(+65%伤害/回血/延寿)，并加速附近召唤塔与死灵塔",
+                desc: "强化所有召唤物(+65%伤害/回血/延寿)，神话眷属与幽魂协同守线",
                 regen_pct: 0.01,
                 aura_haste: 0.16,
                 summon_power: 0.65,
                 ..Doctrine::ZERO
             },
-            // Builder route: attack-speed aura plus an active skill that constructs
+            // Builder route: attack-speed aura plus a passive that constructs
             // temporary guards, distinct from the summon staff's mobile mythic allies.
             HeroWeapon::ForgeHammer => Doctrine {
                 name: "临时工事",
-                desc: "全面提升周围防御塔攻速(+30%)；主动技能会组装临时守卫",
+                desc: "全面提升周围防御塔攻速(+30%)；战斗中自动组装临时守卫",
                 aura_haste: 0.30,
                 ..Doctrine::ZERO
             },
@@ -313,32 +305,20 @@ impl HeroWeapon {
     }
 
     pub fn skill_name(self) -> &'static str {
-        match self {
-            HeroWeapon::BannerSword => "战旗冲锋",
-            HeroWeapon::StarfireStaff => "星火风暴",
-            HeroWeapon::ShadowBow => "猎影齐射",
-            HeroWeapon::OathShield => "守护壁垒",
-            HeroWeapon::StormOrb => "雷云审判",
-            HeroWeapon::SentryCrossbow => "哨戒结界",
-            HeroWeapon::NightDagger => "死印爆发",
-            HeroWeapon::SummonStaff => "神话召临",
-            HeroWeapon::ForgeHammer => "组装守卫",
-        }
+        self.talent_name(0)
     }
 
     pub fn skill_desc(self) -> &'static str {
         match self {
-            HeroWeapon::BannerSword => "震击英雄周围敌人，造成物理伤害并短暂眩晕，同时恢复英雄生命",
-            HeroWeapon::StarfireStaff => {
-                "锁定高生命敌人，引爆奥术风暴，对范围内敌人造成魔法伤害和冰冻"
-            }
-            HeroWeapon::ShadowBow => "标记最靠前的敌群，连续穿透射击并附加剧毒减速",
-            HeroWeapon::OathShield => "修复附近防御塔，鼓舞塔攻势，并冻结贴近防线的敌人",
-            HeroWeapon::StormOrb => "召来雷云多段轰击前线敌群，造成雷风伤害和减速",
-            HeroWeapon::SentryCrossbow => "展开哨戒结界，强化附近塔并缠绕、削弱敌群",
-            HeroWeapon::NightDagger => "给最靠前敌人打上死印，造成暗影爆发、剧毒、缚足和破甲诅咒",
-            HeroWeapon::SummonStaff => "召唤会移动、会攻击的神话眷属，并裂界削弱周围敌人",
-            HeroWeapon::ForgeHammer => "组装临时机械守卫，超频附近防御塔，并用震荡锤击迟滞敌人",
+            HeroWeapon::BannerSword => "自动施展破阵冲锋与旋锋横扫；30级解锁裂地连斩",
+            HeroWeapon::StarfireStaff => "自动施展星火长径与寒星禁锢；30级解锁群星坠落",
+            HeroWeapon::ShadowBow => "自动施展淬毒齐射与穿云狙击；30级解锁万箭风暴",
+            HeroWeapon::OathShield => "自动施展盾击震退与圣光修复；30级解锁圣域庇护",
+            HeroWeapon::StormOrb => "自动施展雷链审判与风眼涡流；30级解锁雷霆风暴",
+            HeroWeapon::SentryCrossbow => "自动施展棱光折射与缚影哨箭；30级解锁永恒哨域",
+            HeroWeapon::NightDagger => "自动施展暗影伏击与毒刃散射；30级解锁绝命刺杀",
+            HeroWeapon::SummonStaff => "自动召唤神话眷属与亡魂友军；30级召唤旧日眷属",
+            HeroWeapon::ForgeHammer => "自动组装守卫并发射追踪火箭；30级解锁守卫工坊",
         }
     }
 
@@ -375,61 +355,25 @@ impl HeroWeapon {
             return self.ultimate_name();
         }
         match (self, index) {
-            (HeroWeapon::BannerSword, 0) => "破阵重击",
-            (HeroWeapon::BannerSword, 1) => "钢铁壁垒",
-            (HeroWeapon::BannerSword, 2) => "战旗统御",
-            (HeroWeapon::StarfireStaff, 0) => "奥术过载",
-            (HeroWeapon::StarfireStaff, 1) => "扩散符文",
-            (HeroWeapon::StarfireStaff, 2) => "时序回响",
-            (HeroWeapon::ShadowBow, 0) => "鹰眼射术",
-            (HeroWeapon::ShadowBow, 1) => "疾行游猎",
-            (HeroWeapon::ShadowBow, 2) => "淬毒陷击",
-            (HeroWeapon::BannerSword, 3) => "血性反击",
-            (HeroWeapon::BannerSword, 4) => "震地压制",
-            (HeroWeapon::BannerSword, 5) => "霸者姿态",
-            (HeroWeapon::StarfireStaff, 3) => "寒星禁锢",
-            (HeroWeapon::StarfireStaff, 4) => "元素亲和",
-            (HeroWeapon::StarfireStaff, 5) => "群星法阵",
-            (HeroWeapon::ShadowBow, 3) => "连珠追猎",
-            (HeroWeapon::ShadowBow, 4) => "弱点标记",
-            (HeroWeapon::ShadowBow, 5) => "风行大师",
-            (HeroWeapon::OathShield, 0) => "坚盾训练",
-            (HeroWeapon::OathShield, 1) => "守护光环",
-            (HeroWeapon::OathShield, 2) => "反击阵线",
-            (HeroWeapon::OathShield, 3) => "壁垒修复",
-            (HeroWeapon::OathShield, 4) => "挑衅压制",
-            (HeroWeapon::OathShield, 5) => "不动堡垒",
-            (HeroWeapon::StormOrb, 0) => "雷击导体",
-            (HeroWeapon::StormOrb, 1) => "暴风链",
-            (HeroWeapon::StormOrb, 2) => "静电过载",
-            (HeroWeapon::StormOrb, 3) => "风暴减速",
-            (HeroWeapon::StormOrb, 4) => "充能矩阵",
-            (HeroWeapon::StormOrb, 5) => "天怒风眼",
-            (HeroWeapon::SentryCrossbow, 0) => "哨戒阵地",
-            (HeroWeapon::SentryCrossbow, 1) => "战术协同",
-            (HeroWeapon::SentryCrossbow, 2) => "藤蔓缠绕",
-            (HeroWeapon::SentryCrossbow, 3) => "远望标尺",
-            (HeroWeapon::SentryCrossbow, 4) => "补给信标",
-            (HeroWeapon::SentryCrossbow, 5) => "森罗壁垒",
-            (HeroWeapon::NightDagger, 0) => "暗刃训练",
-            (HeroWeapon::NightDagger, 1) => "毒影灌注",
-            (HeroWeapon::NightDagger, 2) => "死亡标记",
-            (HeroWeapon::NightDagger, 3) => "闪袭步法",
-            (HeroWeapon::NightDagger, 4) => "破甲诅咒",
-            (HeroWeapon::NightDagger, 5) => "终结手法",
-            (HeroWeapon::SummonStaff, 0) => "契约增幅",
-            (HeroWeapon::SummonStaff, 1) => "旧日契印",
-            (HeroWeapon::SummonStaff, 2) => "护主鳞甲",
-            (HeroWeapon::SummonStaff, 3) => "裂界低语",
-            (HeroWeapon::SummonStaff, 4) => "召唤仪式",
-            (HeroWeapon::SummonStaff, 5) => "群星共鸣",
-            (HeroWeapon::ForgeHammer, 0) => "精密齿轮",
-            (HeroWeapon::ForgeHammer, 1) => "过载线圈",
-            (HeroWeapon::ForgeHammer, 2) => "重装底盘",
-            (HeroWeapon::ForgeHammer, 3) => "自动修复",
-            (HeroWeapon::ForgeHammer, 4) => "震荡锤击",
-            (HeroWeapon::ForgeHammer, 5) => "主控核心",
-            _ => "未知天赋",
+            (HeroWeapon::BannerSword, 0) => "破阵冲锋",
+            (HeroWeapon::BannerSword, 1) => "旋锋横扫",
+            (HeroWeapon::StarfireStaff, 0) => "星火长径",
+            (HeroWeapon::StarfireStaff, 1) => "寒星禁锢",
+            (HeroWeapon::ShadowBow, 0) => "淬毒齐射",
+            (HeroWeapon::ShadowBow, 1) => "穿云狙击",
+            (HeroWeapon::OathShield, 0) => "盾击震退",
+            (HeroWeapon::OathShield, 1) => "圣光修复",
+            (HeroWeapon::StormOrb, 0) => "雷链审判",
+            (HeroWeapon::StormOrb, 1) => "风眼涡流",
+            (HeroWeapon::SentryCrossbow, 0) => "棱光折射",
+            (HeroWeapon::SentryCrossbow, 1) => "缚影哨箭",
+            (HeroWeapon::NightDagger, 0) => "暗影伏击",
+            (HeroWeapon::NightDagger, 1) => "毒刃散射",
+            (HeroWeapon::SummonStaff, 0) => "神话契约",
+            (HeroWeapon::SummonStaff, 1) => "亡魂召回",
+            (HeroWeapon::ForgeHammer, 0) => "守卫组装",
+            (HeroWeapon::ForgeHammer, 1) => "追踪火箭",
+            _ => "未知技能",
         }
     }
 
@@ -438,60 +382,50 @@ impl HeroWeapon {
             return self.ultimate_desc();
         }
         match (self, index) {
-            (HeroWeapon::BannerSword, 0) => "提高攻击，并把普攻改为小范围顺劈",
-            (HeroWeapon::BannerSword, 1) => "提高生命和护甲，让英雄能顶住攻城怪",
-            (HeroWeapon::BannerSword, 2) => "提高攻速和移动速度，并缩短武器技能冷却",
-            (HeroWeapon::StarfireStaff, 0) => "提高奥术伤害，并强化火球命中的奥术灼痕",
-            (HeroWeapon::StarfireStaff, 1) => "提高射程和爆炸范围，增强控场覆盖",
-            (HeroWeapon::StarfireStaff, 2) => "提高施法频率，并延长武器技能冰冻",
-            (HeroWeapon::ShadowBow, 0) => "提高远程伤害和射程",
-            (HeroWeapon::ShadowBow, 1) => "提高攻速和移动速度，便于游走补线",
-            (HeroWeapon::ShadowBow, 2) => "强化毒箭和猎影齐射的减速/毒伤",
-            (HeroWeapon::BannerSword, 3) => "受伤后更能维持输出，并提高生命",
-            (HeroWeapon::BannerSword, 4) => "扩大顺劈范围，技能眩晕更稳定",
-            (HeroWeapon::BannerSword, 5) => "提高全属性成长，降低技能冷却",
-            (HeroWeapon::StarfireStaff, 3) => "延长冰冻，并让奥术灼痕削弱敌人抗性",
-            (HeroWeapon::StarfireStaff, 4) => "提高元素伤害并略微提高生存",
-            (HeroWeapon::StarfireStaff, 5) => "扩大技能法阵，提升终局爆发和灼痕持续压制",
-            (HeroWeapon::ShadowBow, 3) => "提高连射频率和齐射目标数",
-            (HeroWeapon::ShadowBow, 4) => "提高穿甲，并让技能更擅长点杀",
-            (HeroWeapon::ShadowBow, 5) => "进一步提升移速、射程和技能冷却",
-            (HeroWeapon::OathShield, 0) => "提高生命、护甲和前线承伤能力",
-            (HeroWeapon::OathShield, 1) => "强化主动技能对附近塔的鼓舞",
-            (HeroWeapon::OathShield, 2) => "提高反击伤害并获得击退普通攻击",
-            (HeroWeapon::OathShield, 3) => "主动技能修复更多塔生命",
-            (HeroWeapon::OathShield, 4) => "让攻击和技能更擅长迟滞敌人",
-            (HeroWeapon::OathShield, 5) => "大幅提升坦度并缩短壁垒冷却",
-            (HeroWeapon::StormOrb, 0) => "提高雷风伤害",
-            (HeroWeapon::StormOrb, 1) => "增加连锁次数和跳跃距离",
-            (HeroWeapon::StormOrb, 2) => "提高攻速并缩短技能冷却",
-            (HeroWeapon::StormOrb, 3) => "增强普攻和技能减速",
-            (HeroWeapon::StormOrb, 4) => "主动技能额外超频附近塔",
-            (HeroWeapon::StormOrb, 5) => "提高雷云半径和终局伤害",
-            (HeroWeapon::SentryCrossbow, 0) => "提高阵地伤害和耐久",
-            (HeroWeapon::SentryCrossbow, 1) => "主动技能鼓舞更多防御塔",
-            (HeroWeapon::SentryCrossbow, 2) => "增强缠绕减速和毒性压制",
-            (HeroWeapon::SentryCrossbow, 3) => "提高射程和索敌稳定性",
-            (HeroWeapon::SentryCrossbow, 4) => "主动技能额外修复防御塔",
-            (HeroWeapon::SentryCrossbow, 5) => "提高阵地范围和技能冷却效率",
-            (HeroWeapon::NightDagger, 0) => "提高暗影直伤和穿甲",
-            (HeroWeapon::NightDagger, 1) => "强化毒伤和持续时间",
-            (HeroWeapon::NightDagger, 2) => "技能死印命中更多目标",
-            (HeroWeapon::NightDagger, 3) => "提高攻速、移速和脱战能力",
-            (HeroWeapon::NightDagger, 4) => "增强诅咒破甲效果",
-            (HeroWeapon::NightDagger, 5) => "提高对高生命目标的终结爆发",
-            (HeroWeapon::SummonStaff, 0) => "提高召唤物和神话眷属伤害",
-            (HeroWeapon::SummonStaff, 1) => "主动技能额外召唤旧日眷属",
-            (HeroWeapon::SummonStaff, 2) => "提高英雄生命，并强化召唤物耐久",
-            (HeroWeapon::SummonStaff, 3) => "神话眷属降临时削弱更多敌人",
-            (HeroWeapon::SummonStaff, 4) => "延长召唤物存在时间，并提高移动速度",
-            (HeroWeapon::SummonStaff, 5) => "提高召唤共鸣，缩短神话召临冷却",
-            (HeroWeapon::ForgeHammer, 0) => "提高机械伤害和基础攻速",
-            (HeroWeapon::ForgeHammer, 1) => "主动技能更强力地超频防御塔",
-            (HeroWeapon::ForgeHammer, 2) => "提高生命和设备覆盖范围",
-            (HeroWeapon::ForgeHammer, 3) => "主动技能修复更多塔结构",
-            (HeroWeapon::ForgeHammer, 4) => "增强锤击减速、穿甲和伤害",
-            (HeroWeapon::ForgeHammer, 5) => "提高装备收益和超频冷却效率",
+            (HeroWeapon::BannerSword, 0) => {
+                "蓄势冲向前锋，沿途剑锋击退并震晕敌人；升阶强化本次冲锋"
+            }
+            (HeroWeapon::BannerSword, 1) => {
+                "转身挥出弧形剑锋，横扫近身敌群；升阶强化横扫伤害与范围"
+            }
+            (HeroWeapon::StarfireStaff, 0) => {
+                "吟唱后贯穿目标方向，铺出持续灼烧的火焰长径；升阶强化火径"
+            }
+            (HeroWeapon::StarfireStaff, 1) => {
+                "在敌群脚下凝结冰阵，释放时冻结范围内敌人；升阶强化冰牢"
+            }
+            (HeroWeapon::ShadowBow, 0) => "搭起多支毒箭，齐射数名敌人并附加剧毒；升阶强化本次齐射",
+            (HeroWeapon::ShadowBow, 1) => {
+                "拉满弓弦射出高穿甲箭，贯穿直线上的所有敌人；升阶强化狙击"
+            }
+            (HeroWeapon::OathShield, 0) => "架盾蓄力后猛击前方，击退并震晕近敌；升阶强化盾击",
+            (HeroWeapon::OathShield, 1) => {
+                "举起圣锤引导治疗，修复受损防御塔并治疗英雄与萝卜；升阶强化修复"
+            }
+            (HeroWeapon::StormOrb, 0) => "聚集电荷后释放连锁闪电，在相邻敌人间跳跃；升阶强化雷链",
+            (HeroWeapon::StormOrb, 1) => "凝聚风眼，持续牵引并禁锢范围内敌群；升阶强化涡流",
+            (HeroWeapon::SentryCrossbow, 0) => {
+                "瞄准防线锚点，发射多路折射哨箭并减速敌人；升阶强化折射"
+            }
+            (HeroWeapon::SentryCrossbow, 1) => {
+                "装填束缚箭，命中后冻结目标并施加破甲诅咒；升阶强化束缚"
+            }
+            (HeroWeapon::NightDagger, 0) => {
+                "隐步蓄势，绕到首领优先目标身后突刺并留下死印；升阶强化伏击"
+            }
+            (HeroWeapon::NightDagger, 1) => "翻转双刃，向敌群掷出多柄淬毒飞刀；升阶强化飞刀",
+            (HeroWeapon::SummonStaff, 0) => {
+                "吟唱开启契约法阵，召出移动作战的神话眷属；升阶强化本次眷属，共享12名上限"
+            }
+            (HeroWeapon::SummonStaff, 1) => {
+                "引导亡魂之门，消耗已击败非首领的魂魄召回友军；升阶强化本次亡魂，共享12名上限"
+            }
+            (HeroWeapon::ForgeHammer, 0) => {
+                "挥锤展开零件，组装在指定防区巡逻近战的机械守卫；升阶强化本次守卫"
+            }
+            (HeroWeapon::ForgeHammer, 1) => {
+                "架起发射器，发射追踪目标并爆炸燃烧的火箭；升阶强化本次火箭"
+            }
             _ => "",
         }
     }
@@ -501,60 +435,24 @@ impl HeroWeapon {
             return self.ultimate_sprite_name();
         }
         match (self, index) {
-            (HeroWeapon::BannerSword, 0) => "warrior_cleave",
-            (HeroWeapon::BannerSword, 1) => "warrior_guard",
-            (HeroWeapon::BannerSword, 2) => "warrior_banner",
+            (HeroWeapon::BannerSword, 0) => "warrior_banner",
+            (HeroWeapon::BannerSword, 1) => "warrior_cleave",
             (HeroWeapon::StarfireStaff, 0) => "mage_overload",
-            (HeroWeapon::StarfireStaff, 1) => "mage_rune",
-            (HeroWeapon::StarfireStaff, 2) => "mage_echo",
-            (HeroWeapon::ShadowBow, 0) => "ranger_eye",
-            (HeroWeapon::ShadowBow, 1) => "ranger_stride",
-            (HeroWeapon::ShadowBow, 2) => "ranger_venom",
-            (HeroWeapon::BannerSword, 3) => "warrior_counter",
-            (HeroWeapon::BannerSword, 4) => "warrior_quake",
-            (HeroWeapon::BannerSword, 5) => "warrior_warlord",
-            (HeroWeapon::StarfireStaff, 3) => "mage_froststar",
-            (HeroWeapon::StarfireStaff, 4) => "mage_attune",
-            (HeroWeapon::StarfireStaff, 5) => "mage_constellation",
-            (HeroWeapon::ShadowBow, 3) => "ranger_barrage",
-            (HeroWeapon::ShadowBow, 4) => "ranger_mark",
-            (HeroWeapon::ShadowBow, 5) => "ranger_mastery",
-            (HeroWeapon::OathShield, 0) => "guardian_shield",
-            (HeroWeapon::OathShield, 1) => "guardian_aura",
-            (HeroWeapon::OathShield, 2) => "guardian_counter",
-            (HeroWeapon::OathShield, 3) => "guardian_repair",
-            (HeroWeapon::OathShield, 4) => "guardian_taunt",
-            (HeroWeapon::OathShield, 5) => "guardian_bastion",
-            (HeroWeapon::StormOrb, 0) => "stormcaller_conduit",
-            (HeroWeapon::StormOrb, 1) => "stormcaller_chain",
-            (HeroWeapon::StormOrb, 2) => "stormcaller_static",
-            (HeroWeapon::StormOrb, 3) => "stormcaller_slow",
-            (HeroWeapon::StormOrb, 4) => "stormcaller_matrix",
-            (HeroWeapon::StormOrb, 5) => "stormcaller_eye",
+            (HeroWeapon::StarfireStaff, 1) => "mage_froststar",
+            (HeroWeapon::ShadowBow, 0) => "ranger_venom",
+            (HeroWeapon::ShadowBow, 1) => "ranger_mark",
+            (HeroWeapon::OathShield, 0) => "guardian_counter",
+            (HeroWeapon::OathShield, 1) => "guardian_repair",
+            (HeroWeapon::StormOrb, 0) => "stormcaller_chain",
+            (HeroWeapon::StormOrb, 1) => "stormcaller_eye",
             (HeroWeapon::SentryCrossbow, 0) => "warden_watch",
-            (HeroWeapon::SentryCrossbow, 1) => "warden_coordination",
-            (HeroWeapon::SentryCrossbow, 2) => "warden_vines",
-            (HeroWeapon::SentryCrossbow, 3) => "warden_sight",
-            (HeroWeapon::SentryCrossbow, 4) => "warden_supply",
-            (HeroWeapon::SentryCrossbow, 5) => "warden_grove",
-            (HeroWeapon::NightDagger, 0) => "assassin_blade",
+            (HeroWeapon::SentryCrossbow, 1) => "warden_vines",
+            (HeroWeapon::NightDagger, 0) => "assassin_step",
             (HeroWeapon::NightDagger, 1) => "assassin_venom",
-            (HeroWeapon::NightDagger, 2) => "assassin_mark",
-            (HeroWeapon::NightDagger, 3) => "assassin_step",
-            (HeroWeapon::NightDagger, 4) => "assassin_curse",
-            (HeroWeapon::NightDagger, 5) => "assassin_execute",
             (HeroWeapon::SummonStaff, 0) => "summoner_pact",
-            (HeroWeapon::SummonStaff, 1) => "summoner_sigil",
-            (HeroWeapon::SummonStaff, 2) => "summoner_scales",
-            (HeroWeapon::SummonStaff, 3) => "summoner_rift",
-            (HeroWeapon::SummonStaff, 4) => "summoner_ritual",
-            (HeroWeapon::SummonStaff, 5) => "summoner_resonance",
-            (HeroWeapon::ForgeHammer, 0) => "engineer_gears",
-            (HeroWeapon::ForgeHammer, 1) => "engineer_overclock",
-            (HeroWeapon::ForgeHammer, 2) => "engineer_mount",
-            (HeroWeapon::ForgeHammer, 3) => "engineer_repair",
-            (HeroWeapon::ForgeHammer, 4) => "engineer_pulse",
-            (HeroWeapon::ForgeHammer, 5) => "engineer_core",
+            (HeroWeapon::SummonStaff, 1) => "summoner_ritual",
+            (HeroWeapon::ForgeHammer, 0) => "engineer_mount",
+            (HeroWeapon::ForgeHammer, 1) => "engineer_pulse",
             _ => "warrior_cleave",
         }
     }
@@ -679,8 +577,8 @@ pub struct Doctrine {
     pub tower_heal: f32,
     /// +gold fraction on every enemy kill while the hero is alive.
     pub gold_bonus: f32,
-    /// +damage fraction granted to ALL summons (召唤物), who are also healed and
-    /// have their decay slowed. Drives the summon-staff route (召唤塔/复活塔).
+    /// +damage fraction granted to all hero summons, which are also healed and
+    /// have their decay slowed.
     pub summon_power: f32,
 }
 
@@ -727,8 +625,8 @@ pub fn hero_doctrine(
         None => 0.0,
     };
 
-    // Summon Staff 异界契约: empower every summon (召唤物联动) — bonus damage, regen, and
-    // slowed decay so召唤塔/复活塔 builds scale. Reset when no summon-staff hero is alive.
+    // Summon Staff 异界契约: empower every hero summon with damage, regen, and
+    // slowed decay. Reset when no summon-staff hero is alive.
     let summon_power = match hero {
         Some(_) => {
             doc.summon_power * scale
@@ -745,7 +643,7 @@ pub fn hero_doctrine(
                 s.hp = (s.hp + s.max_hp * 0.05 * dt).min(s.max_hp);
             }
             // Slow the crumble timer of temporary minions (skeletons are infinite).
-            if s.lifetime.is_finite() {
+            if run.wave_in_progress && s.lifetime.is_finite() {
                 s.lifetime += dt * 0.5;
             }
         }
@@ -813,6 +711,8 @@ pub struct HeroRunMods {
     pub damage_mult: f32,
     pub range_mult: f32,
     pub cooldown_mult: f32,
+    pub skill_interval_mult: f32,
+    pub skill_power_mult: f32,
     pub hp_mult: f32,
     pub move_mult: f32,
     pub armor_add: f32,
@@ -826,6 +726,8 @@ impl Default for HeroRunMods {
             damage_mult: 1.0,
             range_mult: 1.0,
             cooldown_mult: 1.0,
+            skill_interval_mult: 1.0,
+            skill_power_mult: 1.0,
             hp_mult: 1.0,
             move_mult: 1.0,
             armor_add: 0.0,
@@ -845,7 +747,8 @@ pub struct HeroLoadout {
     pub talent_points: u8,
     pub weapon_talents: [[u8; Self::TALENT_SLOTS]; HeroWeapon::ALL.len()],
     pub gear: [Option<HeroGear>; HeroGearSlot::COUNT],
-    pub skill_cd: i32,
+    /// Independent remaining game seconds before each class skill can cast.
+    pub skill_cooldowns: [f32; Self::TALENT_SLOTS],
     /// Temporary roguelite build modifiers for the active level only.
     pub run_mods: HeroRunMods,
     /// Whether the hero is currently alive in the run.
@@ -865,7 +768,7 @@ impl Default for HeroLoadout {
             talent_points: saved.points,
             weapon_talents: saved.talents,
             gear: saved.gear,
-            skill_cd: 0,
+            skill_cooldowns: [0.0; Self::TALENT_SLOTS],
             run_mods: HeroRunMods::default(),
             alive: false,
             respawn_waves: 0,
@@ -875,11 +778,14 @@ impl Default for HeroLoadout {
 
 impl HeroLoadout {
     pub const MAX_LEVEL: u8 = 30;
-    pub const TALENT_SLOTS: usize = 6;
+    pub const TALENT_SLOTS: usize = 3;
     pub const TALENT_MAX_RANK: u8 = 5;
 
     /// Pick a weapon directly (hero selection screen), persisting the choice.
     pub fn set_weapon(&mut self, weapon: HeroWeapon) {
+        if self.weapon != weapon {
+            self.skill_cooldowns = [0.0; Self::TALENT_SLOTS];
+        }
         self.weapon = weapon;
         save_hero(self);
     }
@@ -902,6 +808,9 @@ impl HeroLoadout {
     }
 
     pub fn talent_rank(&self, index: usize) -> u8 {
+        if index == self.weapon.ult_slot() {
+            return 0;
+        }
         self.weapon_talents
             .get(self.weapon_index())
             .and_then(|row| row.get(index))
@@ -910,7 +819,9 @@ impl HeroLoadout {
     }
 
     pub fn spent_in_current_weapon(&self) -> u8 {
-        self.weapon_talents[self.weapon_index()].iter().sum()
+        self.weapon_talents[self.weapon_index()][..self.weapon.ult_slot()]
+            .iter()
+            .sum()
     }
 
     pub fn weapon_kind(&self) -> HeroWeaponKind {
@@ -958,17 +869,17 @@ impl HeroLoadout {
 
     pub fn add_talent(&mut self, index: usize) -> Result<(), &'static str> {
         if index >= Self::TALENT_SLOTS {
-            return Err("未知天赋");
+            return Err("未知技能");
         }
         if index == self.weapon.ult_slot() {
-            return Err("终极天赋将在30级自动解锁，无需投点");
+            return Err("终极技能将在30级自动解锁，无需投点");
         }
         if self.talent_points == 0 {
             return Err("没有可用天赋点");
         }
         let weapon_index = self.weapon_index();
         if self.weapon_talents[weapon_index][index] >= Self::TALENT_MAX_RANK {
-            return Err("该天赋已满级");
+            return Err("该技能已满阶");
         }
         self.weapon_talents[weapon_index][index] += 1;
         self.talent_points -= 1;
@@ -978,97 +889,67 @@ impl HeroLoadout {
 
     pub fn respec_current_weapon(&mut self) -> u8 {
         let weapon_index = self.weapon_index();
-        let refunded: u8 = self.weapon_talents[weapon_index].iter().sum();
+        let refunded = self.spent_in_current_weapon();
         self.weapon_talents[weapon_index] = [0; Self::TALENT_SLOTS];
         self.talent_points = self.talent_points.saturating_add(refunded);
         save_hero(self);
         refunded
     }
 
-    pub fn tick_wave_cooldowns(&mut self) {
-        self.skill_cd = (self.skill_cd - 1).max(0);
+    pub fn skill_unlocked(&self, index: usize) -> bool {
+        index < Self::TALENT_SLOTS
+            && (index != self.weapon.ult_slot() || self.level >= Self::MAX_LEVEL)
     }
 
-    pub fn skill_cooldown_max(&self) -> i32 {
-        let base = match self.weapon {
-            HeroWeapon::BannerSword => 3,
-            HeroWeapon::StarfireStaff => 4,
-            HeroWeapon::ShadowBow => 3,
-            HeroWeapon::OathShield => 4,
-            HeroWeapon::StormOrb => 4,
-            HeroWeapon::SentryCrossbow => 4,
-            HeroWeapon::NightDagger => 3,
-            HeroWeapon::SummonStaff => 4,
-            HeroWeapon::ForgeHammer => 4,
+    /// Cooldowns belong to casts; training never changes baseline combat stats.
+    pub fn skill_interval(&self, index: usize) -> f32 {
+        let intervals = match self.weapon {
+            HeroWeapon::BannerSword => [18.0, 12.0, 38.0],
+            HeroWeapon::StarfireStaff => [24.0, 18.0, 42.0],
+            HeroWeapon::ShadowBow => [18.0, 14.0, 38.0],
+            HeroWeapon::OathShield => [14.0, 24.0, 42.0],
+            HeroWeapon::StormOrb => [18.0, 20.0, 40.0],
+            HeroWeapon::SentryCrossbow => [20.0, 16.0, 42.0],
+            HeroWeapon::NightDagger => [18.0, 14.0, 38.0],
+            HeroWeapon::SummonStaff => [24.0, 18.0, 45.0],
+            HeroWeapon::ForgeHammer => [24.0, 16.0, 42.0],
         };
         let gear = hero_gear::gear_stats(&self.gear);
         let affinity = hero_gear::weapon_affinity_stats(&self.gear, self.weapon);
-        (base
-            - ((self.talent_rank(2) + self.talent_rank(5)) / 3) as i32
-            - gear.skill_cooldown_reduction
-            - affinity.skill_cooldown_reduction)
-            .max(1)
+        ((intervals.get(index).copied().unwrap_or(intervals[0])
+            - gear.passive_interval_reduction as f32
+            - affinity.passive_interval_reduction as f32)
+            * self.run_mods.skill_interval_mult)
+            .max(crate::data::HERO_PASSIVE_MIN_INTERVAL)
+    }
+
+    /// Primary skill interval used by the existing attribute comparison report.
+    pub fn passive_interval(&self) -> f32 {
+        self.skill_interval(0)
     }
 
     pub fn skill_damage_mult(&self) -> f32 {
         let level = 1.0 + (self.level.saturating_sub(1) as f32 * 0.045);
         let gear = hero_gear::gear_stats(&self.gear);
         let affinity = hero_gear::weapon_affinity_stats(&self.gear, self.weapon);
-        let talent = match self.weapon {
-            HeroWeapon::BannerSword => {
-                1.0 + self.talent_rank(0) as f32 * 0.13 + self.talent_rank(5) as f32 * 0.05
-            }
-            HeroWeapon::StarfireStaff => {
-                1.0 + self.talent_rank(0) as f32 * 0.16 + self.talent_rank(5) as f32 * 0.07
-            }
-            HeroWeapon::ShadowBow => {
-                1.0 + self.talent_rank(0) as f32 * 0.11 + self.talent_rank(4) as f32 * 0.06
-            }
-            HeroWeapon::OathShield => {
-                1.0 + self.talent_rank(2) as f32 * 0.08 + self.talent_rank(5) as f32 * 0.04
-            }
-            HeroWeapon::StormOrb => {
-                1.0 + self.talent_rank(0) as f32 * 0.12 + self.talent_rank(5) as f32 * 0.08
-            }
-            HeroWeapon::SentryCrossbow => {
-                1.0 + self.talent_rank(0) as f32 * 0.08 + self.talent_rank(5) as f32 * 0.05
-            }
-            HeroWeapon::NightDagger => {
-                1.0 + self.talent_rank(0) as f32 * 0.12 + self.talent_rank(5) as f32 * 0.10
-            }
-            HeroWeapon::SummonStaff => {
-                1.0 + self.talent_rank(0) as f32 * 0.10 + self.talent_rank(5) as f32 * 0.06
-            }
-            HeroWeapon::ForgeHammer => {
-                1.0 + self.talent_rank(0) as f32 * 0.10 + self.talent_rank(5) as f32 * 0.06
-            }
-        };
-        level * talent * gear.skill_mult * affinity.skill_mult
+        level * gear.skill_mult * affinity.skill_mult * self.run_mods.skill_power_mult
     }
 }
 
 /// Movement speed (world px/sec) for this race+weapon.
 pub fn hero_move_speed(loadout: &HeroLoadout) -> f32 {
-    let talent_speed = match loadout.weapon {
-        HeroWeapon::BannerSword => 1.0 + loadout.talent_rank(2) as f32 * 0.04,
-        HeroWeapon::StarfireStaff => 1.0,
-        HeroWeapon::ShadowBow => {
-            1.0 + loadout.talent_rank(1) as f32 * 0.07 + loadout.talent_rank(5) as f32 * 0.03
-        }
-        HeroWeapon::OathShield => 0.92 + loadout.talent_rank(5) as f32 * 0.025,
-        HeroWeapon::StormOrb => 1.0 + loadout.talent_rank(2) as f32 * 0.035,
-        HeroWeapon::SentryCrossbow => 0.98 + loadout.talent_rank(3) as f32 * 0.025,
-        HeroWeapon::NightDagger => {
-            1.12 + loadout.talent_rank(3) as f32 * 0.06 + loadout.talent_rank(5) as f32 * 0.02
-        }
-        HeroWeapon::SummonStaff => 0.96 + loadout.talent_rank(4) as f32 * 0.025,
-        HeroWeapon::ForgeHammer => 0.98 + loadout.talent_rank(2) as f32 * 0.02,
+    let weapon_speed = match loadout.weapon {
+        HeroWeapon::OathShield => 0.92,
+        HeroWeapon::SentryCrossbow | HeroWeapon::ForgeHammer => 0.98,
+        HeroWeapon::NightDagger => 1.12,
+        HeroWeapon::SummonStaff => 0.96,
+        _ => 1.0,
     };
     let gear = hero_gear::gear_stats(&loadout.gear);
     let affinity = hero_gear::weapon_affinity_stats(&loadout.gear, loadout.weapon);
     110.0
         * loadout.race.mods().speed
-        * talent_speed
+        * weapon_speed
         * gear.move_mult
         * affinity.move_mult
         * loadout.run_mods.move_mult
@@ -1120,13 +1001,6 @@ pub fn apply_loadout_to_tower(loadout: &HeroLoadout, t: &mut Tower) {
         1.0
     };
     let level_mult = 1.0 + loadout.level.saturating_sub(1) as f32 * 0.04;
-    let a = loadout.talent_rank(0) as f32;
-    let b = loadout.talent_rank(1) as f32;
-    let c = loadout.talent_rank(2) as f32;
-    let d = loadout.talent_rank(3) as f32;
-    let e = loadout.talent_rank(4) as f32;
-    let f = loadout.talent_rank(5) as f32;
-    let equipped_count = loadout.gear_count() as f32;
     let gear = hero_gear::gear_stats(&loadout.gear);
     let affinity = hero_gear::weapon_affinity_stats(&loadout.gear, loadout.weapon);
     let mut damage_mult = level_mult;
@@ -1135,7 +1009,6 @@ pub fn apply_loadout_to_tower(loadout: &HeroLoadout, t: &mut Tower) {
     let mut hp_mult = 1.0;
     let mut armor_bonus = 0.0;
     let mut armor_pierce_bonus = 0.0;
-    let mut aoe_bonus = 0.0;
 
     t.behavior = base.behavior;
     // Sentry Crossbow is the 哨兵 (sentinel): built-in 反隐形 — reveals invisible enemies in
@@ -1149,14 +1022,10 @@ pub fn apply_loadout_to_tower(loadout: &HeroLoadout, t: &mut Tower) {
     t.freeze_duration = 0.0;
     t.armor_reduce = 0.0;
     t.curse_duration = 0.0;
-    t.heal_amount = 0.0;
     t.buff_range = 0.0;
     t.dot_damage = 0.0;
     t.poison_duration = 0.0;
     t.fire_duration = 0.0;
-    t.summon_hp = 0.0;
-    t.summon_speed = 0.0;
-    t.max_summons = 0;
     t.target_priority = match loadout.weapon {
         HeroWeapon::BannerSword | HeroWeapon::ShadowBow | HeroWeapon::NightDagger => {
             TargetPriority::Weakest
@@ -1169,165 +1038,52 @@ pub fn apply_loadout_to_tower(loadout: &HeroLoadout, t: &mut Tower) {
     };
 
     match loadout.weapon {
-        HeroWeapon::BannerSword => {
-            damage_mult *= 1.0 + a * 0.14 + f * 0.05;
-            hp_mult *= 1.0 + b * 0.16 + d * 0.04 + f * 0.06;
-            armor_bonus += b * 6.0 + d * 2.0 + f * 3.0;
-            cooldown_mult *= 1.0 - c * 0.055 - f * 0.025;
-            aoe_bonus += if a > 0.0 || e > 0.0 {
-                42.0 + a * 8.0 + e * 10.0
-            } else {
-                0.0
-            };
-            if a > 0.0 || e > 0.0 {
-                t.behavior = Behavior::Aoe;
-            }
-        }
+        HeroWeapon::BannerSword | HeroWeapon::ShadowBow => {}
         HeroWeapon::StarfireStaff => {
-            damage_mult *= 1.0 + a * 0.10 + e * 0.035 + f * 0.045;
-            range_mult *= 1.0 + b * 0.045 + e * 0.015;
-            cooldown_mult *= 1.0 - c * 0.045;
-            hp_mult *= 1.0 + e * 0.03;
-            t.dot_damage = 12.0 + a * 4.5 + f * 5.5;
-            t.fire_duration = 2.2 + c * 0.25 + f * 0.16;
-            t.armor_reduce = 7.0 + d * 3.5 + f * 2.0;
-            t.curse_duration = 1.6 + d * 0.28;
-            aoe_bonus += b * 7.0 + f * 5.0;
-            t.freeze_duration = 0.65 + d * 0.16;
-            // Aura radius so the 湮灭领域 doctrine can amp nearby magic towers.
-            t.buff_range = 115.0 + b * 16.0 + f * 8.0;
-        }
-        HeroWeapon::ShadowBow => {
-            damage_mult *= 1.0 + a * 0.06 + d * 0.02 + f * 0.025;
-            range_mult *= 1.0 + a * 0.024 + f * 0.016;
-            cooldown_mult *= 1.0 - b * 0.04 - d * 0.02;
-            hp_mult *= 1.0 + f * 0.03;
-            armor_pierce_bonus += e * 4.0;
-            if c > 0.0 {
-                t.behavior = Behavior::Poison;
-                t.dot_damage = 8.0 + c * 5.0;
-                t.poison_duration = 2.4 + c * 0.45;
-            }
+            t.dot_damage = 12.0;
+            t.fire_duration = 2.2;
+            t.armor_reduce = 7.0;
+            t.curse_duration = 1.6;
+            t.freeze_duration = 0.65;
+            t.buff_range = 115.0;
         }
         HeroWeapon::OathShield => {
-            damage_mult *= 1.0 + c * 0.08;
-            range_mult *= 1.0 + b * 0.02;
-            cooldown_mult *= 1.0 - c * 0.025 - f * 0.02;
-            hp_mult *= 1.0 + a * 0.14 + f * 0.10;
-            armor_bonus += a * 7.0 + c * 2.0 + f * 8.0;
-            t.buff_range = 110.0 + b * 18.0;
-            if e > 0.0 {
-                t.behavior = Behavior::Knockback;
-                t.knock_dist = 18.0 + e * 8.0;
-                t.stun_duration = 0.16 + e * 0.04;
-            }
+            t.buff_range = 110.0;
         }
         HeroWeapon::StormOrb => {
-            damage_mult *= 1.0 + a * 0.12 + f * 0.07;
-            range_mult *= 1.0 + b * 0.02 + f * 0.02;
-            cooldown_mult *= 1.0 - c * 0.05 - f * 0.02;
-            hp_mult *= 1.0 + e * 0.03;
             t.behavior = Behavior::Chain;
-            t.chain_count = 4 + b as i32;
-            t.chain_range = 120.0 + b * 20.0 + f * 12.0;
-            t.slow_duration = 0.6 + d * 0.18;
-            t.buff_range = 125.0 + e * 16.0;
+            t.chain_count = 4;
+            t.chain_range = 120.0;
+            t.slow_duration = 0.6;
+            t.buff_range = 125.0;
         }
         HeroWeapon::SentryCrossbow => {
-            damage_mult *= 1.0 + a * 0.08 + f * 0.05;
-            range_mult *= 1.0 + d * 0.045 + f * 0.015;
-            cooldown_mult *= 1.0 - b * 0.025 - f * 0.025;
-            hp_mult *= 1.0 + a * 0.06 + f * 0.05;
-            armor_bonus += f * 3.0;
             t.behavior = Behavior::Slow;
-            t.slow_duration = 0.9 + c * 0.22 + f * 0.08;
-            t.buff_range = 130.0 + b * 18.0 + f * 10.0;
+            t.slow_duration = 0.9;
+            t.buff_range = 130.0;
         }
         HeroWeapon::NightDagger => {
-            damage_mult *= 1.0 + a * 0.12 + f * 0.08;
-            range_mult *= 1.0 + e * 0.02;
-            cooldown_mult *= 1.0 - d * 0.06 - f * 0.02;
-            hp_mult *= 1.0 + d * 0.03;
-            armor_pierce_bonus += a * 5.0 + e * 8.0;
             t.behavior = Behavior::Poison;
-            t.dot_damage = 18.0 + b * 10.0 + f * 6.0;
-            t.poison_duration = 3.0 + b * 0.45;
-            t.armor_reduce = 6.0 + e * 4.0;
-            t.curse_duration = 1.5 + e * 0.22;
+            t.dot_damage = 18.0;
+            t.poison_duration = 3.0;
+            t.armor_reduce = 6.0;
+            t.curse_duration = 1.5;
         }
         HeroWeapon::SummonStaff => {
-            damage_mult *= 1.0 + a * 0.10 + f * 0.05;
-            range_mult *= 1.0 + e * 0.02;
-            cooldown_mult *= 1.0 - e * 0.025 - f * 0.03;
-            hp_mult *= 1.0 + c * 0.08 + e * 0.05;
-            armor_bonus += c * 3.0 + f * 2.0;
             t.behavior = Behavior::Curse;
-            t.armor_reduce = 8.0 + d * 4.0 + f * 2.0;
-            t.curse_duration = 1.8 + d * 0.25;
-            t.buff_range = 145.0 + e * 14.0 + f * 10.0;
+            t.armor_reduce = 8.0;
+            t.curse_duration = 1.8;
+            t.buff_range = 145.0;
         }
         HeroWeapon::ForgeHammer => {
-            damage_mult *= 1.0 + a * 0.10 + f * 0.04 + equipped_count * f * 0.025;
-            cooldown_mult *= 1.0 - a * 0.03 - b * 0.02 - f * 0.03 - equipped_count * f * 0.01;
-            hp_mult *= 1.0 + c * 0.06 + d * 0.06;
-            armor_bonus += c * 2.0 + d * 3.0;
-            armor_pierce_bonus += e * 4.0;
-            t.buff_range = 135.0 + c * 16.0 + f * 10.0;
-            if e > 0.0 {
-                t.slow_duration = 0.38 + e * 0.16;
-            }
-        }
-    }
-
-    // ===== Level-30 ULTIMATE =====
-    // A dramatic capstone that auto-activates at max level.
-    if loadout.level >= HeroLoadout::MAX_LEVEL {
-        match loadout.weapon {
-            HeroWeapon::BannerSword => {
-                damage_mult *= 1.5;
-                hp_mult *= 1.6;
-                armor_bonus += 30.0;
-            }
-            HeroWeapon::StarfireStaff => {
-                damage_mult *= 1.6;
-                aoe_bonus += 90.0;
-            }
-            HeroWeapon::ShadowBow => {
-                cooldown_mult *= 0.5;
-                armor_pierce_bonus += 30.0;
-            }
-            HeroWeapon::OathShield => {
-                hp_mult *= 2.0;
-                armor_bonus += 50.0;
-            }
-            HeroWeapon::StormOrb => {
-                damage_mult *= 1.4;
-                t.chain_count += 5;
-                t.chain_range += 60.0;
-            }
-            HeroWeapon::SentryCrossbow => {
-                range_mult *= 1.5;
-            }
-            HeroWeapon::NightDagger => {
-                damage_mult *= 1.8;
-                armor_pierce_bonus += 40.0;
-            }
-            HeroWeapon::SummonStaff => {
-                hp_mult *= 1.3;
-                t.buff_range += 45.0;
-                t.armor_reduce += 10.0;
-            }
-            HeroWeapon::ForgeHammer => {
-                t.buff_range += 45.0;
-                hp_mult *= 1.2;
-            }
+            t.buff_range = 135.0;
         }
     }
 
     t.element = base.element;
     t.magic = base.element != Element::Physical;
     t.color = loadout.race.color();
-    t.aoe_radius = (base.aoe_radius + aoe_bonus).max(base.aoe_radius);
+    t.aoe_radius = base.aoe_radius;
     damage_mult *= gear.damage_mult;
     range_mult *= gear.range_mult;
     cooldown_mult *= gear.cooldown_mult;
@@ -1408,77 +1164,46 @@ fn default_save() -> HeroSave {
 }
 
 fn parse_hero(raw: &str) -> HeroSave {
-    let raw = raw.trim();
-    let mut save = default_save();
-    if let Some(rest) = raw.strip_prefix("v3,") {
-        let (numbers, gear) = rest.split_once('|').unwrap_or((rest, ""));
-        parse_hero_numbers(numbers, &mut save);
-        save.gear = hero_gear::decode(gear);
-        return save;
-    }
-    if let Some(rest) = raw.strip_prefix("v2,") {
-        parse_hero_numbers(rest, &mut save);
-        return save;
-    }
-
-    // Legacy format: "race,weapon".
-    let mut parts = raw.split(',');
-    let r = parts.next().and_then(|s| s.trim().parse::<usize>().ok());
-    let c = parts.next().and_then(|s| s.trim().parse::<usize>().ok());
-    save.race = r
-        .and_then(|i| Race::ALL.get(i).copied())
-        .unwrap_or(Race::Human);
-    save.weapon = c
-        .and_then(|i| HeroWeapon::ALL.get(i).copied())
-        .unwrap_or(HeroWeapon::BannerSword);
-    save
-}
-
-fn parse_hero_numbers(raw: &str, save: &mut HeroSave) {
-    let nums = raw
+    let Some(rest) = raw.trim().strip_prefix("v4,") else {
+        return default_save();
+    };
+    let Some((numbers, gear)) = rest.split_once('|') else {
+        return default_save();
+    };
+    let Ok(nums) = numbers
         .split(',')
-        .filter_map(|s| s.trim().parse::<i32>().ok())
-        .collect::<Vec<_>>();
-    save.race = nums
-        .first()
-        .and_then(|i| Race::ALL.get((*i).max(0) as usize).copied())
-        .unwrap_or(save.race);
-    save.weapon = nums
-        .get(1)
-        .and_then(|i| HeroWeapon::ALL.get((*i).max(0) as usize).copied())
-        .unwrap_or(save.weapon);
-    save.level = nums
-        .get(2)
+        .map(str::parse::<i32>)
+        .collect::<Result<Vec<_>, _>>()
+    else {
+        return default_save();
+    };
+    if nums.len() != 5 + HeroWeapon::ALL.len() * HeroLoadout::TALENT_SLOTS {
+        return default_save();
+    }
+    let mut save = default_save();
+    save.race = Race::ALL
+        .get(nums[0].max(0) as usize)
         .copied()
-        .unwrap_or(1)
-        .clamp(1, HeroLoadout::MAX_LEVEL as i32) as u8;
-    save.xp = nums.get(3).copied().unwrap_or(0).max(0);
-    save.points = nums.get(4).copied().unwrap_or(0).clamp(0, 99) as u8;
-    if nums.len() <= 5 + 3 * 3 {
-        let mut cursor = 5;
-        for weapon in 0..3 {
-            for talent in 0..3 {
-                save.talents[weapon][talent] =
-                    nums.get(cursor)
-                        .copied()
-                        .unwrap_or(0)
-                        .clamp(0, HeroLoadout::TALENT_MAX_RANK as i32) as u8;
-                cursor += 1;
-            }
-        }
-        return;
-    }
-    let mut cursor = 5;
-    for weapon in 0..HeroWeapon::ALL.len() {
-        for talent in 0..HeroLoadout::TALENT_SLOTS {
-            save.talents[weapon][talent] =
-                nums.get(cursor)
-                    .copied()
-                    .unwrap_or(0)
-                    .clamp(0, HeroLoadout::TALENT_MAX_RANK as i32) as u8;
-            cursor += 1;
+        .unwrap_or(save.race);
+    save.weapon = HeroWeapon::ALL
+        .get(nums[1].max(0) as usize)
+        .copied()
+        .unwrap_or(save.weapon);
+    save.level = nums[2].clamp(1, HeroLoadout::MAX_LEVEL as i32) as u8;
+    save.xp = nums[3].max(0);
+    save.points = nums[4].clamp(0, 99) as u8;
+    for (weapon, row) in save.talents.iter_mut().enumerate() {
+        for (slot, rank) in row.iter_mut().enumerate() {
+            *rank = if slot == HeroWeapon::ALL[weapon].ult_slot() {
+                0
+            } else {
+                nums[5 + weapon * HeroLoadout::TALENT_SLOTS + slot]
+                    .clamp(0, HeroLoadout::TALENT_MAX_RANK as i32) as u8
+            };
         }
     }
+    save.gear = hero_gear::decode(gear);
+    save
 }
 
 fn encode_hero(loadout: &HeroLoadout) -> String {
@@ -1491,7 +1216,7 @@ fn encode_hero(loadout: &HeroLoadout) -> String {
         .position(|weapon| *weapon == loadout.weapon)
         .unwrap_or(0);
     let mut parts = vec![
-        "v3".to_string(),
+        "v4".to_string(),
         ri.to_string(),
         wi.to_string(),
         loadout.level.to_string(),
@@ -1523,7 +1248,7 @@ mod tests {
             talent_points: 0,
             weapon_talents: [[0; HeroLoadout::TALENT_SLOTS]; HeroWeapon::ALL.len()],
             gear: hero_gear::empty_gear(),
-            skill_cd: 0,
+            skill_cooldowns: [0.0; HeroLoadout::TALENT_SLOTS],
             run_mods: HeroRunMods::default(),
             alive: true,
             respawn_waves: 0,
@@ -1537,7 +1262,7 @@ mod tests {
         let base_speed = hero_move_speed(&base);
 
         let mut geared = test_loadout();
-        geared.equip_gear(HeroGear::WayfarerBoots);
+        hero_gear::equip(&mut geared.gear, HeroGear::WayfarerBoots);
         let geared_tower = make_hero_tower(&geared, Vec2::ZERO);
         let geared_speed = hero_move_speed(&geared);
 
@@ -1550,11 +1275,11 @@ mod tests {
     fn weapon_affinity_changes_active_weapon_combat_stats() {
         let mut matched = test_loadout();
         matched.weapon = HeroWeapon::SummonStaff;
-        matched.equip_gear(HeroGear::SummonerGreaves);
+        hero_gear::equip(&mut matched.gear, HeroGear::SummonerGreaves);
 
         let mut unmatched = test_loadout();
         unmatched.weapon = HeroWeapon::BannerSword;
-        unmatched.equip_gear(HeroGear::SummonerGreaves);
+        hero_gear::equip(&mut unmatched.gear, HeroGear::SummonerGreaves);
 
         assert!(matched.skill_damage_mult() > unmatched.skill_damage_mult());
 
@@ -1599,6 +1324,109 @@ mod tests {
             make_hero_tower(&loadout, Vec2::ZERO).target_priority,
             TargetPriority::Threat
         );
+    }
+
+    #[test]
+    fn skill_training_never_changes_baseline_combat_stats() {
+        for weapon in HeroWeapon::ALL {
+            for level in [1, HeroLoadout::MAX_LEVEL] {
+                let mut loadout = test_loadout();
+                loadout.weapon = weapon;
+                loadout.level = level;
+                let before = make_hero_tower(&loadout, Vec2::ZERO);
+                let speed = hero_move_speed(&loadout);
+                let power = loadout.skill_damage_mult();
+                let intervals = std::array::from_fn::<_, 3, _>(|i| loadout.skill_interval(i));
+                let weapon_index = loadout.weapon_index();
+                loadout.weapon_talents[weapon_index] = [5, 5, 0];
+                let after = make_hero_tower(&loadout, Vec2::ZERO);
+                assert_eq!(before.damage, after.damage);
+                assert_eq!(before.range, after.range);
+                assert_eq!(before.cooldown, after.cooldown);
+                assert_eq!(before.max_hp, after.max_hp);
+                assert_eq!(before.armor, after.armor);
+                assert_eq!(before.armor_pierce, after.armor_pierce);
+                assert_eq!(before.aoe_radius, after.aoe_radius);
+                assert_eq!(before.chain_count, after.chain_count);
+                assert_eq!(before.dot_damage, after.dot_damage);
+                assert_eq!(before.buff_range, after.buff_range);
+                assert_eq!(speed, hero_move_speed(&loadout));
+                assert_eq!(power, loadout.skill_damage_mult());
+                assert_eq!(
+                    intervals,
+                    std::array::from_fn(|i| loadout.skill_interval(i))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_class_has_two_base_casts_and_one_level_thirty_ultimate() {
+        for weapon in HeroWeapon::ALL {
+            let mut loadout = test_loadout();
+            loadout.weapon = weapon;
+            assert!(loadout.skill_unlocked(0));
+            assert!(loadout.skill_unlocked(1));
+            assert!(!loadout.skill_unlocked(2));
+            assert!(!loadout.skill_unlocked(3));
+            assert_ne!(weapon.talent_name(0), weapon.talent_name(1));
+            assert_ne!(weapon.talent_name(1), weapon.talent_name(2));
+            loadout.level = HeroLoadout::MAX_LEVEL;
+            assert!(loadout.skill_unlocked(2));
+            for slot in 0..HeroLoadout::TALENT_SLOTS {
+                assert_ne!(
+                    crate::i18n::tr(crate::i18n::Lang::En, weapon.talent_name(slot)),
+                    weapon.talent_name(slot)
+                );
+                assert_ne!(
+                    crate::i18n::tr(crate::i18n::Lang::En, weapon.talent_desc(slot)),
+                    weapon.talent_desc(slot)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn skill_hex_modifiers_are_separate_from_training() {
+        let mut loadout = test_loadout();
+        let cooldowns = std::array::from_fn::<_, 3, _>(|i| loadout.skill_interval(i));
+        let power = loadout.skill_damage_mult();
+        loadout.run_mods.skill_interval_mult = 0.9;
+        loadout.run_mods.skill_power_mult = 1.15;
+        for (slot, original) in cooldowns.into_iter().enumerate() {
+            assert!((loadout.skill_interval(slot) - original * 0.9).abs() < 0.001);
+        }
+        assert!((loadout.skill_damage_mult() - power * 1.15).abs() < 0.001);
+    }
+
+    #[test]
+    fn current_save_roundtrips_without_ultimate_training() {
+        let mut loadout = test_loadout();
+        loadout.weapon = HeroWeapon::SummonStaff;
+        loadout.level = 30;
+        loadout.talent_points = 7;
+        loadout.weapon_talents[7] = [3, 4, 0];
+        hero_gear::equip(&mut loadout.gear, HeroGear::SummonerGreaves);
+        let saved = parse_hero(&encode_hero(&loadout));
+        assert!(saved.weapon == loadout.weapon);
+        assert_eq!(saved.level, 30);
+        assert_eq!(saved.points, 7);
+        assert_eq!(saved.talents, loadout.weapon_talents);
+        assert!(saved.gear == loadout.gear);
+    }
+
+    #[test]
+    fn obsolete_or_malformed_skill_saves_are_not_reinterpreted() {
+        for raw in [
+            "v3,2,7,30,0,4|",
+            "v2,2,7,30,0,4",
+            "2,7",
+            "v4,0,7,30,oops,2|",
+        ] {
+            let saved = parse_hero(raw);
+            assert_eq!(saved.level, 1);
+            assert_eq!(saved.talents, [[0; 3]; HeroWeapon::ALL.len()]);
+        }
     }
 }
 

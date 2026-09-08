@@ -123,19 +123,14 @@ fn world_to_cell(world: Vec2) -> Option<(i32, i32)> {
     }
 }
 
-/// Number-row keys select a tower type to build (temporary; Stage 4 adds buttons).
+/// Number-row keys select one of the five defensive towers.
 pub fn select_build_kind(keys: Res<ButtonInput<KeyCode>>, mut sel: ResMut<Selection>) {
-    const ROW: [(KeyCode, usize); 10] = [
+    const ROW: [(KeyCode, usize); 5] = [
         (KeyCode::Digit1, 0),
         (KeyCode::Digit2, 1),
         (KeyCode::Digit3, 2),
         (KeyCode::Digit4, 3),
         (KeyCode::Digit5, 4),
-        (KeyCode::Digit6, 5),
-        (KeyCode::Digit7, 6),
-        (KeyCode::Digit8, 7),
-        (KeyCode::Digit9, 8),
-        (KeyCode::Digit0, 9),
     ];
     for (key, idx) in ROW {
         if keys.just_pressed(key) {
@@ -674,11 +669,23 @@ fn hero_world_cfg(walks: &HeroWalks, weapon: HeroWeapon, race: Race) -> Option<&
 /// frames, while melee attacks briefly hold generated sword-out frames from the
 /// same sheet so the hero body appears to swing.
 pub fn animate_hero_walk(
-    mut q: Query<(&Tower, &mut HeroWalkAnim, &mut SpritesheetAnimation)>,
+    run: Res<RunState>,
+    paused: Res<crate::game::Paused>,
+    mut q: Query<(
+        &Tower,
+        &mut HeroWalkAnim,
+        &mut SpritesheetAnimation,
+        Option<&crate::hero_passives::HeroCast>,
+    )>,
     mut last: Local<Vec2>,
 ) {
-    for (t, mut a, mut animation) in &mut q {
+    for (t, mut a, mut animation, cast) in &mut q {
         if !t.hero {
+            continue;
+        }
+        animation.playing = !paused.0 && cast.is_none();
+        animation.speed_factor = run.game_speed;
+        if cast.is_some() {
             continue;
         }
         let pos = t.center();
@@ -1014,7 +1021,6 @@ pub fn hero_status(
             loadout.respawn_waves -= 1;
         }
         if loadout.alive && heroes.iter().any(|t| t.hero) {
-            loadout.tick_wave_cooldowns();
             let xp = 14 + run.wave.max(1) * 3;
             let gained = loadout.gain_xp(xp);
             if gained > 0 {
@@ -1041,7 +1047,7 @@ pub fn hero_status(
     if loadout.alive && !exists {
         loadout.alive = false;
         loadout.respawn_waves = 2;
-        run.show(crate::i18n::t("英雄阵亡！2 回合后可再次召唤"));
+        run.show(crate::i18n::t("英雄阵亡！2 波后自动重生"));
     }
 }
 
@@ -1056,7 +1062,7 @@ pub fn auto_spawn_hero(
     sprites: Res<Sprites>,
     walks: Res<HeroWalks>,
 ) {
-    loadout.skill_cd = 0;
+    loadout.skill_cooldowns = [0.0; HeroLoadout::TALENT_SLOTS];
     loadout.respawn_waves = 0;
     let pos = crate::hero::hero_spawn_pos();
     let tower = crate::hero::make_hero_tower(&loadout, pos);
@@ -1326,9 +1332,6 @@ pub fn upgrade_sell(
             if t.level < 3 && run.gold >= cost {
                 run.gold -= cost;
                 upgrade_tower(&mut t);
-                if let Some(note) = upgrade_unlock_note(t.kind, t.level) {
-                    run.show(crate::i18n::t(note));
-                }
             }
         }
     }
@@ -1408,35 +1411,8 @@ pub fn upgrade_tower(t: &mut Tower) {
     if t.dot_damage > 0.0 {
         t.dot_damage = (t.dot_damage * M::DOT_DAMAGE).floor();
     }
-    if t.heal_amount > 0.0 {
-        t.heal_amount = (t.heal_amount * M::HEAL_AMOUNT).floor();
-    }
-    if t.summon_hp > 0.0 {
-        t.summon_hp = (t.summon_hp * M::SUMMON_HP).floor();
-    }
     if t.chain_count > 0 {
         t.chain_count += 1;
-    }
-    // Behavior-specific unlocks that escalate with level.
-    if t.behavior == crate::data::Behavior::Summon {
-        // Each level raises the summon cap; the minion *tier* is chosen at spawn
-        // time from `level` in `update_towers` (skeleton → fireworm → mimic).
-        t.max_summons += 1;
-    }
-    // Necromancer raise-count and minion strength are derived from `level` in
-    // `necromancer_raise`, so leveling up alone unlocks "+1 revive".
-}
-
-/// One-line description of the new ability unlocked at `new_level` (for the HUD).
-pub fn upgrade_unlock_note(kind: TowerKind, new_level: i32) -> Option<&'static str> {
-    use crate::data::Behavior;
-    match (kind.def().behavior, new_level) {
-        (Behavior::Summon, 2) => Some("解锁：召唤冲锋骷髅，召唤上限 +1"),
-        (Behavior::Summon, 3) => Some("解锁：召唤重装巨像，召唤上限 +1，攻击大增"),
-        (Behavior::Necromancer, 2) => Some("解锁：每次可复活 2 个亡灵，亡灵更强"),
-        (Behavior::Necromancer, 3) => Some("解锁：每次可复活 3 个亡灵，亡灵更强"),
-        (Behavior::Chain, 2) | (Behavior::Chain, 3) => Some("解锁：闪电额外多弹射 1 个目标"),
-        _ => None,
     }
 }
 
@@ -1522,7 +1498,7 @@ pub fn refresh_hero_visual(
     mut commands: Commands,
     walks: Res<HeroWalks>,
     loadout: Res<crate::hero::HeroLoadout>,
-    mut heroes: Query<(Entity, &Tower, &Transform)>,
+    mut heroes: Query<(Entity, &Tower, &Transform, Option<&HeroWalkAnim>)>,
     mut last_kit: Local<Option<(HeroWeapon, Race)>>,
     mut last_gear: Local<
         Option<[Option<crate::hero_gear::HeroGear>; crate::hero_gear::HeroGearSlot::COUNT]>,
@@ -1535,16 +1511,15 @@ pub fn refresh_hero_visual(
     let gear_changed = last_gear.is_some() && *last_gear != Some(loadout.gear);
     *last_kit = Some(kit);
     *last_gear = Some(loadout.gear);
-    if !kit_changed && !gear_changed {
-        return;
-    }
-
-    for (entity, tower, tf) in &mut heroes {
+    for (entity, tower, tf, animation) in &mut heroes {
         if !tower.hero {
             continue;
         }
+        if !kit_changed && !gear_changed && animation.is_some() {
+            continue;
+        }
         let pos = tf.translation.truncate();
-        if kit_changed {
+        if kit_changed || animation.is_none() {
             if let Some(cfg) = hero_world_cfg(&walks, loadout.weapon, loadout.race) {
                 let mut sprite = Sprite::from_atlas_image(
                     cfg.image.clone(),
@@ -1555,17 +1530,20 @@ pub fn refresh_hero_visual(
                 );
                 sprite.color = tower.color;
                 sprite.custom_size = Some(Vec2::splat(cfg.size));
-                commands.entity(entity).insert((
-                    sprite,
-                    SpritesheetAnimation::new(cfg.idle_anim.clone()),
-                    HeroWalkAnim {
-                        idle: cfg.idle_anim.clone(),
-                        walk: cfg.walk_anim.clone(),
-                        attack: cfg.attack_anim.clone(),
-                        frames: cfg.frames,
-                        state: HeroAnimState::Idle,
-                    },
-                ));
+                commands
+                    .entity(entity)
+                    .remove::<crate::hero_paperdoll::HeroPaperdollSprite>()
+                    .insert((
+                        sprite,
+                        SpritesheetAnimation::new(cfg.idle_anim.clone()),
+                        HeroWalkAnim {
+                            idle: cfg.idle_anim.clone(),
+                            walk: cfg.walk_anim.clone(),
+                            attack: cfg.attack_anim.clone(),
+                            frames: cfg.frames,
+                            state: HeroAnimState::Idle,
+                        },
+                    ));
             }
             vfx.write(crate::vfx::VfxEvent::ElementPulse {
                 pos,

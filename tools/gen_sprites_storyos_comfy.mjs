@@ -4,7 +4,7 @@
 // Requires a reachable ComfyUI compatible with StoryOS's FLUX2 Klein workflow:
 //   COMFY_BASE_URL=https://comfy.example/api/comfy/v1 \
 //   COMFY_API_TOKEN=optional-bearer-token \
-//   node tools/gen_sprites_storyos_comfy.mjs all       # 19 towers + 16 archetype enemies + 20 equipment icons
+//   node tools/gen_sprites_storyos_comfy.mjs all       # 5 towers + 16 archetype enemies + 20 equipment icons
 //   node tools/gen_sprites_storyos_comfy.mjs species   # 100 monster species portraits
 //   node tools/gen_sprites_storyos_comfy.mjs equipment # 20 persistent relic icons
 //   node tools/gen_sprites_storyos_comfy.mjs full      # all of the above
@@ -223,22 +223,8 @@ const TARGETS = {
     arrow: 'crossbow arrow tower, red lacquer, bone charms, practical early-game turret',
     cannon: 'iron cannon tower, orange firebox, riveted stone base, explosive artillery',
     magic: 'purple arcane tower with a floating crystal eye, occult runes',
-    sniper: 'green long-range watchtower with a precision ballista, hunter optics',
-    thunder: 'yellow storm tower with tesla coils and forked lightning',
-    laser: 'pink eldritch laser obelisk with a focused lens aperture',
-    missile: 'heavy 2x2 missile bunker with multiple rockets and warning paint',
-    fortress: 'massive 2x2 fortress cannon, stone bastion, brass recoil rails',
     ice: 'blue ice tower, frozen crystal barrel, frost mist',
-    wind: 'turquoise wind turbine tower, cyclone fins, ritual feathers',
-    frostnova: 'ice nova obelisk, pale blue shockwave crystal crown',
-    shadow: 'black obsidian shadow tower, purple smoke, sealed forbidden glyphs',
-    holy: 'gold holy light tower, reliquary spire, radiant halo',
     detection: 'lavender detection tower with one large watchful mystic eye',
-    poison: 'toxic alchemy tower with green vials, pipes, dripping venom',
-    fire: 'flame tower with brazier core and dragon-mouth nozzle',
-    summon: 'summoner totem tower with spectral guardian aura',
-    prism: 'grand 3x3 cyan prism laser tower, crystalline beam splitter',
-    necromancer: 'necromancer bone tower, skull lantern, green soul flame',
   },
   enemies: {
     normal: 'one squat red slug-like cult-mutated monster with eyes and small claws, organic creature only, no building, no grid',
@@ -374,6 +360,11 @@ async function loadSpeciesTargets() {
     if (line.trim() === '),') {
       const cleaned = block.map((l) => l.trim().replace(/,$/, ''))
       const id = Number(cleaned[1])
+      // Runtime species 100 intentionally reuses portrait 099 (see sprites.rs).
+      if (id > 99) {
+        block = null
+        continue
+      }
       const quoted = cleaned
         .filter((l) => /^".*"$/.test(l))
         .map((l) => l.slice(1, -1))

@@ -6,10 +6,8 @@ use bevy::prelude::*;
 
 #[derive(States, Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GameState {
-    /// Initial asset gate; critical tuning assets are loaded before the menu.
-    #[default]
-    Loading,
     /// Start screen / level select.
+    #[default]
     Menu,
     /// Opening story scene with generated key art and character portraits.
     Story,

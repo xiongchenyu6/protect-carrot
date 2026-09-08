@@ -150,7 +150,7 @@ mod tests {
             talent_points: 0,
             weapon_talents: talents,
             gear,
-            skill_cd: 0,
+            skill_cooldowns: [0.0; HeroLoadout::TALENT_SLOTS],
             run_mods: HeroRunMods::default(),
             alive: false,
             respawn_waves: 0,
@@ -1879,7 +1879,6 @@ pub fn update_enemies(
     mut q: Query<(Entity, &mut Enemy, &mut Transform)>,
     mut next: ResMut<NextState<GameState>>,
     mut vfx: MessageWriter<crate::vfx::VfxEvent>,
-    mut died: MessageWriter<crate::tower::EnemyDied>,
 ) {
     let dt = time.delta_secs() * run.game_speed;
     if run.kill_combo_timer > 0.0 {
@@ -2233,6 +2232,7 @@ pub fn update_enemies(
             run.best_combo = run.best_combo.max(run.kill_combo);
             let first_seen = bestiary.record(e.species_id);
             let dpos = tf.translation.truncate();
+            run.remember_fallen_enemy(&e, dpos);
             vfx.write(crate::vfx::VfxEvent::Death {
                 pos: dpos,
                 color: e.kind.def().color,
@@ -2287,12 +2287,6 @@ pub fn update_enemies(
                     rare: species.map(|species| species.is_boss()).unwrap_or(e.boss),
                 });
             }
-            // Notify necromancer towers (they may raise this corpse as an ally).
-            died.write(crate::tower::EnemyDied {
-                pos: dpos,
-                kind: e.kind,
-                max_hp: e.max_hp,
-            });
             // Equipment drop: bosses always, elites often, normal enemies sometimes.
             if let Some(item) = roll_drop(&mut rng, e.boss, e.elite, run.wave) {
                 let def = item.def();

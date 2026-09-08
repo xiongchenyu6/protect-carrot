@@ -4,8 +4,13 @@
 //!   cargo run --bin capture
 //!   cargo run --bin capture -- screenshot screenshots/capture/still.png
 //!   cargo run --bin capture -- frames screenshots/capture 120
+//!   CARROT_CAPTURE_MOBILE=1 cargo run --bin capture -- screenshot screenshots/capture/mobile.png
 
 use std::{collections::HashSet, env, path::PathBuf, process, time::Duration};
+
+#[path = "capture/class_skills.rs"]
+mod class_skills;
+use class_skills::{CaptureHeroPassiveSmoke, drive_hero_passive_smoke};
 
 use bevy::{
     app::{AppExit, ScheduleRunnerPlugin},
@@ -54,8 +59,42 @@ const DEFAULT_FRAMES_DIR: &str = "screenshots/capture";
 const DEFAULT_FRAME_COUNT: u32 = 120;
 
 const PANEL_W: f32 = 256.0;
+const LEFT_RESERVE: f32 = 80.0;
 const VIRTUAL_W: f32 = BOARD_W + PANEL_W;
 const VIRTUAL_H: f32 = BOARD_H;
+
+#[derive(Resource, Clone, Copy)]
+struct CaptureViewport {
+    width: u32,
+    height: u32,
+    touch: bool,
+}
+
+impl CaptureViewport {
+    fn from_env() -> Self {
+        let touch = matches!(
+            env::var("CARROT_CAPTURE_MOBILE")
+                .ok()
+                .as_deref()
+                .map(str::to_ascii_lowercase)
+                .as_deref(),
+            Some("1" | "true" | "yes" | "on")
+        );
+        if touch {
+            Self {
+                width: 844,
+                height: 390,
+                touch,
+            }
+        } else {
+            Self {
+                width: CAPTURE_W,
+                height: CAPTURE_H,
+                touch,
+            }
+        }
+    }
+}
 
 #[derive(Resource, Clone)]
 struct CaptureTarget(Handle<Image>);
@@ -79,15 +118,6 @@ struct CaptureMouseInputSmoke {
     tower_count_before: usize,
     hero_entity: Option<Entity>,
     move_target: Option<Vec2>,
-}
-
-#[derive(Resource, Default)]
-struct CaptureHeroSkillSmoke {
-    step: u8,
-    mythic_count: usize,
-    guard_count: usize,
-    guard_homes: Vec<Vec2>,
-    moved_hero_pos: Option<Vec2>,
 }
 
 #[derive(Resource, Default)]
@@ -123,7 +153,7 @@ enum CaptureScenario {
     TowerSelected,
     HeroSelected,
     MouseInputSmoke,
-    HeroSkillSmoke,
+    HeroPassiveSmoke,
     RogueliteDraft,
     RoguelitePick,
     RunStats,
@@ -151,6 +181,7 @@ fn main() -> AppExit {
     let capture_screen = capture_screen_from_env();
     let capture_scenario = capture_scenario_from_env();
     let capture_level = capture_level_from_env(capture_scenario);
+    let capture_viewport = CaptureViewport::from_env();
 
     let mut app = App::new();
 
@@ -189,6 +220,16 @@ fn main() -> AppExit {
     .add_plugins(hero_paperdoll::HeroPaperdollPlugin)
     .add_plugins(protect_carrot::polish::PolishPlugin)
     .add_plugins(SpritesheetAnimationPlugin)
+    .add_systems(
+        PostUpdate,
+        protect_carrot::hero_cast_visuals::pose_casts
+            .after(bevy_spritesheet_animation::plugin::AnimationSystemSet),
+    )
+    .add_systems(
+        Update,
+        protect_carrot::hero_cast_visuals::draw_casts.run_if(in_state(GameState::Playing)),
+    )
+    .add_plugins(bevy_sequential_actions::SequentialActionsPlugin)
     .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
         1.0 / FPS,
     )))
@@ -212,7 +253,7 @@ fn main() -> AppExit {
     .init_resource::<Selection>()
     .init_resource::<Snapshot>()
     .init_resource::<tutorial::Tutorial>()
-    .init_resource::<ui::TouchMode>()
+    .insert_resource(ui::TouchMode(capture_viewport.touch))
     .init_resource::<ui::HudPanels>()
     .init_resource::<ui::JoystickState>()
     .init_resource::<ui::TalentConfirm>()
@@ -231,19 +272,20 @@ fn main() -> AppExit {
     .init_resource::<CapturePrepared>()
     .init_resource::<CaptureEscapeAfterScenario>()
     .init_resource::<CaptureMouseInputSmoke>()
-    .init_resource::<CaptureHeroSkillSmoke>()
+    .init_resource::<CaptureHeroPassiveSmoke>()
     .init_resource::<CaptureFogProbeSeeded>()
     .insert_resource(capture_screen)
     .insert_resource(capture_scenario)
+    .insert_resource(capture_viewport)
     .insert_resource(job)
     .add_systems(Startup, ui::load_persistent_progress)
     .add_message::<Damage>()
+    .add_message::<protect_carrot::hero_passives::HeroSkillCastEvent>()
     .add_message::<Status>()
     .add_message::<BuffTower>()
     .add_message::<HealCarrot>()
     .add_message::<vfx::VfxEvent>()
     .add_message::<audio::SfxEvent>()
-    .add_message::<tower::EnemyDied>()
     .add_message::<ui::UiActionActivated>()
     .add_observer(ui::widget_button_activated)
     .add_systems(
@@ -292,6 +334,10 @@ fn main() -> AppExit {
     .add_systems(PreUpdate, ui::cjk_linebreak)
     .add_systems(
         Update,
+        ui::update_mobile_controls.run_if(in_state(GameState::Playing)),
+    )
+    .add_systems(
+        Update,
         (
             fit_capture_ui_scale,
             ui::cjk_linebreak,
@@ -309,13 +355,15 @@ fn main() -> AppExit {
             build::mouse_build,
             build::hero_control.after(build::mouse_build),
             prepare_capture_level,
-            drive_hero_skill_smoke,
+            drive_hero_passive_smoke,
             ui::hero_buttons,
             prepare_roguelite_draft_capture.after(prepare_capture_level),
             seed_fog_probe_enemy.after(prepare_capture_level),
             (
                 tower::build_snapshot,
                 hero::hero_doctrine,
+                protect_carrot::hero_passives::update_hero_passives,
+                protect_carrot::hero_skill_effects::update_skill_fields,
                 tower::update_towers,
                 tower::update_projectiles,
                 tower::update_shot_fx,
@@ -334,7 +382,6 @@ fn main() -> AppExit {
                 tower::update_fire_grounds,
                 enemy::spawn_enemies,
                 enemy::update_enemies,
-                tower::necromancer_raise,
                 enemy::heal_auras,
                 enemy::incubation,
                 tick_auto_wave,
@@ -351,7 +398,9 @@ fn main() -> AppExit {
             game::update_carrot_seal,
             game::grow_portal,
             tower::compute_synergy,
-            build::animate_hero_walk,
+            (build::refresh_hero_visual, build::animate_hero_walk)
+                .chain()
+                .after(drive_hero_passive_smoke),
             build::rotate_towers,
             build::update_hero_race_badges,
             build::tint_silenced_towers,
@@ -375,18 +424,17 @@ fn main() -> AppExit {
         (
             update_hud,
             ui::update_unit_stats,
-            ui::update_hero_info,
+            (ui::update_hero_info, ui::update_hero_skill_icons),
             ui::update_combo_meter,
             ui::update_equipment_button_labels.after(prepare_capture_level),
             ui::update_upgrade_button_label,
             ui::update_equipped_slot_icons,
             ui::update_boss_bar,
-            ui::update_ability_buttons,
             ui::update_hero_select_buttons,
             ui::update_hero_paperdoll_panel.after(prepare_capture_level),
             ui::update_roguelite_draft_panel
                 .after(prepare_roguelite_draft_capture)
-                .after(drive_hero_skill_smoke),
+                .after(drive_hero_passive_smoke),
             ui::update_run_stats_panel.after(prepare_capture_level),
             press_capture_escape_once.before(ui::close_hud_panels_with_escape),
             ui::close_hud_panels_with_escape,
@@ -415,8 +463,12 @@ fn main() -> AppExit {
     )
     .add_systems(Update, drive_capture);
 
-    let image =
-        Image::new_target_texture(CAPTURE_W, CAPTURE_H, TextureFormat::Rgba8UnormSrgb, None);
+    let image = Image::new_target_texture(
+        capture_viewport.width,
+        capture_viewport.height,
+        TextureFormat::Rgba8UnormSrgb,
+        None,
+    );
     let target = app.world_mut().resource_mut::<Assets<Image>>().add(image);
     app.insert_resource(CaptureTarget(target));
 
@@ -523,10 +575,24 @@ fn prepare_output_path(job: &CaptureJob) {
     }
 }
 
-fn setup_capture_camera(mut commands: Commands, target: Res<CaptureTarget>) {
+fn setup_capture_camera(
+    mut commands: Commands,
+    target: Res<CaptureTarget>,
+    viewport: Res<CaptureViewport>,
+) {
+    let virtual_width = if viewport.touch {
+        VIRTUAL_W + LEFT_RESERVE
+    } else {
+        VIRTUAL_W
+    };
+    let center_x = if viewport.touch {
+        (PANEL_W - LEFT_RESERVE) / 2.0
+    } else {
+        PANEL_W / 2.0
+    };
     let mut projection = OrthographicProjection::default_2d();
     projection.scaling_mode = ScalingMode::AutoMin {
-        min_width: VIRTUAL_W,
+        min_width: virtual_width,
         min_height: VIRTUAL_H,
     };
 
@@ -537,18 +603,18 @@ fn setup_capture_camera(mut commands: Commands, target: Res<CaptureTarget>) {
         IsDefaultUiCamera,
         Msaa::Off,
         Projection::Orthographic(projection),
-        Transform::from_xyz(PANEL_W / 2.0, 0.0, 0.0),
+        Transform::from_xyz(center_x, 0.0, 0.0),
         vfx::ShakeCamera {
-            base: Vec3::new(PANEL_W / 2.0, 0.0, 0.0),
+            base: Vec3::new(center_x, 0.0, 0.0),
         },
         lighting::camera_config(0),
         FogOfWarCamera,
     ));
 }
 
-fn setup_capture_window(mut commands: Commands) {
+fn setup_capture_window(mut commands: Commands, viewport: Res<CaptureViewport>) {
     let mut window = Window {
-        resolution: WindowResolution::new(CAPTURE_W, CAPTURE_H),
+        resolution: WindowResolution::new(viewport.width, viewport.height),
         ..default()
     };
     window.set_cursor_position(None);
@@ -610,12 +676,7 @@ fn capture_scenario_from_env() -> CaptureScenario {
         | Some("mouse-input-smoke")
         | Some("input_smoke")
         | Some("input-smoke") => CaptureScenario::MouseInputSmoke,
-        Some("hero_skill")
-        | Some("hero-skill")
-        | Some("hero_skill_smoke")
-        | Some("hero-skill-smoke")
-        | Some("skill_smoke")
-        | Some("skill-smoke") => CaptureScenario::HeroSkillSmoke,
+        Some("passive-smoke") => CaptureScenario::HeroPassiveSmoke,
         Some("roguelite") | Some("roguelite_draft") | Some("roguelite-draft") => {
             CaptureScenario::RogueliteDraft
         }
@@ -627,8 +688,13 @@ fn capture_scenario_from_env() -> CaptureScenario {
     }
 }
 
-fn fit_capture_ui_scale(mut ui_scale: ResMut<UiScale>) {
-    ui_scale.0 = (CAPTURE_W as f32 / VIRTUAL_W).min(CAPTURE_H as f32 / VIRTUAL_H);
+fn fit_capture_ui_scale(viewport: Res<CaptureViewport>, mut ui_scale: ResMut<UiScale>) {
+    let virtual_width = if viewport.touch {
+        VIRTUAL_W + LEFT_RESERVE
+    } else {
+        VIRTUAL_W
+    };
+    ui_scale.0 = (viewport.width as f32 / virtual_width).min(viewport.height as f32 / VIRTUAL_H);
 }
 
 fn press_capture_escape_once(
@@ -795,237 +861,6 @@ fn drive_mouse_input_smoke(
             prepared.scenario_ready = true;
             state.step = 6;
             println!("[capture/input] hero right-click move succeeded");
-        }
-        _ => {}
-    }
-}
-
-fn drive_hero_skill_smoke(
-    scenario: Res<CaptureScenario>,
-    mut state: ResMut<CaptureHeroSkillSmoke>,
-    mut prepared: ResMut<CapturePrepared>,
-    mut loadout: ResMut<hero::HeroLoadout>,
-    mut run: ResMut<RunState>,
-    mut roguelite: ResMut<roguelite::RogueliteRun>,
-    mut selection: ResMut<Selection>,
-    mut panels: ResMut<ui::HudPanels>,
-    mut actions: MessageWriter<ui::UiActionActivated>,
-    mut towers: Query<(Entity, &mut tower::Tower)>,
-    summons: Query<
-        (
-            Entity,
-            &Transform,
-            Option<&tower::MythicSummonSprite>,
-            Option<&tower::TemporaryGuard>,
-            Option<&tower::FixedSummonHome>,
-        ),
-        With<tower::Summon>,
-    >,
-) {
-    if *scenario != CaptureScenario::HeroSkillSmoke {
-        return;
-    }
-    // The proof sequence must keep playing after a wave clear. Real gameplay
-    // waits for a player draft pick; this deterministic capture skips the draft
-    // so a modal cannot freeze most of the 15-second clip.
-    if roguelite.draft.take().is_some() {
-        run.auto_wave_timer = 0.0;
-    }
-    run.auto_wave = true;
-    if !prepared.level_ready || prepared.scenario_ready {
-        return;
-    }
-
-    let Some((hero_entity, _)) = towers
-        .iter_mut()
-        .find(|(_, tower)| tower.hero)
-        .map(|(entity, tower)| (entity, tower.hero_pos))
-    else {
-        return;
-    };
-
-    match state.step {
-        0 => {
-            loadout.race = hero::Race::Elf;
-            loadout.weapon = hero::HeroWeapon::SummonStaff;
-            loadout.level = hero::HeroLoadout::MAX_LEVEL;
-            loadout.gear = [
-                Some(hero_gear::HeroGear::NullMantle),
-                Some(hero_gear::HeroGear::MythcallerTotem),
-                Some(hero_gear::HeroGear::RiftIdol),
-                Some(hero_gear::HeroGear::SummonerGreaves),
-            ];
-            assert_eq!(
-                hero_gear::active_four_piece_set(&loadout.gear),
-                Some(hero_gear::HeroGearSet::Covenant),
-                "[capture/skill] summon loadout did not activate Covenant four-piece"
-            );
-            loadout.skill_cd = 0;
-            let weapon_index = loadout.weapon_index();
-            loadout.weapon_talents[weapon_index] = [3, 0, 3, 3, 3, 3];
-            for (_, mut tower) in &mut towers {
-                if tower.hero {
-                    hero::apply_loadout_to_tower(&loadout, &mut tower);
-                    tower.hp = tower.max_hp;
-                    tower.cooldown_timer = 0.0;
-                }
-            }
-            selection.selected = Some(hero_entity);
-            selection.build_kind = None;
-            panels.dock_open = false;
-            panels.hero_open = false;
-            panels.settings_open = false;
-            actions.write(ui::UiActionActivated {
-                entity: hero_entity,
-                action: ui::UiAction::HeroSkill,
-            });
-            state.step = 1;
-            println!("[capture/skill] fired SummonStaff hero skill");
-        }
-        1 => {
-            let mythic_count = summons
-                .iter()
-                .filter(|(_, _, mythic, _, _)| mythic.is_some())
-                .count();
-            if mythic_count < 4 {
-                panic!(
-                    "[capture/skill] SummonStaff + Covenant spawned {mythic_count} mythic allies; expected three skill summons plus one four-piece retainer"
-                );
-            }
-            state.mythic_count = mythic_count;
-            state.guard_count = summons
-                .iter()
-                .filter(|(_, _, _, guard, _)| guard.is_some())
-                .count();
-
-            loadout.weapon = hero::HeroWeapon::ForgeHammer;
-            loadout.level = hero::HeroLoadout::MAX_LEVEL;
-            loadout.gear = [
-                Some(hero_gear::HeroGear::WildhideHarness),
-                Some(hero_gear::HeroGear::ClockworkBadge),
-                Some(hero_gear::HeroGear::GolemBlueprint),
-                Some(hero_gear::HeroGear::EngineerTreads),
-            ];
-            assert_eq!(
-                hero_gear::active_four_piece_set(&loadout.gear),
-                Some(hero_gear::HeroGearSet::Workshop),
-                "[capture/skill] forge loadout did not activate Workshop four-piece"
-            );
-            loadout.skill_cd = 0;
-            let weapon_index = loadout.weapon_index();
-            loadout.weapon_talents[weapon_index] = [3, 3, 3, 3, 3, 3];
-            for (_, mut tower) in &mut towers {
-                if tower.hero {
-                    hero::apply_loadout_to_tower(&loadout, &mut tower);
-                    tower.hp = tower.max_hp;
-                    tower.cooldown_timer = 0.0;
-                }
-            }
-            actions.write(ui::UiActionActivated {
-                entity: hero_entity,
-                action: ui::UiAction::HeroSkill,
-            });
-            state.step = 2;
-            println!(
-                "[capture/skill] fired ForgeHammer hero skill after {mythic_count} mythic allies"
-            );
-        }
-        2 => {
-            let mythic_count = summons
-                .iter()
-                .filter(|(_, _, mythic, _, _)| mythic.is_some())
-                .count();
-            let guard_count = summons
-                .iter()
-                .filter(|(_, _, _, guard, _)| guard.is_some())
-                .count();
-            if mythic_count < state.mythic_count {
-                panic!(
-                    "[capture/skill] mythic ally count regressed: {} -> {}",
-                    state.mythic_count, mythic_count
-                );
-            }
-            if guard_count < state.guard_count + 5 {
-                panic!(
-                    "[capture/skill] ForgeHammer + Workshop spawned too few temporary guards: {} -> {}; expected four skill guards plus one four-piece sentinel",
-                    state.guard_count, guard_count
-                );
-            }
-            state.guard_homes = summons
-                .iter()
-                .filter_map(|(_, _, _, guard, home)| guard.and(home).map(|home| home.pos))
-                .collect();
-            if state.guard_homes.len() != guard_count {
-                panic!(
-                    "[capture/skill] temporary guards missing fixed homes: homes={} guards={guard_count}",
-                    state.guard_homes.len()
-                );
-            }
-            let moved = Vec2::new(BOARD_W * 0.25, -BOARD_H * 0.25);
-            for (_, mut tower) in &mut towers {
-                if tower.hero {
-                    tower.hero_pos = moved;
-                    tower.move_target = None;
-                    tower.angle = 0.0;
-                    break;
-                }
-            }
-            state.moved_hero_pos = Some(moved);
-            state.step = 3;
-            println!("[capture/skill] moved hero away from {guard_count} fixed temporary guards");
-        }
-        3 => {
-            let Some(hero_pos) = state.moved_hero_pos else {
-                panic!("[capture/skill] missing moved hero position");
-            };
-            let guards = summons
-                .iter()
-                .filter_map(|(_, tf, _, guard, home)| {
-                    guard
-                        .and(home)
-                        .map(|home| (tf.translation.truncate(), home.pos))
-                })
-                .collect::<Vec<_>>();
-            if guards.len() != state.guard_homes.len() {
-                panic!(
-                    "[capture/skill] guard count changed after hero relocation: {} -> {}",
-                    state.guard_homes.len(),
-                    guards.len()
-                );
-            }
-            for (pos, home) in guards.iter().copied() {
-                let anchored = state
-                    .guard_homes
-                    .iter()
-                    .any(|expected| home.distance(*expected) <= 0.5);
-                if !anchored {
-                    panic!(
-                        "[capture/skill] guard home moved or was recreated after hero moved: {home:?}, known homes {:?}",
-                        state.guard_homes
-                    );
-                }
-                if home.distance(hero_pos) < TILE_SIZE * 2.0 {
-                    panic!(
-                        "[capture/skill] guard home is still tied to moved hero: home={home:?} hero={hero_pos:?}"
-                    );
-                }
-                if pos.distance(hero_pos) < TILE_SIZE * 1.2 {
-                    panic!(
-                        "[capture/skill] guard body followed moved hero: guard={pos:?} hero={hero_pos:?}"
-                    );
-                }
-            }
-            run.show(crate::i18n::tf(
-                "capture: 英雄技能召唤通过，神话{} 临时守卫{}",
-                &[&state.mythic_count.to_string(), &guards.len().to_string()],
-            ));
-            prepared.scenario_ready = true;
-            state.step = 4;
-            println!(
-                "[capture/skill] verified Covenant/Workshop keystones: {} mythic allies and {} anchored temporary guards after hero moved",
-                state.mythic_count,
-                guards.len()
-            );
         }
         _ => {}
     }
@@ -1641,9 +1476,6 @@ fn prepare_capture_level(
             TowerKind::Cannon,
             TowerKind::Magic,
             TowerKind::Ice,
-            TowerKind::Thunder,
-            TowerKind::Poison,
-            TowerKind::Fire,
             TowerKind::Detection,
         ];
 
@@ -1717,7 +1549,7 @@ fn apply_capture_scenario(
     match scenario {
         CaptureScenario::Default => true,
         CaptureScenario::MouseInputSmoke => false,
-        CaptureScenario::HeroSkillSmoke => false,
+        CaptureScenario::HeroPassiveSmoke => false,
         CaptureScenario::RogueliteDraft => false,
         CaptureScenario::RoguelitePick => false,
         CaptureScenario::RunStats => {
@@ -1728,7 +1560,7 @@ fn apply_capture_scenario(
             loadout.weapon_talents =
                 [[0; hero::HeroLoadout::TALENT_SLOTS]; hero::HeroWeapon::ALL.len()];
             let weapon_index = loadout.weapon_index();
-            loadout.weapon_talents[weapon_index] = [2, 2, 1, 1, 0, 0];
+            loadout.weapon_talents[weapon_index] = [2, 2, 0];
             loadout.gear = [None; hero_gear::HeroGearSlot::COUNT];
             for item in [
                 hero_gear::HeroGear::VowPlate,
@@ -1782,7 +1614,7 @@ fn apply_capture_scenario(
                 tower.cooldown =
                     def.cooldown_ms / 1000.0 * talents.firerate_mult * talents.rogue_firerate_mult;
                 fallback.get_or_insert(entity);
-                if matches!(tower.kind, TowerKind::Thunder | TowerKind::Magic) {
+                if tower.kind == TowerKind::Magic {
                     preferred = Some(entity);
                 }
             }
@@ -1877,7 +1709,7 @@ fn apply_capture_scenario(
                     continue;
                 }
                 fallback.get_or_insert(entity);
-                if matches!(tower.kind, TowerKind::Thunder | TowerKind::Magic) {
+                if tower.kind == TowerKind::Magic {
                     preferred = Some(entity);
                     break;
                 }
@@ -1975,18 +1807,24 @@ fn apply_capture_scenario(
 fn drive_capture(
     mut commands: Commands,
     screen: Res<CaptureScreen>,
+    scenario: Res<CaptureScenario>,
     prepared: Res<CapturePrepared>,
     target: Res<CaptureTarget>,
     mut job: ResMut<CaptureJob>,
     capturing: Query<Entity, With<Capturing>>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    if matches!(*screen, CaptureScreen::Playing) && !prepared.scenario_ready {
-        return;
+    let passive_frames =
+        *scenario == CaptureScenario::HeroPassiveSmoke && matches!(job.mode, CaptureMode::Frames);
+    if matches!(*screen, CaptureScreen::Playing) {
+        if !prepared.level_ready || (!prepared.scenario_ready && !passive_frames) {
+            return;
+        }
     }
 
     job.tick += 1;
-    if job.tick < SETTLE_FRAMES {
+    let settle_frames = if passive_frames { 5 } else { SETTLE_FRAMES };
+    if job.tick < settle_frames {
         return;
     }
 

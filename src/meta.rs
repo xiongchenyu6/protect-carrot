@@ -1,10 +1,6 @@
 //! Run-wide meta systems: global tower talents (bought with gold).
-//! （塔系全局主动技能已移除——主动技只保留英雄技能。）
+//! 英雄武器与装备能力均在战斗中自动触发，不提供手动技能。
 
-use crate::components::Enemy;
-use crate::data::{BOARD_H, Element};
-use crate::game::RunState;
-use crate::tower::Damage;
 use bevy::prelude::*;
 
 // ============================ Talents ============================
@@ -45,4 +41,3 @@ impl Default for Talents {
 pub fn talent_cost(lvl: i32) -> i32 {
     (80.0 * 1.5f32.powi(lvl)).floor() as i32
 }
-

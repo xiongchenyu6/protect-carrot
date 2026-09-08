@@ -50,15 +50,19 @@ def parse_species() -> list[dict[str, str]]:
         block.append(line)
         if line.strip() == "),":
             vals = [l.strip().rstrip(",") for l in block]
+            species_id = int(vals[1])
+            if species_id > 99:
+                block = None
+                continue
             quoted = [v[1:-1] for v in vals if re.fullmatch(r'".*"', v)]
             out.append(
                 {
                     "id": vals[1],
-                    "key": f"{int(vals[1]):03}",
+                    "key": f"{species_id:03}",
                     "name": quoted[0],
                     "kind": vals[3],
                     "tags": quoted[-1],
-                    "path": str(ROOT / "assets" / "sprites" / "species" / f"{int(vals[1]):03}.png"),
+                    "path": str(ROOT / "assets" / "sprites" / "species" / f"{species_id:03}.png"),
                 }
             )
             block = None

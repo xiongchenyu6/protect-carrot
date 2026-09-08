@@ -3,17 +3,19 @@
 
 This is intended for StoryOS/ComfyUI batches and release checks. It derives the
 required tower/enemy/species/equipment sprites from Rust source, validates that the files
-exist and are nonblank PNGs, and writes:
+exist and are nonblank WebP images, and writes:
 
     tmp/sprite_manifest.json
     tmp/sprite_report.md
 
 Run:
     .venv/bin/python tools/verify_sprite_assets.py
+    .venv/bin/python tools/verify_sprite_assets.py --format png  # generation inputs
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import sys
@@ -48,7 +50,7 @@ def parse_sprite_names(enum_name: str) -> list[str]:
     names = re.findall(r'=>\s*"([^"]+)"', block)
     if not names:
         raise SystemExit(f"could not parse {enum_name} sprite names")
-    return names
+    return list(dict.fromkeys(names))
 
 
 def parse_equipment_sprite_names() -> list[str]:
@@ -86,7 +88,9 @@ def parse_species_ids() -> list[str]:
         block.append(line)
         if line.strip() == "),":
             vals = [l.strip().rstrip(",") for l in block]
-            out.append(f"{int(vals[1]):03}")
+            species_id = int(vals[1])
+            if species_id <= 99:
+                out.append(f"{species_id:03}")
             block = None
     if len(out) != 100:
         raise SystemExit(f"expected 100 species, parsed {len(out)}")
@@ -129,8 +133,9 @@ def inspect(path: Path, group: str, key: str) -> dict[str, object]:
         with Image.open(path) as img:
             item["width"], item["height"] = img.size
             item["mode"] = img.mode
-            if img.format != "PNG":
-                errors.append(f"not_png:{img.format}")
+            expected_format = "WEBP" if path.suffix == ".webp" else "PNG"
+            if img.format != expected_format:
+                errors.append(f"format_mismatch:{img.format}")
             if img.width < 32 or img.height < 32:
                 errors.append("too_small")
             if abs(img.width - img.height) > max(2, min(img.size) * 0.05):
@@ -145,25 +150,25 @@ def inspect(path: Path, group: str, key: str) -> dict[str, object]:
     return item
 
 
-def expected() -> list[tuple[str, str, Path]]:
+def expected(image_format: str) -> list[tuple[str, str, Path]]:
     rows: list[tuple[str, str, Path]] = []
     rows.extend(
-        ("towers", name, ROOT / "assets" / "sprites" / "towers" / f"{name}.png")
+        ("towers", name, ROOT / "assets" / "sprites" / "towers" / f"{name}.{image_format}")
         for name in parse_sprite_names("TowerKind")
     )
     rows.extend(
-        ("enemies", name, ROOT / "assets" / "sprites" / "enemies" / f"{name}.png")
+        ("enemies", name, ROOT / "assets" / "sprites" / "enemies" / f"{name}.{image_format}")
         for name in parse_sprite_names("EnemyKind")
     )
     rows.extend(
-        ("species", sid, ROOT / "assets" / "sprites" / "species" / f"{sid}.png")
+        ("species", sid, ROOT / "assets" / "sprites" / "species" / f"{sid}.{image_format}")
         for sid in parse_species_ids()
     )
     rows.extend(
         (
             "equipment",
             name,
-            ROOT / "assets" / "sprites" / "equipment" / f"{name}.png",
+            ROOT / "assets" / "sprites" / "equipment" / f"{name}.{image_format}",
         )
         for name in parse_equipment_sprite_names()
     )
@@ -203,7 +208,10 @@ def write_report(manifest: dict[str, object]) -> None:
 
 
 def main() -> int:
-    entries = [inspect(path, group, key) for group, key, path in expected()]
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--format", choices=("webp", "png"), default="webp")
+    args = parser.parse_args()
+    entries = [inspect(path, group, key) for group, key, path in expected(args.format)]
     groups: dict[str, dict[str, int]] = {}
     for entry in entries:
         group = str(entry["group"])
@@ -211,6 +219,7 @@ def main() -> int:
         groups[group]["total"] += 1
         groups[group]["ok" if entry["ok"] else "failed"] += 1
     manifest = {
+        "format": args.format,
         "total": len(entries),
         "ok": sum(1 for entry in entries if entry["ok"]),
         "failed": sum(1 for entry in entries if not entry["ok"]),

@@ -8,6 +8,11 @@
 
 use bevy::prelude::*;
 
+pub const HERO_PASSIVE_SHORT_INTERVAL: f32 = 18.0;
+pub const HERO_PASSIVE_LONG_INTERVAL: f32 = 24.0;
+pub const HERO_PASSIVE_MIN_INTERVAL: f32 = 8.0;
+pub const MAX_HERO_SUMMONS: usize = 12;
+
 // ----- Grid / board geometry (from the top of the original <script>) -----
 pub const TILE_SIZE: f32 = 40.0;
 pub const COLS: i32 = 20;
@@ -141,29 +146,11 @@ pub fn cell_center(col: f32, row: f32) -> Vec2 {
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum TowerKind {
-    // attack
     Arrow,
     Cannon,
     Magic,
-    Sniper,
-    Thunder,
-    Laser,
-    Missile,
-    Fortress,
-    // control
     Ice,
-    Wind,
-    FrostNova,
-    Shadow,
-    // support
-    Holy,
     Detection,
-    // special
-    Poison,
-    Fire,
-    Summon,
-    Prism,
-    Necromancer,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -171,22 +158,14 @@ pub enum Category {
     Attack,
     Control,
     Support,
-    Special,
 }
 
 impl Category {
-    pub const ALL: [Category; 4] = [
-        Category::Attack,
-        Category::Control,
-        Category::Support,
-        Category::Special,
-    ];
     pub fn name(self) -> &'static str {
         match self {
             Category::Attack => "攻击",
             Category::Control => "控制",
             Category::Support => "辅助",
-            Category::Special => "特殊",
         }
     }
 }
@@ -198,23 +177,14 @@ pub enum Behavior {
     Single,
     Aoe,
     Chain,
-    Laser,
-    Homing,
     Slow,
     Knockback,
-    Freeze,
     Curse,
-    Heal,
     Detect,
     Poison,
-    Fire,
-    Summon,
-    /// Raises slain nearby enemies as allied units instead of attacking directly.
-    Necromancer,
 }
 
-/// All stats for a tower kind. Behavior-specific fields are `0.0`/`0` when unused,
-/// exactly like the optional properties in the JS object literals.
+/// All stats for one of the five buildable tower kinds.
 #[derive(Clone, Copy, Debug)]
 #[allow(dead_code)]
 pub struct TowerDef {
@@ -247,14 +217,10 @@ pub struct TowerDef {
     pub freeze_duration: f32,
     pub armor_reduce: f32,
     pub curse_duration: f32,
-    pub heal_amount: f32,
     pub buff_range: f32,
     pub dot_damage: f32,
     pub poison_duration: f32,
     pub fire_duration: f32,
-    pub summon_hp: f32,
-    pub summon_speed: f32,
-    pub max_summons: i32,
     pub desc: &'static str,
 }
 
@@ -286,43 +252,25 @@ const fn base() -> TowerDef {
         freeze_duration: 0.0,
         armor_reduce: 0.0,
         curse_duration: 0.0,
-        heal_amount: 0.0,
         buff_range: 0.0,
         dot_damage: 0.0,
         poison_duration: 0.0,
         fire_duration: 0.0,
-        summon_hp: 0.0,
-        summon_speed: 0.0,
-        max_summons: 0,
         desc: "",
     }
 }
 
 impl TowerKind {
-    pub const ALL: [TowerKind; 19] = [
+    pub const ALL: [TowerKind; 5] = [
         TowerKind::Arrow,
         TowerKind::Cannon,
         TowerKind::Magic,
-        TowerKind::Sniper,
-        TowerKind::Thunder,
-        TowerKind::Laser,
-        TowerKind::Missile,
-        TowerKind::Fortress,
         TowerKind::Ice,
-        TowerKind::Wind,
-        TowerKind::FrostNova,
-        TowerKind::Shadow,
-        TowerKind::Holy,
         TowerKind::Detection,
-        TowerKind::Poison,
-        TowerKind::Fire,
-        TowerKind::Summon,
-        TowerKind::Prism,
-        TowerKind::Necromancer,
     ];
 
     pub fn def(self) -> &'static TowerDef {
-        // Linear scan over a 16-element table; trivial and avoids index/enum drift.
+        // Linear scan over a five-element table; trivial and avoids index/enum drift.
         TOWER_DEFS.iter().find(|d| d.kind == self).unwrap()
     }
 
@@ -333,22 +281,8 @@ impl TowerKind {
             Arrow => "arrow",
             Cannon => "cannon",
             Magic => "magic",
-            Sniper => "sniper",
-            Thunder => "thunder",
-            Laser => "laser",
-            Missile => "missile",
             Ice => "ice",
-            Wind => "wind",
-            FrostNova => "frostnova",
-            Shadow => "shadow",
-            Holy => "holy",
             Detection => "detection",
-            Poison => "poison",
-            Fire => "fire",
-            Summon => "summon",
-            Fortress => "fortress",
-            Prism => "prism",
-            Necromancer => "necromancer",
         }
     }
 }
@@ -398,68 +332,6 @@ pub static TOWER_DEFS: &[TowerDef] = &[
         desc: "高单体魔法伤害",
         ..base()
     },
-    TowerDef {
-        kind: TowerKind::Sniper,
-        name: "狙击塔",
-        icon: "🎯",
-        color: hex(0x2ecc71),
-        cost: 180,
-        damage: 95.0,
-        range: 220.0,
-        cooldown_ms: 1400.0,
-        behavior: Behavior::Single,
-        desc: "超远射程物理伤害",
-        ..base()
-    },
-    TowerDef {
-        kind: TowerKind::Thunder,
-        name: "雷塔",
-        icon: "⚡",
-        color: hex(0xf1c40f),
-        cost: 220,
-        damage: 35.0,
-        range: 130.0,
-        cooldown_ms: 900.0,
-        behavior: Behavior::Chain,
-        chain_count: 4,
-        chain_range: 100.0,
-        magic: true,
-        element: Element::Storm,
-        desc: "命中后弹射多个敌人",
-        ..base()
-    },
-    TowerDef {
-        kind: TowerKind::Laser,
-        name: "激光塔",
-        icon: "🔦",
-        color: hex(0xe84393),
-        cost: 250,
-        damage: 25.0,
-        range: 160.0,
-        cooldown_ms: 100.0,
-        behavior: Behavior::Laser,
-        magic: true,
-        element: Element::Arcane,
-        desc: "持续穿透直线伤害",
-        ..base()
-    },
-    TowerDef {
-        kind: TowerKind::Missile,
-        name: "导弹塔",
-        icon: "🚀",
-        color: hex(0xd35400),
-        cost: 300,
-        damage: 220.0,
-        range: 200.0,
-        cooldown_ms: 2000.0,
-        behavior: Behavior::Homing,
-        aoe_radius: 75.0,
-        footprint: 2, // 2×2 heavy emplacement
-        max_hp: 260.0,
-        armor: 14.0,
-        desc: "2×2 追踪导弹·高伤范围",
-        ..base()
-    },
     // ---- control ----
     TowerDef {
         kind: TowerKind::Ice,
@@ -478,75 +350,7 @@ pub static TOWER_DEFS: &[TowerDef] = &[
         desc: "减速敌人",
         ..base()
     },
-    TowerDef {
-        kind: TowerKind::Wind,
-        name: "风塔",
-        icon: "🌪️",
-        color: hex(0x00cec9),
-        cost: 160,
-        damage: 12.0,
-        range: 90.0,
-        cooldown_ms: 800.0,
-        category: Category::Control,
-        behavior: Behavior::Knockback,
-        element: Element::Storm,
-        knock_dist: 40.0,
-        stun_duration: 400.0,
-        desc: "击退并短暂眩晕",
-        ..base()
-    },
-    TowerDef {
-        kind: TowerKind::FrostNova,
-        name: "冰霜新星",
-        icon: "💥",
-        color: hex(0x74b9ff),
-        cost: 240,
-        damage: 30.0,
-        range: 110.0,
-        cooldown_ms: 1500.0,
-        category: Category::Control,
-        behavior: Behavior::Freeze,
-        element: Element::Frost,
-        aoe_radius: 80.0,
-        freeze_duration: 1500.0,
-        desc: "范围冰冻敌人",
-        ..base()
-    },
-    TowerDef {
-        kind: TowerKind::Shadow,
-        name: "暗影塔",
-        icon: "🌑",
-        color: hex(0x636e72),
-        cost: 180,
-        damage: 20.0,
-        range: 120.0,
-        cooldown_ms: 700.0,
-        category: Category::Control,
-        behavior: Behavior::Curse,
-        element: Element::Shadow,
-        armor_reduce: 8.0,
-        curse_duration: 3000.0,
-        desc: "降低敌人护甲/魔抗",
-        ..base()
-    },
     // ---- support ----
-    TowerDef {
-        kind: TowerKind::Holy,
-        name: "圣光塔",
-        icon: "✨",
-        color: hex(0xfdcb6e),
-        cost: 150,
-        damage: 15.0,
-        range: 130.0,
-        cooldown_ms: 1200.0,
-        category: Category::Support,
-        behavior: Behavior::Heal,
-        element: Element::Arcane,
-        heal_amount: 1.0,
-        buff_range: 120.0,
-        desc: "治疗萝卜并增益周围塔",
-        ..base()
-    },
     TowerDef {
         kind: TowerKind::Detection,
         name: "侦测塔",
@@ -562,113 +366,6 @@ pub static TOWER_DEFS: &[TowerDef] = &[
         desc: "使隐形敌人显形",
         ..base()
     },
-    // ---- special ----
-    TowerDef {
-        kind: TowerKind::Poison,
-        name: "毒塔",
-        icon: "🧪",
-        color: hex(0x6c5ce7),
-        cost: 140,
-        damage: 8.0,
-        range: 110.0,
-        cooldown_ms: 650.0,
-        category: Category::Special,
-        behavior: Behavior::Poison,
-        element: Element::Toxic,
-        dot_damage: 16.0,
-        poison_duration: 4000.0,
-        desc: "剧毒·持续掉血(可叠加时长)",
-        ..base()
-    },
-    TowerDef {
-        kind: TowerKind::Fire,
-        name: "火塔",
-        icon: "🔥",
-        color: hex(0xe17055),
-        cost: 170,
-        damage: 15.0,
-        range: 100.0,
-        cooldown_ms: 900.0,
-        category: Category::Special,
-        behavior: Behavior::Fire,
-        element: Element::Fire,
-        aoe_radius: 60.0,
-        dot_damage: 18.0,
-        fire_duration: 3000.0,
-        desc: "点燃范围敌人，并留下持续火场",
-        ..base()
-    },
-    TowerDef {
-        kind: TowerKind::Summon,
-        name: "召唤塔",
-        icon: "🐺",
-        color: hex(0xb2bec3),
-        cost: 200,
-        damage: 25.0,
-        range: 100.0,
-        cooldown_ms: 1500.0,
-        category: Category::Special,
-        behavior: Behavior::Summon,
-        max_hp: 150.0,
-        summon_hp: 120.0,
-        summon_speed: 1.5,
-        max_summons: 1,
-        desc: "召唤狼魂阻挡敌人",
-        ..base()
-    },
-    // ---- large emplacements (multi-cell) ----
-    TowerDef {
-        kind: TowerKind::Fortress,
-        name: "要塞炮",
-        icon: "🏰",
-        color: hex(0x8e6e3c),
-        cost: 400,
-        damage: 90.0,
-        range: 150.0,
-        cooldown_ms: 1300.0,
-        category: Category::Attack,
-        behavior: Behavior::Aoe,
-        aoe_radius: 95.0,
-        footprint: 2,
-        max_hp: 360.0,
-        armor: 24.0,
-        desc: "2×2 重炮·超大范围爆炸",
-        ..base()
-    },
-    TowerDef {
-        kind: TowerKind::Prism,
-        name: "光棱塔",
-        icon: "🔆",
-        color: hex(0x00d2ff),
-        cost: 650,
-        damage: 55.0,
-        range: 210.0,
-        cooldown_ms: 100.0,
-        category: Category::Special,
-        behavior: Behavior::Laser,
-        magic: true,
-        element: Element::Arcane,
-        footprint: 3,
-        max_hp: 520.0,
-        armor: 18.0,
-        desc: "3×3 指数聚焦高能激光",
-        ..base()
-    },
-    TowerDef {
-        kind: TowerKind::Necromancer,
-        name: "死灵塔",
-        icon: "💀",
-        color: hex(0x4b3b5a),
-        cost: 260,
-        damage: 0.0,
-        range: 130.0,
-        cooldown_ms: 3500.0, // raise interval
-        category: Category::Special,
-        behavior: Behavior::Necromancer,
-        element: Element::Shadow,
-        desc: "击杀范围内敌人→复活为我方作战",
-        ..base()
-    },
 ];
 
 /// Upgrade multipliers (original `UPGRADE_MULTIPLIERS`).
@@ -681,8 +378,6 @@ impl UpgradeMul {
     pub const COST: f32 = 0.7;
     pub const AOE_RADIUS: f32 = 1.15;
     pub const DOT_DAMAGE: f32 = 1.5;
-    pub const HEAL_AMOUNT: f32 = 1.5;
-    pub const SUMMON_HP: f32 = 1.5;
 }
 
 // ============================ Enemies ============================

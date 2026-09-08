@@ -22,7 +22,7 @@ pub struct HeroCombatValues {
     pub armor: f32,
     pub armor_pierce: f32,
     pub skill_power: f32,
-    pub skill_cooldown: i32,
+    pub passive_interval: f32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -35,7 +35,7 @@ pub struct AttributeContribution {
     pub skill_mult: f32,
     pub armor_add: f32,
     pub armor_pierce_add: f32,
-    pub skill_cooldown_reduction: i32,
+    pub passive_interval_reduction: f32,
 }
 
 impl Default for AttributeContribution {
@@ -49,7 +49,7 @@ impl Default for AttributeContribution {
             skill_mult: 1.0,
             armor_add: 0.0,
             armor_pierce_add: 0.0,
-            skill_cooldown_reduction: 0,
+            passive_interval_reduction: 0.0,
         }
     }
 }
@@ -68,7 +68,7 @@ impl AttributeContribution {
         .any(|value| (value - 1.0).abs() > 0.001)
             || self.armor_add.abs() > 0.01
             || self.armor_pierce_add.abs() > 0.01
-            || self.skill_cooldown_reduction != 0
+            || self.passive_interval_reduction != 0.0
     }
 }
 
@@ -250,7 +250,7 @@ fn hero_values(loadout: &HeroLoadout) -> HeroCombatValues {
         armor: tower.armor,
         armor_pierce: tower.armor_pierce,
         skill_power: loadout.skill_damage_mult(),
-        skill_cooldown: loadout.skill_cooldown_max(),
+        passive_interval: loadout.passive_interval(),
     }
 }
 
@@ -267,7 +267,7 @@ fn contribution_between(
         skill_mult: safe_ratio(after.skill_power, before.skill_power),
         armor_add: after.armor - before.armor,
         armor_pierce_add: after.armor_pierce - before.armor_pierce,
-        skill_cooldown_reduction: before.skill_cooldown - after.skill_cooldown,
+        passive_interval_reduction: before.passive_interval - after.passive_interval,
     }
 }
 
@@ -288,7 +288,7 @@ fn runtime_copy(source: &HeroLoadout) -> HeroLoadout {
         talent_points: source.talent_points,
         weapon_talents: source.weapon_talents,
         gear: source.gear,
-        skill_cd: source.skill_cd,
+        skill_cooldowns: source.skill_cooldowns,
         run_mods: source.run_mods,
         alive: source.alive,
         respawn_waves: source.respawn_waves,
@@ -310,7 +310,7 @@ mod tests {
             talent_points: 0,
             weapon_talents: [[0; HeroLoadout::TALENT_SLOTS]; HeroWeapon::ALL.len()],
             gear: empty_gear(),
-            skill_cd: 0,
+            skill_cooldowns: [0.0; HeroLoadout::TALENT_SLOTS],
             run_mods: HeroRunMods::default(),
             alive: true,
             respawn_waves: 0,
@@ -328,7 +328,10 @@ mod tests {
 
         let report = hero_attribute_report(&hero, None);
         assert!(report.level.damage_mult > 1.30);
-        assert!(report.weapon_talents.damage_mult > 1.20);
+        assert!(
+            !report.weapon_talents.active(),
+            "skill training must not add baseline attributes"
+        );
         assert!(report.gear.active());
         assert!(report.run_cards.damage_mult > 1.20);
         assert!(report.run_cards.attack_speed_mult > 1.20);

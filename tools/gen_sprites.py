@@ -45,11 +45,11 @@ def save(img, path):
 # ----------------------------- towers -----------------------------
 
 TOWERS = {
-    "arrow": 0xE74C3C, "cannon": 0xE67E22, "magic": 0x9B59B6, "sniper": 0x2ECC71,
-    "thunder": 0xF1C40F, "laser": 0xE84393, "missile": 0xD35400, "ice": 0x3498DB,
-    "wind": 0x00CEC9, "frostnova": 0x74B9FF, "shadow": 0x636E72, "holy": 0xFDCB6E,
-    "detection": 0xA29BFE, "poison": 0x6C5CE7, "fire": 0xE17055, "summon": 0xB2BEC3,
-    "fortress": 0x8E6E3C, "prism": 0x00D2FF, "necromancer": 0x4B3B5A,
+    "arrow": 0xE74C3C,
+    "cannon": 0xE67E22,
+    "magic": 0x9B59B6,
+    "ice": 0x3498DB,
+    "detection": 0xA29BFE,
 }
 
 

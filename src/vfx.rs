@@ -1743,7 +1743,6 @@ pub fn enemy_hit_pop(time: Res<Time>, mut q: Query<(&mut Enemy, &mut Transform)>
     }
 }
 
-
 /// 技能演出时间轴：把一串 VfxEvent 按相对时刻排布（蓄力→释放→冲击→余晖
 /// 的多拍分层观感，参照线性施法的相位机思路）。事件到点即写出，排空自毁。
 #[derive(Component)]

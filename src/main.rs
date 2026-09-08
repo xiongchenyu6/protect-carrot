@@ -14,19 +14,16 @@
 use bevy::camera::ScalingMode;
 use bevy::prelude::*;
 use bevy::window::{CursorIcon, MonitorSelection, WindowMode};
-use bevy_asset_loader::prelude::{ConfigureLoadingState, LoadingState, LoadingStateAppExt};
-use bevy_common_assets::ron::RonAssetPlugin;
 use bevy_cursor_kit::prelude::{CursorAssetPlugin, CustomCursorImageBuilder, StaticCursor};
 use bevy_fog_of_war::prelude::FogOfWarCamera;
 use bevy_paperdoll::PaperdollPlugin;
 use bevy_sequential_actions::SequentialActionsPlugin;
 use bevy_spritesheet_animation::prelude::SpritesheetAnimationPlugin;
-use iyes_progress::ProgressPlugin;
 
 use protect_carrot::{
     Levels, audio, bestiary, build, creatures, data, enemy, equipment, fluent_i18n, game, hero,
     hero_gear, hero_paperdoll, i18n, lighting, meta, mutators, polish, quality, roguelite, sprites,
-    states, tower, tuning, tutorial, ui, vfx,
+    states, tower, tutorial, ui, vfx,
 };
 
 // Web-only: a retrying HTTP asset reader, installed before AssetPlugin so a
@@ -256,23 +253,23 @@ fn main() {
     .add_plugins(lighting::LightingPlugin)
     .add_plugins(SequentialActionsPlugin)
     .add_plugins(SpritesheetAnimationPlugin)
+    .add_systems(
+        PostUpdate,
+        protect_carrot::hero_cast_visuals::pose_casts
+            .after(bevy_spritesheet_animation::plugin::AnimationSystemSet),
+    )
+    .add_systems(
+        Update,
+        protect_carrot::hero_cast_visuals::draw_casts.run_if(in_state(GameState::Playing)),
+    )
     .add_plugins(fluent_i18n::fluent_plugin())
-    .add_plugins(RonAssetPlugin::<tuning::FocusBeamTuningAsset>::new(&[
-        "focus.ron",
-    ]))
-    .add_plugins(
-        ProgressPlugin::<GameState>::new()
-            .with_state_transition(GameState::Loading, GameState::Menu),
-    )
     .init_state::<GameState>()
-    .add_loading_state(
-        LoadingState::new(GameState::Loading).load_collection::<tuning::TuningAssets>(),
-    )
     .insert_resource(ClearColor(hex(0x1e2a1e)))
     .insert_resource(quality)
     .insert_resource(lighting_settings)
     .insert_resource(language)
     .insert_resource(fluent_locale)
+    .insert_resource(ui::persistent_progress())
     .init_resource::<audio::AudioSettings>()
     .init_resource::<ui::MenuDirty>()
     .init_resource::<ui::SelectedEpisode>()
@@ -305,19 +302,18 @@ fn main() {
     .init_resource::<bestiary::Bestiary>()
     .init_resource::<vfx::ScreenShake>()
     .add_message::<Damage>()
+    .add_message::<protect_carrot::hero_passives::HeroSkillCastEvent>()
     .add_message::<Status>()
     .add_message::<BuffTower>()
     .add_message::<HealCarrot>()
     .add_message::<vfx::VfxEvent>()
     .add_message::<audio::SfxEvent>()
-    .add_message::<tower::EnemyDied>()
     .add_message::<ui::UiActionActivated>()
     .add_observer(ui::widget_button_activated)
     .add_systems(
         Startup,
         (
             setup,
-            ui::load_persistent_progress,
             load_carrot_cursor,
             fluent_i18n::load_fluent_bundles,
             creatures::load_creatures,
@@ -422,7 +418,9 @@ fn main() {
             ui::roguelite_buttons,
             ui::settings_nav_buttons,
             ui::hero_joystick,
-            build::hero_move,
+            build::hero_move
+                .after(ui::hero_joystick)
+                .after(build::hero_control),
             build::hero_control.after(build::mouse_build),
             build::hero_status,
             build::hero_respawn,
@@ -455,8 +453,15 @@ fn main() {
     .add_systems(
         Update,
         (
-            tower::build_snapshot,
-            hero::hero_doctrine,
+            tower::build_snapshot
+                .after(build::hero_move)
+                .after(ui::hero_buttons),
+            (
+                hero::hero_doctrine,
+                protect_carrot::hero_passives::update_hero_passives,
+                protect_carrot::hero_skill_effects::update_skill_fields,
+            )
+                .chain(),
             tower::update_towers,
             tower::update_projectiles,
             tower::update_shot_fx,
@@ -472,7 +477,6 @@ fn main() {
             tower::update_fire_grounds,
             enemy::spawn_enemies,
             enemy::update_enemies,
-            tower::necromancer_raise,
             // 嵌套成二元组以绕开单个 add_systems 最多 20 个系统的上限。
             (
                 enemy::heal_auras,
@@ -556,7 +560,7 @@ fn main() {
         (
             update_hud,
             ui::update_unit_stats,
-            ui::update_hero_info,
+            (ui::update_hero_info, ui::update_hero_skill_icons),
             ui::update_combo_meter,
             ui::update_equipment_button_labels,
             ui::update_upgrade_button_label,
@@ -578,10 +582,6 @@ fn main() {
         ui::update_boss_bar.run_if(in_state(GameState::Playing)),
     )
     // tooltip + panel scrolling
-    .add_systems(
-        Update,
-        ui::update_ability_buttons.run_if(in_state(GameState::Playing)),
-    )
     // tooltips also run on the selection screens (menu/briefing) so the race/weapon/
     // difficulty pickers show their info. Harmless where no TooltipBox exists.
     .add_systems(

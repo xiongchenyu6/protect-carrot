@@ -32,7 +32,6 @@ use std::collections::{HashMap, HashSet};
 
 pub const HERO_MELEE_ATTACK_TIME: f32 = 0.28;
 const HERO_MELEE_ATTACK_RANGE_CAP: f32 = 92.0;
-const TOWER_SUMMON_VISUAL_SCALE: f32 = 0.70;
 const SUPPORT_BUFF_STEP: f32 = 0.02;
 const SUPPORT_BUFF_CAP: f32 = 0.40;
 
@@ -146,10 +145,6 @@ pub struct Tower {
     pub hero_pos: Vec2,
     /// Where the hero is walking toward, if commanded (hero only).
     pub move_target: Option<Vec2>,
-    /// Laser focus ramp: seconds the beam has dwelled on its current target, and
-    /// which target that is. DPS grows exponentially with dwell (boss-shredder).
-    pub laser_charge: f32,
-    pub laser_target: Option<Entity>,
     // behavior params
     pub aoe_radius: f32,
     pub chain_count: i32,
@@ -160,14 +155,10 @@ pub struct Tower {
     pub freeze_duration: f32,
     pub armor_reduce: f32,
     pub curse_duration: f32,
-    pub heal_amount: f32,
     pub buff_range: f32,
     pub dot_damage: f32,
     pub poison_duration: f32,
     pub fire_duration: f32,
-    pub summon_hp: f32,
-    pub summon_speed: f32,
-    pub max_summons: i32,
 }
 
 impl Tower {
@@ -211,8 +202,6 @@ impl Tower {
             hero_weapon: None,
             hero_pos: Vec2::ZERO,
             move_target: None,
-            laser_charge: 0.0,
-            laser_target: None,
             aoe_radius: def.aoe_radius,
             chain_count: def.chain_count,
             chain_range: def.chain_range,
@@ -222,14 +211,10 @@ impl Tower {
             freeze_duration: def.freeze_duration / 1000.0,
             armor_reduce: def.armor_reduce,
             curse_duration: def.curse_duration / 1000.0,
-            heal_amount: def.heal_amount,
             buff_range: def.buff_range,
             dot_damage: def.dot_damage,
             poison_duration: def.poison_duration / 1000.0,
             fire_duration: def.fire_duration / 1000.0,
-            summon_hp: def.summon_hp,
-            summon_speed: def.summon_speed,
-            max_summons: def.max_summons,
         }
     }
 
@@ -283,16 +268,7 @@ impl Tower {
     pub fn can_hit_flying(&self) -> bool {
         matches!(
             self.kind,
-            TowerKind::Arrow
-                | TowerKind::Magic
-                | TowerKind::Sniper
-                | TowerKind::Thunder
-                | TowerKind::Laser
-                | TowerKind::Missile
-                | TowerKind::Poison
-                | TowerKind::Fire
-                | TowerKind::Holy
-                | TowerKind::Detection
+            TowerKind::Arrow | TowerKind::Magic | TowerKind::Detection
         )
     }
 }
@@ -379,25 +355,6 @@ pub struct FixedSummonHome {
     pub range: f32,
 }
 
-/// Minion archetype a summon tower conjures at a given level. Stronger tiers
-/// unlock as the tower upgrades (all three have creature sprite sheets).
-pub fn summon_minion_kind(level: i32) -> crate::data::EnemyKind {
-    use crate::data::EnemyKind::*;
-    match level {
-        0 | 1 => Armored, // skeleton
-        2 => Charger,     // fireworm — faster, aggressive
-        _ => Tank,        // mimic — beefy bruiser
-    }
-}
-
-/// Emitted when an enemy dies, so necromancer towers can raise it.
-#[derive(Message)]
-pub struct EnemyDied {
-    pub pos: Vec2,
-    pub kind: crate::data::EnemyKind,
-    pub max_hp: f32,
-}
-
 // ============================ Events ============================
 
 #[derive(Message)]
@@ -476,7 +433,6 @@ pub struct Snapshot {
     pub enemies: Vec<EnemySnap>,
     pub detectors: Vec<(Vec2, f32)>,
     pub silencers: Vec<(Vec2, f32)>,
-    pub summon_counts: HashMap<Entity, usize>,
     pub tower_zones: HashMap<Entity, (Vec2, f32)>,
 }
 
@@ -484,7 +440,6 @@ pub fn build_snapshot(
     mut snap: ResMut<Snapshot>,
     enemies: Query<(Entity, &Enemy, &Transform, Option<&FogHidden>)>,
     towers: Query<(Entity, &Tower, &Transform)>,
-    summons: Query<&Summon>,
 ) {
     snap.enemies.clear();
     snap.silencers.clear();
@@ -521,10 +476,6 @@ pub fn build_snapshot(
         if t.detector {
             snap.detectors.push((t.center(), effective_range));
         }
-    }
-    snap.summon_counts.clear();
-    for s in &summons {
-        *snap.summon_counts.entry(s.owner).or_insert(0) += 1;
     }
 }
 
@@ -1125,27 +1076,6 @@ fn queue_attack_sequence(
     ));
 }
 
-fn fire_wall_angle(target: EnemySnap, board: &Board, fallback_from: Vec2) -> f32 {
-    let path = &board.path_world;
-    let idx = target.path_index.min(path.len().saturating_sub(1));
-    let path_dir = if path.len() >= 2 {
-        if idx + 1 < path.len() {
-            path[idx + 1] - path[idx]
-        } else if idx > 0 {
-            path[idx] - path[idx - 1]
-        } else {
-            target.pos - fallback_from
-        }
-    } else {
-        target.pos - fallback_from
-    };
-    if path_dir.length_squared() > 0.0 {
-        path_dir.to_angle() + std::f32::consts::FRAC_PI_2
-    } else {
-        0.0
-    }
-}
-
 fn point_in_fire_wall(
     point: Vec2,
     center: Vec2,
@@ -1166,15 +1096,10 @@ fn projectile_tint(kind: TowerKind, proj: &Projectile, tower_color: Color) -> Co
     }
     match kind {
         Arrow => Color::srgb(1.0, 0.82, 0.42),
-        Sniper => Color::srgb(0.56, 1.0, 0.58),
         Magic => fireball_color(),
-        Missile | Fortress | Cannon => Color::srgb(1.0, 0.46, 0.16),
-        Ice | FrostNova => Color::srgb(0.52, 0.9, 1.0),
-        Wind => Color::srgb(0.36, 1.0, 0.92),
-        Shadow | Necromancer => Color::srgb(0.58, 0.42, 0.95),
-        Poison => Color::srgb(0.42, 1.0, 0.48),
-        Fire => Color::srgb(1.0, 0.34, 0.12),
-        Laser | Prism | Holy | Detection | Summon | Thunder => proj.element.color(),
+        Cannon => Color::srgb(1.0, 0.46, 0.16),
+        Ice => Color::srgb(0.52, 0.9, 1.0),
+        Detection => proj.element.color(),
     }
     .mix(&tower_color, 0.18)
     .mix(&Color::WHITE, 0.16)
@@ -1184,10 +1109,8 @@ fn projectile_radius(kind: TowerKind, proj: &Projectile) -> f32 {
     use TowerKind::*;
     match (kind, proj.kind) {
         (_, ProjKind::Fireball) => 7.6,
-        (Missile, _) => 5.8,
         (_, ProjKind::Missile) => 5.2,
         (Magic, _) => 6.4,
-        (Sniper, _) => 2.8,
         (Arrow, _) => 3.2,
         (_, ProjKind::Curse) => 5.0,
         (_, ProjKind::Poison) => 4.5,
@@ -1201,8 +1124,7 @@ fn projectile_tail(kind: TowerKind, proj: &Projectile) -> (f32, f32, f32) {
     use TowerKind::*;
     match (kind, proj.kind) {
         (_, ProjKind::Fireball) => (13.0, 13.0, 0.24),
-        (Missile, _) | (_, ProjKind::Missile) => (34.0, 9.0, 0.34),
-        (Sniper, _) => (42.0, 3.0, 0.42),
+        (_, ProjKind::Missile) => (34.0, 9.0, 0.34),
         (Arrow, _) => (25.0, 4.0, 0.30),
         (Magic, _) => (13.0, 12.0, 0.22),
         (_, ProjKind::Curse) => (22.0, 9.0, 0.26),
@@ -1409,7 +1331,7 @@ fn spawn_projectile_trail(
     ));
 }
 
-fn spawn_projectile(
+pub(crate) fn spawn_projectile(
     commands: &mut Commands,
     from: Vec2,
     to: Vec2,
@@ -1431,7 +1353,7 @@ fn spawn_projectile(
     let core = tint.mix(&Color::WHITE, 0.22);
     let glow = tint;
     let hot = Color::WHITE.mix(&tint, 0.28);
-    let missile_like = tower_kind == TowerKind::Missile || proj.kind == ProjKind::Missile;
+    let missile_like = proj.kind == ProjKind::Missile;
     let fireball_like = tower_kind == TowerKind::Magic || proj.kind == ProjKind::Fireball;
     commands
         .spawn((
@@ -1497,10 +1419,7 @@ fn spawn_projectile(
                     },
                     Transform::from_xyz(-radius - 7.0, 0.0, -0.1),
                 ));
-            } else if matches!(
-                tower_kind,
-                TowerKind::Arrow | TowerKind::Sniper | TowerKind::Wind
-            ) {
+            } else if tower_kind == TowerKind::Arrow {
                 p.spawn((
                     Sprite {
                         color: hot.with_alpha(0.86),
@@ -1515,11 +1434,6 @@ fn spawn_projectile(
 
 // ============================ Tower behavior ============================
 
-fn focus_beam_dps(base_damage: f32, charge: f32, profile: crate::tuning::FocusBeamProfile) -> f32 {
-    (base_damage * profile.base_dps_mult * 2f32.powf(charge * profile.charge_rate))
-        .min(profile.dps_cap)
-}
-
 pub fn update_towers(
     mut commands: Commands,
     time: Res<Time>,
@@ -1532,195 +1446,33 @@ pub fn update_towers(
         &Transform,
         Option<&CurrentAction>,
         Option<&ActionQueue>,
+        Option<&crate::hero_passives::HeroCast>,
     )>,
     mut dmg: MessageWriter<Damage>,
     mut status: MessageWriter<Status>,
-    mut buff: MessageWriter<BuffTower>,
-    mut heal: MessageWriter<HealCarrot>,
     mut vfx: MessageWriter<crate::vfx::VfxEvent>,
-    creatures: Res<crate::creatures::Creatures>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
-    focus_tuning_handles: Option<Res<crate::tuning::TuningAssets>>,
-    focus_tunings: Option<Res<Assets<crate::tuning::FocusBeamTuningAsset>>>,
 ) {
     let dt = time.delta_secs() * run.game_speed;
 
-    // Precompute tower entity+pos for the holy buff (read from snapshot-free list).
-    let buff_positions: Vec<(Entity, Vec2)> = towers
-        .iter()
-        .map(|(e, t, _, _, _)| (e, t.center()))
-        .collect();
-
-    for (entity, mut tower, _, current_action, action_queue) in &mut towers {
+    for (entity, mut tower, _, current_action, action_queue, cast) in &mut towers {
         if tower.cooldown_timer > 0.0 {
             // Forge Hammer/Sentry Crossbow doctrine haste speeds the cooldown tick (= faster attacks).
             let set_bonus = equipment_set_bonus(&tower.equipment);
             tower.cooldown_timer -= dt * (1.0 + tower.aura_haste) * set_bonus.attack_speed_mult;
         }
         let c = tower.center();
+        if cast.is_some() {
+            continue;
+        }
         if snap.tower_silenced(c) {
             continue;
         }
 
         match tower.behavior {
-            // Passive towers: cooldown already ticked above; no direct attack.
-            Behavior::Detect | Behavior::Necromancer => continue,
-
-            Behavior::Heal => {
-                if tower.cooldown_timer <= 0.0 {
-                    tower.cooldown_timer = tower.cooldown;
-                    heal.write(HealCarrot {
-                        amount: tower.heal_amount as i32,
-                    });
-                    vfx.write(crate::vfx::VfxEvent::Heal { pos: c });
-                    for (other, pos) in &buff_positions {
-                        if *other != entity && pos.distance(c) <= tower.buff_range {
-                            buff.write(BuffTower { target: *other });
-                            spawn_layered_beam(
-                                &mut commands,
-                                c,
-                                *pos,
-                                tower.element.color(),
-                                3.0,
-                                0.28,
-                                9.0,
-                                true,
-                            );
-                        }
-                    }
-                }
-                continue;
-            }
-
-            Behavior::Laser => {
-                let focus = crate::tuning::focus_profile_from_assets(
-                    tower.kind,
-                    focus_tuning_handles.as_deref(),
-                    focus_tunings.as_deref(),
-                );
-                // Sticky targeting for focus beams: keep melting the SAME target while
-                // it's alive, targetable and in range, so the exponential ramp can
-                // actually build. `snap.target()` re-picks the "best" enemy every
-                // frame, which against a moving stream would reset the charge each
-                // frame. We only re-acquire once the held target is gone.
-                let eff_range = effective_attack_range(&tower);
-                let held = if focus.is_some() {
-                    tower.laser_target.and_then(|prev| {
-                        snap.enemies.iter().copied().find(|e| {
-                            e.entity == prev
-                                && snap.can_target(&tower, e)
-                                && c.distance(e.pos) <= eff_range
-                        })
-                    })
-                } else {
-                    None
-                };
-                if let Some(t) = held.or_else(|| snap.target(&tower)) {
-                    tower.angle = (t.pos - c).to_angle();
-                    // Focus beams are anti-boss weapons: dwelling on one target ramps
-                    // DPS exponentially. The 650-cost Prism starts higher, charges
-                    // faster, pierces wider, and caps far above the basic Laser.
-                    let dps = if let Some(profile) = focus {
-                        if tower.laser_target == Some(t.entity) {
-                            tower.laser_charge += dt;
-                        } else {
-                            tower.laser_target = Some(t.entity);
-                            tower.laser_charge = 0.0;
-                        }
-                        focus_beam_dps(tower.damage, tower.laser_charge, profile)
-                    } else {
-                        tower.damage
-                    };
-                    let charge_frac = focus
-                        .map(|profile| {
-                            (tower.laser_charge / profile.visual_full_charge).clamp(0.0, 1.0)
-                        })
-                        .unwrap_or(0.0);
-                    let base_width = if tower.kind == TowerKind::Prism {
-                        8.5
-                    } else {
-                        5.5
-                    };
-                    let width =
-                        base_width + charge_frac * focus.map_or(0.0, |profile| profile.width_bonus);
-                    let hit_radius = focus
-                        .map(|profile| {
-                            profile.hit_radius_base + charge_frac * profile.hit_radius_bonus
-                        })
-                        .unwrap_or(15.0);
-                    spawn_layered_beam(
-                        &mut commands,
-                        c,
-                        t.pos,
-                        tower
-                            .element
-                            .color()
-                            .mix(&tower.color, 0.22)
-                            .mix(&Color::WHITE, charge_frac * 0.5),
-                        width,
-                        0.075,
-                        11.5,
-                        false,
-                    );
-                    let dmg_amt = dps * dt; // continuous: dps * sec
-                    for e in &snap.enemies {
-                        if !snap.can_target(&tower, e) {
-                            continue;
-                        }
-                        if seg_dist(c, t.pos, e.pos) <= hit_radius {
-                            dmg.write(Damage {
-                                source_tower: Some(entity),
-                                target: e.entity,
-                                amount: dmg_amt,
-                                magic: true,
-                                element: tower.element,
-                                armor_pierce: tower.armor_pierce,
-                            });
-                        }
-                    }
-                } else {
-                    // Beam off — reset the focus ramp so it must build up again.
-                    tower.laser_target = None;
-                    tower.laser_charge = 0.0;
-                }
-                continue;
-            }
-
-            Behavior::Summon => {
-                if tower.cooldown_timer <= 0.0 {
-                    let count = snap.summon_counts.get(&entity).copied().unwrap_or(0);
-                    let enemy_in_range = snap.enemies.iter().any(|e| {
-                        snap.can_target(&tower, e)
-                            && c.distance(e.pos) <= effective_attack_range(&tower)
-                    });
-                    if enemy_in_range && (count as i32) < tower.max_summons {
-                        tower.cooldown_timer = tower.cooldown;
-                        // The minion tier and its damage scale with the tower level
-                        // (skeleton → charger → mimic-bruiser).
-                        let minion = summon_minion_kind(tower.level);
-                        let dmg_mult = 1.0 + 0.4 * (tower.level - 1).max(0) as f32;
-                        spawn_ally(
-                            &mut commands,
-                            &creatures,
-                            minion,
-                            c,
-                            tower.summon_hp,
-                            (tower.damage * dmg_mult).max(20.0),
-                            tower.summon_speed * TILE_SIZE / 60.0 * (1000.0 / 16.0),
-                            f32::INFINITY,
-                            TOWER_SUMMON_VISUAL_SCALE,
-                            entity,
-                        );
-                        vfx.write(crate::vfx::VfxEvent::ElementPulse {
-                            pos: c,
-                            color: tower.element.color(),
-                            strong: false,
-                        });
-                    }
-                }
-                continue;
-            }
+            // Detection is the only passive tower in the five-tower roster.
+            Behavior::Detect => continue,
             _ => {}
         }
 
@@ -1739,8 +1491,8 @@ pub fn update_towers(
         }
         tower.cooldown_timer = tower.cooldown;
 
-        // Attack flourish (skip non-attacking support behaviors).
-        if !matches!(tower.behavior, Behavior::Heal | Behavior::Detect) {
+        // Attack flourish (the passive detection tower returned above).
+        if tower.behavior != Behavior::Detect {
             let dir = Vec2::from_angle(tower.angle);
             if !is_close_combat_hero(&tower) {
                 let muzzle = c + dir * (TILE_SIZE * (0.34 + 0.22 * tower.footprint as f32));
@@ -1974,11 +1726,7 @@ pub fn update_towers(
                             c,
                             target.pos,
                             tower.element.color().mix(&tower.color, 0.35),
-                            if tower.kind == TowerKind::Fortress {
-                                7.5
-                            } else {
-                                5.5
-                            },
+                            5.5,
                             0.20,
                             9.5,
                             true,
@@ -2036,161 +1784,9 @@ pub fn update_towers(
                     }
                 }
             }
-            Behavior::Fire => {
-                // Characteristic: lay a roaring wall of flame across the path. It
-                // burns longer and reaches wider than a plain AoE, and its look is
-                // animated in `update_fire_grounds` (flicker, white-hot core, embers).
-                // Equipment can convert this tower, so the wall carries the element.
-                let life = (tower.fire_duration.max(2.0) * 1.6).max(3.0);
-                let angle = fire_wall_angle(target, &board, c);
-                let half_len = (tower.aoe_radius * 1.42).max(TILE_SIZE * 2.2);
-                let half_width = (TILE_SIZE * 0.62).max(24.0);
-                let elem = tower.element.color();
-                let axis = Vec2::from_angle(angle);
-                spawn_layered_beam(&mut commands, c, target.pos, elem, 8.0, 0.24, 9.5, true);
-                // Outer flame body (FireGround = hitbox + animated base).
-                commands.spawn((
-                    Sprite {
-                        color: elem.mix(&Color::WHITE, 0.12).with_alpha(0.46),
-                        custom_size: Some(Vec2::new(half_len * 2.0, half_width * 2.0)),
-                        ..default()
-                    },
-                    Transform::from_translation(target.pos.extend(3.5))
-                        .with_rotation(Quat::from_rotation_z(angle)),
-                    crate::components::FireGround {
-                        half_len,
-                        half_width,
-                        angle,
-                        dps: tower.dot_damage.max(8.0),
-                        element: tower.element,
-                        source_tower: Some(entity),
-                        life,
-                        max_life: life,
-                        ember_timer: 0.0,
-                    },
-                    LevelEntity,
-                ));
-                // White-hot inner core (visual only) — fades with the wall via its
-                // own short-lived FireGround sibling carrying no damage.
-                commands.spawn((
-                    Sprite {
-                        color: Color::srgb(1.0, 0.93, 0.66).with_alpha(0.5),
-                        custom_size: Some(Vec2::new(half_len * 1.7, half_width * 0.9)),
-                        ..default()
-                    },
-                    Transform::from_translation(target.pos.extend(3.62))
-                        .with_rotation(Quat::from_rotation_z(angle)),
-                    crate::components::FireGround {
-                        half_len,
-                        half_width: half_width * 0.45,
-                        angle,
-                        dps: 0.0,
-                        element: tower.element,
-                        source_tower: None,
-                        life: life * 0.85,
-                        max_life: life * 0.85,
-                        ember_timer: 0.5,
-                    },
-                    LevelEntity,
-                ));
-                // A row of flame bursts along the wall so it ignites as a line of
-                // fire rather than a single flat puff.
-                for k in [-0.66_f32, -0.22, 0.22, 0.66] {
-                    vfx.write(crate::vfx::VfxEvent::ElementPulse {
-                        pos: target.pos + axis * k * half_len,
-                        color: elem,
-                        strong: k.abs() < 0.4,
-                    });
-                }
-                for e in &snap.enemies {
-                    if point_in_fire_wall(e.pos, target.pos, angle, half_len, half_width) {
-                        dmg.write(Damage {
-                            source_tower: Some(entity),
-                            target: e.entity,
-                            amount: tower.damage,
-                            magic: true,
-                            element: tower.element,
-                            armor_pierce: tower.armor_pierce,
-                        });
-                        status.write(Status {
-                            source_tower: Some(entity),
-                            target: e.entity,
-                            kind: StatusKind::Fire {
-                                dmg: tower.dot_damage.max(8.0),
-                                duration: tower.fire_duration.max(1.0),
-                                element: tower.element,
-                            },
-                        });
-                    }
-                }
-            }
-            Behavior::Freeze => {
-                spawn_layered_beam(
-                    &mut commands,
-                    c,
-                    target.pos,
-                    tower.element.color().mix(&Color::WHITE, 0.24),
-                    6.0,
-                    0.18,
-                    9.5,
-                    true,
-                );
-                vfx.write(crate::vfx::VfxEvent::Explosion {
-                    pos: target.pos,
-                    radius: tower.aoe_radius,
-                    color: tower.element.color(),
-                });
-                for e in &snap.enemies {
-                    if e.pos.distance(target.pos) <= tower.aoe_radius {
-                        dmg.write(Damage {
-                            source_tower: Some(entity),
-                            target: e.entity,
-                            amount: tower.damage,
-                            magic: true,
-                            element: tower.element,
-                            armor_pierce: tower.armor_pierce,
-                        });
-                        status.write(Status {
-                            source_tower: Some(entity),
-                            target: e.entity,
-                            kind: StatusKind::Freeze {
-                                duration: tower.freeze_duration,
-                            },
-                        });
-                    }
-                }
-            }
             Behavior::Chain => {
                 chain_lightning(entity, &tower, target, &snap, &mut dmg, &mut commands)
             }
-            Behavior::Homing => spawn_projectile(
-                &mut commands,
-                c,
-                target.pos,
-                tower.kind,
-                Projectile {
-                    source_tower: Some(entity),
-                    target: target.entity,
-                    speed: proj_px_s(5.0),
-                    damage: tower.damage,
-                    magic: false,
-                    element: tower.element,
-                    armor_pierce: tower.armor_pierce,
-                    kind: ProjKind::Missile,
-                    aoe_radius: tower.aoe_radius,
-                    slow_duration: 0.0,
-                    freeze_duration: 0.0,
-                    dot_damage: 0.0,
-                    poison_duration: 0.0,
-                    armor_reduce: 0.0,
-                    curse_duration: 0.0,
-                    knock_dist: 0.0,
-                    stun_duration: 0.0,
-                },
-                tower.color,
-                &mut meshes,
-                &mut materials,
-            ),
             Behavior::Knockback => spawn_projectile(
                 &mut commands,
                 c,
@@ -2817,7 +2413,7 @@ pub fn update_projectiles(
             );
             commands.entity(entity).despawn();
         } else {
-            let step = delta / dist * p.speed * dt;
+            let step = delta / dist * (p.speed * dt).min(dist);
             let next = pos + step;
             if visual.trail_timer <= 0.0 {
                 spawn_projectile_trail(&mut commands, visual.tower_kind, &p, pos, next);
@@ -2941,6 +2537,17 @@ fn on_hit(
                         element: p.element,
                         armor_pierce: p.armor_pierce,
                     });
+                    if p.dot_damage > 0.0 {
+                        status.write(Status {
+                            source_tower: p.source_tower,
+                            target: e.entity,
+                            kind: StatusKind::Fire {
+                                dmg: p.dot_damage,
+                                duration: p.poison_duration,
+                                element: p.element,
+                            },
+                        });
+                    }
                 }
             }
         }
@@ -2996,6 +2603,15 @@ fn on_hit(
                     duration: p.curse_duration,
                 },
             });
+            if p.freeze_duration > 0.0 {
+                status.write(Status {
+                    source_tower: p.source_tower,
+                    target: p.target,
+                    kind: StatusKind::Freeze {
+                        duration: p.freeze_duration,
+                    },
+                });
+            }
         }
         ProjKind::Knockback => {
             dmg.write(Damage {
@@ -3266,7 +2882,7 @@ pub fn update_summons(
     for (entity, mut s, mut tf, sprite, mythic, fixed_home, current_action, action_queue) in
         &mut summons
     {
-        if s.lifetime.is_finite() {
+        if run.wave_in_progress && s.lifetime.is_finite() {
             s.lifetime -= dt;
         }
         if s.attack_timer > 0.0 {
@@ -3464,9 +3080,6 @@ fn summon_formation_offset(
         .map(|placement| placement.entity)
         .collect::<Vec<_>>();
     group.sort_unstable();
-    if group.len() <= 1 {
-        return Vec2::ZERO;
-    }
     let Some(index) = group
         .iter()
         .position(|candidate| *candidate == entity_index)
@@ -4486,74 +4099,6 @@ pub fn enemy_vs_tower(
     }
 }
 
-/// Necromancer towers raise enemies that die within range into allied units.
-pub fn necromancer_raise(
-    mut died: MessageReader<EnemyDied>,
-    mut commands: Commands,
-    creatures: Res<crate::creatures::Creatures>,
-    mut towers: Query<(Entity, &mut Tower, &Transform)>,
-    allies: Query<(), With<Summon>>,
-    mut vfx: MessageWriter<crate::vfx::VfxEvent>,
-) {
-    let mut ally_count = allies.iter().count();
-    const ALLY_CAP: usize = 24;
-    for ev in died.read() {
-        if ally_count >= ALLY_CAP {
-            break;
-        }
-        for (entity, mut t, _) in &mut towers {
-            if t.behavior != Behavior::Necromancer || t.cooldown_timer > 0.0 {
-                continue;
-            }
-            if t.center().distance(ev.pos) <= effective_attack_range(&t) {
-                t.cooldown_timer = t.cooldown;
-                let center = t.center();
-                spawn_layered_beam(
-                    &mut commands,
-                    center,
-                    ev.pos,
-                    t.element.color().mix(&Color::WHITE, 0.10),
-                    4.0,
-                    0.32,
-                    10.0,
-                    true,
-                );
-                vfx.write(crate::vfx::VfxEvent::ElementPulse {
-                    pos: ev.pos,
-                    color: t.element.color(),
-                    strong: false,
-                });
-                // Level unlocks "+1 revive": raise `level` undead per kill, each
-                // stronger at higher levels.
-                let raises = t.level.max(1);
-                let hp = (ev.max_hp * (0.4 + 0.12 * t.level as f32)).max(20.0);
-                let dmg = 16.0 + 10.0 * t.level as f32;
-                for i in 0..raises {
-                    if ally_count >= ALLY_CAP {
-                        break;
-                    }
-                    // Fan the revived units out a little so they don't stack.
-                    let spread = ((i as f32) - (raises as f32 - 1.0) / 2.0) * 16.0;
-                    spawn_ally(
-                        &mut commands,
-                        &creatures,
-                        ev.kind,
-                        ev.pos + Vec2::new(spread, 0.0),
-                        hp,
-                        dmg,
-                        90.0,
-                        14.0, // raised allies fade after 14s
-                        1.0,
-                        entity,
-                    );
-                    ally_count += 1;
-                }
-                break;
-            }
-        }
-    }
-}
-
 /// Burning ground patches: damage enemies standing in them, fade out, despawn.
 pub fn update_fire_grounds(
     time: Res<Time>,
@@ -4880,21 +4425,6 @@ pub fn apply_damage(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn prism_focus_beam_scales_like_a_final_tower() {
-        let laser = crate::tuning::default_focus_profile(TowerKind::Laser).unwrap();
-        let prism = crate::tuning::default_focus_profile(TowerKind::Prism).unwrap();
-
-        assert!(prism.base_dps_mult > laser.base_dps_mult);
-        assert!(prism.charge_rate > laser.charge_rate);
-        assert!(prism.dps_cap > laser.dps_cap);
-        assert!(prism.hit_radius_bonus > laser.hit_radius_bonus);
-
-        let basic_laser_dps = focus_beam_dps(25.0, 3.0, laser);
-        let final_prism_dps = focus_beam_dps(55.0, 3.0, prism);
-        assert!(final_prism_dps > basic_laser_dps * 3.0);
-    }
 
     #[test]
     fn arcane_resonance_extends_runtime_targeting_range() {
