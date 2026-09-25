@@ -1,0 +1,17 @@
+(
+    image: (
+        path: "cursors/carrot_cursor.webp",
+    ),
+    texture_atlas_layout: (
+        tile_size: (64, 64),
+        columns: 1,
+        rows: 1,
+        padding: None,
+        offset: None,
+    ),
+    hotspots: (
+        // Use the angled carrot tip as the click point.
+        default: (20, 20),
+        overrides: {},
+    ),
+)
