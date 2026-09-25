@@ -1238,6 +1238,9 @@ fn dict() -> &'static HashMap<&'static str, &'static str> {
             ("现实边缘", "Edge of Reality"),
             ("最后封印", "The Last Seal"),
             ("萝卜纪元", "The Carrot Epoch"),
+            // ---- 海克斯强化拾取反馈 augment pickup feedback ----
+            ("强化", "UP"),
+            ("{} · 海克斯强化", "{} · Hextech Augment"),
             // ---- 章节战场机制 episode mutators ----
             ("沙暴波", "Sandstorm Wave"),
             ("星陨", "Starfall"),

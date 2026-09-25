@@ -350,6 +350,7 @@ mod tests {
             dmg_lvl: 1,
             rng_lvl: 1,
             spd_lvl: 1,
+            ..Default::default()
         };
         let report = tower_global_attribute_report(&talents);
         assert!((report.total.damage_mult - 1.242).abs() < 0.001);

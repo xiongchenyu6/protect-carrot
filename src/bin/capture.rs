@@ -219,6 +219,7 @@ fn main() -> AppExit {
     .add_plugins(PaperdollPlugin)
     .add_plugins(hero_paperdoll::HeroPaperdollPlugin)
     .add_plugins(protect_carrot::polish::PolishPlugin)
+    .add_plugins(protect_carrot::augment_fx::AugmentFxPlugin)
     .add_plugins(SpritesheetAnimationPlugin)
     .add_systems(
         PostUpdate,
@@ -1263,6 +1264,7 @@ fn verify_roguelite_draft(
 }
 
 fn verify_roguelite_pick(
+    mut augment: MessageWriter<protect_carrot::augment_fx::AugmentPicked>,
     scenario: Res<CaptureScenario>,
     prepared: Res<CapturePrepared>,
     mut roguelite: ResMut<roguelite::RogueliteRun>,
@@ -1271,8 +1273,15 @@ fn verify_roguelite_pick(
     mut run: ResMut<RunState>,
     mut towers: Query<(Entity, &mut tower::Tower)>,
     mut done: Local<bool>,
+    mut wait: Local<u32>,
 ) {
     if *done || *scenario != CaptureScenario::RoguelitePick || !prepared.scenario_ready {
+        return;
+    }
+    // 截图在就绪后 SETTLE_FRAMES 帧拍摄；拾取推迟到临近截图，
+    // 让画面落在拾取反馈（横幅/闪光/涟漪）播放期间。
+    *wait += 1;
+    if *wait < SETTLE_FRAMES - 20 {
         return;
     }
     let before_damage = loadout.run_mods.damage_mult;
@@ -1284,11 +1293,17 @@ fn verify_roguelite_pick(
     let before_tower_damage = talents.rogue_damage_mult;
     let before_tower_range = talents.rogue_range_mult;
     let before_tower_cooldown = talents.rogue_firerate_mult;
+    let wave = roguelite.draft.as_ref().map_or(run.wave, |d| d.wave);
     let picked = roguelite.pick(0, &mut loadout, &mut talents, &mut run, &mut towers);
     let Some(picked) = picked else {
         eprintln!("[capture/roguelite] expected pick to succeed");
         process::exit(1);
     };
+    // 与游戏内 UI 拾取走同一条演出管线，截图即可看到拾取反馈。
+    augment.write(protect_carrot::augment_fx::AugmentPicked {
+        talent: picked,
+        wave,
+    });
     if roguelite.draft.is_some() || roguelite.picked.len() != 1 {
         eprintln!("[capture/roguelite] pick did not close draft or record selection");
         process::exit(1);

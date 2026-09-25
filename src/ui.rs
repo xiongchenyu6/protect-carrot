@@ -423,7 +423,7 @@ pub struct RogueliteChoiceDesc {
 }
 #[derive(Component)]
 pub struct RogueliteChoiceButton {
-    index: usize,
+    pub index: usize,
 }
 #[derive(Component)]
 pub struct BossBarRoot;
@@ -4591,6 +4591,7 @@ fn roguelite_pool_bg(choice: crate::roguelite::RogueliteTalent) -> Color {
         crate::roguelite::TalentPool::Race => Color::srgba(0.15, 0.28, 0.19, 0.96),
         crate::roguelite::TalentPool::Weapon => Color::srgba(0.17, 0.20, 0.32, 0.96),
         crate::roguelite::TalentPool::Common => Color::srgba(0.30, 0.22, 0.10, 0.96),
+        crate::roguelite::TalentPool::Tower => Color::srgba(0.30, 0.13, 0.12, 0.96),
     }
 }
 
@@ -8374,32 +8375,23 @@ pub fn roguelite_buttons(
     mut loadout: ResMut<HeroLoadout>,
     mut talents: ResMut<Talents>,
     mut towers: Query<(Entity, &mut crate::tower::Tower)>,
-    mut sfx: MessageWriter<crate::audio::SfxEvent>,
-    mut vfx: MessageWriter<crate::vfx::VfxEvent>,
+    mut augment: MessageWriter<crate::augment_fx::AugmentPicked>,
 ) {
     for event in actions.read() {
         let UiAction::PickRogueliteTalent(index) = event.action else {
             continue;
         };
+        let wave = roguelite.draft.as_ref().map_or(run.wave, |d| d.wave);
         let Some(picked) = roguelite.pick(index, &mut loadout, &mut talents, &mut run, &mut towers)
         else {
             run.show(crate::i18n::t("当前没有可选择的构筑天赋"));
             continue;
         };
-        let pos = towers
-            .iter_mut()
-            .find_map(|(_, tower)| tower.hero.then_some(tower.center()))
-            .unwrap_or(Vec2::ZERO);
-        vfx.write(crate::vfx::VfxEvent::Burst {
-            pos,
-            radius: 72.0,
-            color: Color::srgb(0.86, 0.95, 0.48),
+        // 音效/震屏/横幅/塔身涟漪全部由 augment_fx 统一演出。
+        augment.write(crate::augment_fx::AugmentPicked {
+            talent: picked,
+            wave,
         });
-        sfx.write(crate::audio::SfxEvent(crate::audio::Sound::Upgrade));
-        run.show_for(
-            crate::i18n::tf("获得构筑天赋：{}", &[&picked.name(&loadout)]),
-            2.4,
-        );
     }
 }
 

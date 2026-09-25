@@ -17,7 +17,7 @@ pub struct ScreenShake {
 }
 
 impl ScreenShake {
-    fn add(&mut self, amount: f32) {
+    pub fn add(&mut self, amount: f32) {
         self.trauma = (self.trauma + amount).clamp(0.0, 1.0);
     }
 }

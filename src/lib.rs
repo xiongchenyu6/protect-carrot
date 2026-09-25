@@ -6,6 +6,7 @@
 
 pub mod attributes;
 pub mod audio;
+pub mod augment_fx;
 pub mod bestiary;
 pub mod board;
 pub mod build;

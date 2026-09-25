@@ -749,6 +749,12 @@ fn roguelite_choice_score(choice: roguelite::RogueliteTalent, run: &RunState) ->
         }
         OrcBloodrage => 64,
         ElfMoonstep => 62,
+        // 塔系专精卡：贪心玩家的主力是箭/炮/法，冰和侦测只作补位。
+        ArrowVolley => 80,
+        CannonShockwave => 78,
+        ArcaneSurge => 78,
+        Frostbound => 70,
+        ScoutNetwork => 50,
     }
 }
 

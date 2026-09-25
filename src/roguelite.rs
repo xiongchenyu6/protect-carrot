@@ -1,6 +1,8 @@
 //! Per-run roguelite build layer: after each cleared wave the player chooses one
 //! of three talents drawn from race, current weapon, and common pools.
 
+use crate::audio::Sound;
+use crate::data::TowerKind;
 use crate::game::{Rng, RunState};
 use crate::hero::{HeroLoadout, HeroWeapon, Race};
 use crate::meta::Talents;
@@ -12,6 +14,7 @@ pub enum TalentPool {
     Race,
     Weapon,
     Common,
+    Tower,
 }
 
 impl TalentPool {
@@ -20,11 +23,12 @@ impl TalentPool {
             TalentPool::Race => "种族",
             TalentPool::Weapon => "武器",
             TalentPool::Common => "公共",
+            TalentPool::Tower => "防线",
         }
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RogueliteTalent {
     HumanFormation,
     HumanLogistics,
@@ -38,6 +42,11 @@ pub enum RogueliteTalent {
     TowerOverclock,
     GemResonance,
     CarrotDividend,
+    ArrowVolley,
+    CannonShockwave,
+    ArcaneSurge,
+    Frostbound,
+    ScoutNetwork,
 }
 
 impl RogueliteTalent {
@@ -55,6 +64,11 @@ impl RogueliteTalent {
             RogueliteTalent::TowerOverclock
             | RogueliteTalent::GemResonance
             | RogueliteTalent::CarrotDividend => TalentPool::Common,
+            RogueliteTalent::ArrowVolley
+            | RogueliteTalent::CannonShockwave
+            | RogueliteTalent::ArcaneSurge
+            | RogueliteTalent::Frostbound
+            | RogueliteTalent::ScoutNetwork => TalentPool::Tower,
         }
     }
 
@@ -78,6 +92,11 @@ impl RogueliteTalent {
             RogueliteTalent::TowerOverclock => "防线超频".to_string(),
             RogueliteTalent::GemResonance => "宝石共振".to_string(),
             RogueliteTalent::CarrotDividend => "萝卜分红".to_string(),
+            RogueliteTalent::ArrowVolley => "箭雨齐射".to_string(),
+            RogueliteTalent::CannonShockwave => "震地炮膛".to_string(),
+            RogueliteTalent::ArcaneSurge => "奥术过载".to_string(),
+            RogueliteTalent::Frostbound => "永冻之痕".to_string(),
+            RogueliteTalent::ScoutNetwork => "哨戒网络".to_string(),
         }
     }
 
@@ -100,6 +119,10 @@ impl RogueliteTalent {
             TalentPool::Common => crate::i18n::tf(
                 "{}池 · 全局构筑",
                 &[&crate::i18n::t(TalentPool::Common.label())],
+            ),
+            TalentPool::Tower => crate::i18n::tf(
+                "{}池 · 塔系专精",
+                &[&crate::i18n::t(TalentPool::Tower.label())],
             ),
         }
     }
@@ -145,6 +168,68 @@ impl RogueliteTalent {
                 "立即获得 {} 金；保留给下一波部署窗口",
                 &[&(70 + wave * 6).to_string()],
             ),
+            RogueliteTalent::ArrowVolley => {
+                crate::i18n::t("箭塔伤害 +25%、射程 +12%；现有箭塔立刻齐射")
+            }
+            RogueliteTalent::CannonShockwave => {
+                crate::i18n::t("炮塔爆炸范围 +25%、攻速 +10%；现有炮塔震地蓄能")
+            }
+            RogueliteTalent::ArcaneSurge => {
+                crate::i18n::t("魔法塔伤害 +25%、攻速 +10%；奥术回路立即过载")
+            }
+            RogueliteTalent::Frostbound => {
+                crate::i18n::t("冰塔伤害 +20%、减速持续 +40%；冻结力场即时扩散")
+            }
+            RogueliteTalent::ScoutNetwork => {
+                crate::i18n::t("侦测塔射程 +25%；全场侦测网络即时上线")
+            }
+        }
+    }
+
+    /// Color and one-shot sound used for both the selected card and every tower
+    /// it changed. This makes the result readable before the next enemy arrives.
+    pub fn feedback(self) -> (Color, Sound) {
+        match self {
+            RogueliteTalent::ArrowVolley => (Color::srgb(1.0, 0.36, 0.20), Sound::Combo),
+            RogueliteTalent::CannonShockwave => (Color::srgb(1.0, 0.58, 0.16), Sound::Explosion),
+            RogueliteTalent::ArcaneSurge => (Color::srgb(0.72, 0.42, 1.0), Sound::Laser),
+            RogueliteTalent::Frostbound => (Color::srgb(0.34, 0.84, 1.0), Sound::Freeze),
+            RogueliteTalent::ScoutNetwork => (Color::srgb(0.58, 0.70, 1.0), Sound::Chain),
+            RogueliteTalent::HumanLogistics | RogueliteTalent::CarrotDividend => {
+                (Color::srgb(1.0, 0.80, 0.25), Sound::Gold)
+            }
+            RogueliteTalent::WeaponMastery
+            | RogueliteTalent::WeaponTempo
+            | RogueliteTalent::WeaponSignature => (Color::srgb(0.96, 0.42, 0.62), Sound::Combo),
+            RogueliteTalent::ElfMoonstep | RogueliteTalent::ElfForestSight => {
+                (Color::srgb(0.42, 0.92, 0.72), Sound::Summon)
+            }
+            RogueliteTalent::OrcBloodrage | RogueliteTalent::OrcWarDrum => {
+                (Color::srgb(1.0, 0.27, 0.20), Sound::Boss)
+            }
+            _ => (Color::srgb(0.86, 0.95, 0.48), Sound::Upgrade),
+        }
+    }
+
+    /// Returns whether a deployed tower should visibly acknowledge this card.
+    pub fn affects_tower(self, tower: &Tower) -> bool {
+        if tower.hero {
+            return matches!(self.pool(), TalentPool::Race | TalentPool::Weapon);
+        }
+        match self {
+            RogueliteTalent::ArrowVolley => tower.kind == TowerKind::Arrow,
+            RogueliteTalent::CannonShockwave => tower.kind == TowerKind::Cannon,
+            RogueliteTalent::ArcaneSurge => tower.kind == TowerKind::Magic,
+            RogueliteTalent::Frostbound => tower.kind == TowerKind::Ice,
+            RogueliteTalent::ScoutNetwork => tower.kind == TowerKind::Detection,
+            // 与 apply() 保持一致：只有真正改了塔数值的卡才让塔应答，
+            // 纯英雄卡/纯金币卡不点亮塔，免得玩家误以为塔也被强化了。
+            RogueliteTalent::HumanFormation
+            | RogueliteTalent::HumanLogistics
+            | RogueliteTalent::ElfForestSight
+            | RogueliteTalent::TowerOverclock
+            | RogueliteTalent::GemResonance => true,
+            _ => false,
         }
     }
 
@@ -206,6 +291,30 @@ impl RogueliteTalent {
             }
             RogueliteTalent::CarrotDividend => {
                 run.gold += 70 + wave * 6;
+            }
+            RogueliteTalent::ArrowVolley => {
+                talents.rogue_arrow_damage_mult *= 1.25;
+                talents.rogue_arrow_range_mult *= 1.12;
+                apply_tower_kind_mods(towers, TowerKind::Arrow, 1.25, 1.12, 1.0, 1.0, 1.0);
+            }
+            RogueliteTalent::CannonShockwave => {
+                talents.rogue_cannon_radius_mult *= 1.25;
+                talents.rogue_cannon_firerate_mult *= 0.90;
+                apply_tower_kind_mods(towers, TowerKind::Cannon, 1.0, 1.0, 0.90, 1.25, 1.0);
+            }
+            RogueliteTalent::ArcaneSurge => {
+                talents.rogue_magic_damage_mult *= 1.25;
+                talents.rogue_magic_firerate_mult *= 0.90;
+                apply_tower_kind_mods(towers, TowerKind::Magic, 1.25, 1.0, 0.90, 1.0, 1.0);
+            }
+            RogueliteTalent::Frostbound => {
+                talents.rogue_ice_damage_mult *= 1.20;
+                talents.rogue_ice_slow_mult *= 1.40;
+                apply_tower_kind_mods(towers, TowerKind::Ice, 1.20, 1.0, 1.0, 1.0, 1.40);
+            }
+            RogueliteTalent::ScoutNetwork => {
+                talents.rogue_detection_range_mult *= 1.25;
+                apply_tower_kind_mods(towers, TowerKind::Detection, 1.0, 1.25, 1.0, 1.0, 1.0);
             }
         }
         reapply_hero_towers(loadout, towers);
@@ -388,5 +497,119 @@ fn reapply_hero_towers(loadout: &HeroLoadout, towers: &mut Query<(Entity, &mut T
         if tower.hero {
             crate::hero::apply_loadout_to_tower(loadout, &mut tower);
         }
+    }
+}
+
+/// 塔系专精卡：只作用于指定族系的已部署塔；之后新建的同族塔由
+/// [`apply_tower_special_mods`] 按 `Talents` 里累计的乘区补上。
+fn apply_tower_kind_mods(
+    towers: &mut Query<(Entity, &mut Tower)>,
+    kind: TowerKind,
+    damage: f32,
+    range: f32,
+    cooldown: f32,
+    radius: f32,
+    slow: f32,
+) {
+    for (_, mut tower) in towers.iter_mut() {
+        if !tower.hero && tower.kind == kind {
+            scale_tower(&mut tower, damage, range, cooldown, radius, slow);
+        }
+    }
+}
+
+/// 新建塔继承本局已拿到的塔系专精加成（在 `spawn_tower` 里调用）。
+pub fn apply_tower_special_mods(tower: &mut Tower, talents: &Talents) {
+    if tower.hero {
+        return;
+    }
+    let (damage, range, cooldown, radius, slow) = match tower.kind {
+        TowerKind::Arrow => (
+            talents.rogue_arrow_damage_mult,
+            talents.rogue_arrow_range_mult,
+            1.0,
+            1.0,
+            1.0,
+        ),
+        TowerKind::Cannon => (
+            1.0,
+            1.0,
+            talents.rogue_cannon_firerate_mult,
+            talents.rogue_cannon_radius_mult,
+            1.0,
+        ),
+        TowerKind::Magic => (
+            talents.rogue_magic_damage_mult,
+            1.0,
+            talents.rogue_magic_firerate_mult,
+            1.0,
+            1.0,
+        ),
+        TowerKind::Ice => (
+            talents.rogue_ice_damage_mult,
+            1.0,
+            1.0,
+            1.0,
+            talents.rogue_ice_slow_mult,
+        ),
+        TowerKind::Detection => (1.0, talents.rogue_detection_range_mult, 1.0, 1.0, 1.0),
+        _ => return,
+    };
+    scale_tower(tower, damage, range, cooldown, radius, slow);
+}
+
+fn scale_tower(tower: &mut Tower, damage: f32, range: f32, cooldown: f32, radius: f32, slow: f32) {
+    tower.base_damage = (tower.base_damage * damage).floor().max(1.0);
+    tower.damage = tower.base_damage;
+    tower.range = (tower.range * range).floor().max(1.0);
+    tower.cooldown = (tower.cooldown * cooldown).max(0.03);
+    tower.aoe_radius *= radius;
+    tower.slow_duration *= slow;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tower(kind: TowerKind) -> Tower {
+        Tower::from_def(kind.def(), 0, 0)
+    }
+
+    #[test]
+    fn new_tower_inherits_its_family_card_bonus() {
+        let talents = Talents {
+            rogue_arrow_damage_mult: 1.25,
+            rogue_arrow_range_mult: 1.12,
+            ..Default::default()
+        };
+        let base = tower(TowerKind::Arrow);
+        let mut boosted = tower(TowerKind::Arrow);
+        apply_tower_special_mods(&mut boosted, &talents);
+        assert!(boosted.base_damage > base.base_damage);
+        assert!(boosted.range > base.range);
+    }
+
+    #[test]
+    fn family_card_bonus_does_not_leak_to_other_towers() {
+        let talents = Talents {
+            rogue_arrow_damage_mult: 1.25,
+            ..Default::default()
+        };
+        let base = tower(TowerKind::Cannon);
+        let mut cannon = tower(TowerKind::Cannon);
+        apply_tower_special_mods(&mut cannon, &talents);
+        assert_eq!(cannon.base_damage, base.base_damage);
+    }
+
+    #[test]
+    fn hero_only_card_does_not_light_up_towers() {
+        assert!(!RogueliteTalent::OrcBloodrage.affects_tower(&tower(TowerKind::Arrow)));
+        assert!(RogueliteTalent::TowerOverclock.affects_tower(&tower(TowerKind::Arrow)));
+    }
+
+    #[test]
+    fn family_card_feedback_targets_only_its_family() {
+        assert!(RogueliteTalent::ArrowVolley.affects_tower(&tower(TowerKind::Arrow)));
+        assert!(!RogueliteTalent::ArrowVolley.affects_tower(&tower(TowerKind::Cannon)));
     }
 }

@@ -434,6 +434,7 @@ pub fn spawn_tower(
     tower.damage = tower.base_damage;
     tower.range *= talents.range_mult * talents.rogue_range_mult;
     tower.cooldown *= talents.firerate_mult * talents.rogue_firerate_mult;
+    crate::roguelite::apply_tower_special_mods(&mut tower, talents);
     let visual_size = tower_visual_size(&tower);
     let tower_entity = commands
         .spawn((
