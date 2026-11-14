@@ -324,12 +324,25 @@ siege/silence systems, sprite coverage, and StoryOS/Comfy prompt coverage.
 
 ---
 
+## PixelFX animations
+
+`PixelFxPlugin` plays the imported PixelFX atlas library and maps all 27 class
+skill releases to effects. `PixelFxRequest::new("ice/frost-nova", position)` can
+play another catalog entry through Bevy messages. Requests support rotation,
+scale, a bounded duration and an optional entity to follow. Animation respects
+pause and game speed. Combat clips preload before the loading overlay closes.
+
+The pinned source revision and MIT notices ship in `assets/pixelfx/`. To rebuild
+the transparent lossless WebP atlases, check out the revision in `catalog.json`
+from <https://github.com/patch-gg/pixelfx> and run
+`node tools/import_pixelfx.mjs /path/to/pixelfx` inside the Nix shell.
+
 ## Project layout
 
 ```
 保卫萝卜.html        # original single-file browser game (unchanged)
 Cargo.toml          # Bevy 0.19 + webgpu feature + pinned wasm-bindgen
-flake.nix           # dev shell: Rust, wasm-bindgen-cli, trunk, lld, Bevy native libs
+flake.nix           # dev shell: Rust, wasm-bindgen-cli, lld, Bevy native libs
 build-web.sh        # wasm build + bindgen -> web/
 web/index.html      # loads the wasm module (WebGPU)
 src/                # the Bevy game (see table above)

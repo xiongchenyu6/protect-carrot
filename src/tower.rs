@@ -80,6 +80,9 @@ impl TargetPriority {
 /// can mutate them per-instance. Durations are stored in **seconds**.
 #[derive(Component)]
 pub struct Tower {
+    /// Hero control durations in game seconds. Immunity prevents chain stuns.
+    pub hero_stun: f32,
+    pub hero_stun_immunity: f32,
     pub kind: TowerKind,
     /// Top-left (min) cell of the tower's footprint.
     pub col: i32,
@@ -164,6 +167,8 @@ pub struct Tower {
 impl Tower {
     pub fn from_def(def: &TowerDef, col: i32, row: i32) -> Self {
         Tower {
+            hero_stun: 0.0,
+            hero_stun_immunity: 0.0,
             kind: def.kind,
             detector: def.behavior == Behavior::Detect,
             col,
@@ -287,6 +292,9 @@ pub enum ProjKind {
 /// A flying projectile homing on a target entity.
 #[derive(Component)]
 pub struct Projectile {
+    /// Carries presentation identity across flight; unrelated casts must not
+    /// relabel a projectile that was already in the air.
+    pub ultimate: bool,
     pub source_tower: Option<Entity>,
     pub target: Entity,
     pub speed: f32, // px/sec
@@ -359,6 +367,7 @@ pub struct FixedSummonHome {
 
 #[derive(Message)]
 pub struct Damage {
+    pub ultimate: bool,
     pub source_tower: Option<Entity>,
     pub target: Entity,
     pub amount: f32,
@@ -716,6 +725,23 @@ fn attack_muzzle_color(tower: &Tower) -> Color {
 #[derive(Component)]
 pub struct AttackActionTimer {
     remaining: f32,
+    duration: f32,
+    phase: AttackMotionPhase,
+}
+
+impl AttackActionTimer {
+    pub(crate) fn presentation_extension(&self) -> f32 {
+        use crate::hero_passives::CastPhase;
+        let phase = match self.phase {
+            AttackMotionPhase::Windup => CastPhase::Windup,
+            AttackMotionPhase::Strike => CastPhase::Release,
+            AttackMotionPhase::Recovery => CastPhase::Recovery,
+        };
+        crate::combat_feel::cast_extension(
+            phase,
+            1.0 - self.remaining / self.duration.max(f32::EPSILON),
+        )
+    }
 }
 
 pub fn tick_attack_actions(
@@ -779,6 +805,8 @@ impl Action for TimedAttackAction {
         }
         world.entity_mut(agent).insert(AttackActionTimer {
             remaining: self.duration,
+            duration: self.duration,
+            phase: self.phase,
         });
         self.is_finished(agent, world)
     }
@@ -860,6 +888,12 @@ struct QueuedHeroSplash {
 
 impl QueuedHeroSingleImpact {
     fn apply(&self, world: &mut World) {
+        if world
+            .get::<Tower>(self.source_tower)
+            .is_none_or(|hero| hero.hp <= 0.0 || hero.hero_stun > 0.0)
+        {
+            return;
+        }
         let Some(target_pos) = current_enemy_pos(world, self.target, self.target_pos) else {
             return;
         };
@@ -890,6 +924,7 @@ impl QueuedHeroSingleImpact {
             });
         }
         world.write_message(Damage {
+            ultimate: false,
             source_tower: Some(self.source_tower),
             target: self.target,
             amount: self.amount,
@@ -915,6 +950,7 @@ impl QueuedHeroSingleImpact {
                     continue;
                 }
                 world.write_message(Damage {
+                    ultimate: false,
                     source_tower: Some(self.source_tower),
                     target: *target,
                     amount: splash.amount,
@@ -949,6 +985,12 @@ struct QueuedHeroAreaImpact {
 
 impl QueuedHeroAreaImpact {
     fn apply(&self, world: &mut World) {
+        if world
+            .get::<Tower>(self.source_tower)
+            .is_none_or(|hero| hero.hp <= 0.0 || hero.hero_stun > 0.0)
+        {
+            return;
+        }
         world.write_message(crate::vfx::VfxEvent::MeleeCleave {
             pos: self.target_pos,
             radius: self.radius,
@@ -959,6 +1001,7 @@ impl QueuedHeroAreaImpact {
                 continue;
             }
             world.write_message(Damage {
+                ultimate: false,
                 source_tower: Some(self.source_tower),
                 target: *target,
                 amount: self.amount,
@@ -996,6 +1039,7 @@ impl QueuedSummonImpact {
             .unwrap_or(target_pos);
         let dir = (target_pos - origin).normalize_or_zero();
         world.write_message(Damage {
+            ultimate: false,
             source_tower: Some(self.source_tower),
             target: self.target,
             amount: self.amount,
@@ -1055,22 +1099,36 @@ fn queue_attack_sequence(
     target_pos: Vec2,
     impact: QueuedImpact,
 ) {
+    use crate::hero::HeroWeapon;
+    let rhythm = match &impact {
+        QueuedImpact::HeroSingle(hit) => crate::combat_feel::melee_rhythm(match hit.vfx {
+            HeroMeleeVfx::Hammer { .. } => HeroWeapon::ForgeHammer,
+            HeroMeleeVfx::Slash { poison: true, .. } => HeroWeapon::NightDagger,
+            HeroMeleeVfx::Slash { poison: false, .. } => HeroWeapon::BannerSword,
+        }),
+        QueuedImpact::HeroArea(_) => crate::combat_feel::melee_rhythm(HeroWeapon::BannerSword),
+        QueuedImpact::Summon(_) => crate::combat_feel::CastRhythm {
+            windup: 0.08,
+            release: 0.10,
+            recovery: 0.16,
+        },
+    };
     commands.actions(agent).add((
         FaceTargetAction { target_pos },
         TimedAttackAction {
             target_pos,
-            duration: 0.08,
+            duration: rhythm.windup,
             phase: AttackMotionPhase::Windup,
         },
         TimedAttackAction {
             target_pos,
-            duration: 0.10,
+            duration: rhythm.release,
             phase: AttackMotionPhase::Strike,
         },
         ImpactAction { impact },
         TimedAttackAction {
             target_pos,
-            duration: 0.16,
+            duration: rhythm.recovery,
             phase: AttackMotionPhase::Recovery,
         },
     ));
@@ -1457,6 +1515,9 @@ pub fn update_towers(
     let dt = time.delta_secs() * run.game_speed;
 
     for (entity, mut tower, _, current_action, action_queue, cast) in &mut towers {
+        if tower.hero && tower.hero_stun > 0.0 {
+            continue;
+        }
         if tower.cooldown_timer > 0.0 {
             // Forge Hammer/Sentry Crossbow doctrine haste speeds the cooldown tick (= faster attacks).
             let set_bonus = equipment_set_bonus(&tower.equipment);
@@ -1697,6 +1758,7 @@ pub fn update_towers(
                         target.pos,
                         TowerKind::Magic,
                         Projectile {
+                            ultimate: false,
                             source_tower: Some(entity),
                             target: target.entity,
                             speed: proj_px_s(7.2),
@@ -1752,6 +1814,7 @@ pub fn update_towers(
                         }
                         if e.pos.distance(target.pos) <= tower.aoe_radius {
                             dmg.write(Damage {
+                                ultimate: false,
                                 source_tower: Some(entity),
                                 target: e.entity,
                                 amount: tower.damage,
@@ -1793,6 +1856,7 @@ pub fn update_towers(
                 target.pos,
                 tower.kind,
                 Projectile {
+                    ultimate: false,
                     source_tower: Some(entity),
                     target: target.entity,
                     speed: proj_px_s(10.0),
@@ -1821,6 +1885,7 @@ pub fn update_towers(
                 target.pos,
                 tower.kind,
                 Projectile {
+                    ultimate: false,
                     source_tower: Some(entity),
                     target: target.entity,
                     speed: proj_px_s(7.0),
@@ -1849,6 +1914,7 @@ pub fn update_towers(
                 target.pos,
                 tower.kind,
                 Projectile {
+                    ultimate: false,
                     source_tower: Some(entity),
                     target: target.entity,
                     speed: proj_px_s(8.0),
@@ -1877,6 +1943,7 @@ pub fn update_towers(
                 target.pos,
                 tower.kind,
                 Projectile {
+                    ultimate: false,
                     source_tower: Some(entity),
                     target: target.entity,
                     speed: proj_px_s(8.0),
@@ -1906,6 +1973,7 @@ pub fn update_towers(
                 target.pos,
                 tower.kind,
                 Projectile {
+                    ultimate: false,
                     source_tower: Some(entity),
                     target: target.entity,
                     speed: proj_px_s(9.0),
@@ -1957,6 +2025,7 @@ fn chain_lightning(
     );
 
     dmg.write(Damage {
+        ultimate: false,
         source_tower: Some(source_tower),
         target: first.entity,
         amount: tower.damage,
@@ -1990,6 +2059,7 @@ fn chain_lightning(
             10.5,
         );
         dmg.write(Damage {
+            ultimate: false,
             source_tower: Some(source_tower),
             target: n.entity,
             amount: tower.damage * 0.7,
@@ -2109,6 +2179,7 @@ fn hero_ranger_shot(
         let falloff = if main { 1.0 } else { 0.64 - i as f32 * 0.04 };
         let hunt = ranger_hunt_multiplier(e.hp, e.max_hp);
         dmg.write(Damage {
+            ultimate: false,
             source_tower: Some(source_tower),
             target: e.entity,
             amount: tower.damage * falloff.max(0.48) * hunt,
@@ -2188,6 +2259,7 @@ fn hero_sentry_shot(
     for (_, e) in hits.into_iter().take(5) {
         let main = e.entity == target.entity;
         dmg.write(Damage {
+            ultimate: false,
             source_tower: Some(source_tower),
             target: e.entity,
             amount: if main {
@@ -2236,6 +2308,7 @@ fn hero_summon_staff_shot(
             strong: main,
         });
         dmg.write(Damage {
+            ultimate: false,
             source_tower: Some(source_tower),
             target: e.entity,
             amount: if main {
@@ -2304,6 +2377,7 @@ fn hero_hammer_shot(
         };
         spawn_lightning_arc(commands, from, e.pos, color, 3.2, 0.13, 10.7);
         dmg.write(Damage {
+            ultimate: false,
             source_tower: Some(source_tower),
             target: e.entity,
             amount: if i == 0 {
@@ -2481,6 +2555,7 @@ fn on_hit(
                 }
                 if e.pos.distance(impact) <= p.aoe_radius {
                     dmg.write(Damage {
+                        ultimate: p.ultimate,
                         source_tower: p.source_tower,
                         target: e.entity,
                         amount: p.damage,
@@ -2530,6 +2605,7 @@ fn on_hit(
             for e in &snap.enemies {
                 if e.pos.distance(pos) <= p.aoe_radius {
                     dmg.write(Damage {
+                        ultimate: p.ultimate,
                         source_tower: p.source_tower,
                         target: e.entity,
                         amount: p.damage,
@@ -2553,6 +2629,7 @@ fn on_hit(
         }
         ProjKind::Slow => {
             dmg.write(Damage {
+                ultimate: p.ultimate,
                 source_tower: p.source_tower,
                 target: p.target,
                 amount: p.damage,
@@ -2570,6 +2647,7 @@ fn on_hit(
         }
         ProjKind::Poison => {
             dmg.write(Damage {
+                ultimate: p.ultimate,
                 source_tower: p.source_tower,
                 target: p.target,
                 amount: p.damage,
@@ -2588,6 +2666,7 @@ fn on_hit(
         }
         ProjKind::Curse => {
             dmg.write(Damage {
+                ultimate: p.ultimate,
                 source_tower: p.source_tower,
                 target: p.target,
                 amount: p.damage,
@@ -2615,6 +2694,7 @@ fn on_hit(
         }
         ProjKind::Knockback => {
             dmg.write(Damage {
+                ultimate: p.ultimate,
                 source_tower: p.source_tower,
                 target: p.target,
                 amount: p.damage,
@@ -2634,6 +2714,7 @@ fn on_hit(
         ProjKind::Normal => {
             let _ = target_pos;
             dmg.write(Damage {
+                ultimate: p.ultimate,
                 source_tower: p.source_tower,
                 target: p.target,
                 amount: p.damage,
@@ -3094,17 +3175,37 @@ fn summon_formation_offset(
 
 /// Enemies fight back: an enemy adjacent to an allied unit stops advancing and
 /// deals melee damage to it (this is the "monsters attack each other" part).
+/// A dodgeable control strike: positive windup, then cooldown before another cast.
+#[derive(Component, Default)]
+pub struct ConcussionStrike {
+    pub windup: f32,
+    pub cooldown: f32,
+}
+
 pub fn enemy_vs_ally(
     time: Res<Time>,
     run: Res<RunState>,
     board: Res<Board>,
     mut commands: Commands,
-    mut enemies: Query<(&mut Enemy, &Transform)>,
+    mut enemies: Query<(
+        Entity,
+        &mut Enemy,
+        &Transform,
+        Option<&mut ConcussionStrike>,
+    )>,
     mut summons: Query<(Entity, &mut Summon, &Transform)>,
     mut heroes: Query<(Entity, &mut Tower)>,
     mut vfx: MessageWriter<crate::vfx::VfxEvent>,
+    mut sfx: MessageWriter<crate::audio::SfxEvent>,
 ) {
+    if !run.wave_in_progress {
+        return;
+    }
     let dt = time.delta_secs() * run.game_speed;
+    for (_, mut tower) in &mut heroes {
+        tower.hero_stun = (tower.hero_stun - dt).max(0.0);
+        tower.hero_stun_immunity = (tower.hero_stun_immunity - dt).max(0.0);
+    }
     let engage = TILE_SIZE * 0.7;
     let allies: Vec<(Entity, Vec2)> = summons
         .iter()
@@ -3121,8 +3222,12 @@ pub fn enemy_vs_ally(
 
     let mut hits: Vec<(Entity, f32)> = Vec::new();
     let mut hero_dmg = 0.0;
-    for (mut enemy, etf) in &mut enemies {
+    let mut stun_hero = false;
+    for (enemy_entity, mut enemy, etf, strike) in &mut enemies {
         enemy.blocked = false;
+        if enemy.hp <= 0.0 || enemy.frozen || enemy.stun_timer > 0.0 {
+            continue;
+        }
         // Stealthed enemies should not be body-blocked by the hero or summons.
         // Otherwise an undetected invisible unit can be pinned outside detector
         // coverage forever: towers cannot target it, but it also cannot advance.
@@ -3130,6 +3235,45 @@ pub fn enemy_vs_ally(
             continue;
         }
         let pos = etf.translation.truncate();
+        if enemy.elite_affix == crate::monster::EliteAffix::Concussion {
+            if let Some(mut strike) = strike {
+                strike.cooldown = (strike.cooldown - dt).max(0.0);
+                if strike.windup > 0.0 {
+                    strike.windup -= dt;
+                    enemy.blocked = true;
+                    if strike.windup <= 0.0 {
+                        strike.cooldown = 6.0;
+                        let radius = TILE_SIZE * 1.3;
+                        stun_hero |= hero.is_some_and(|(_, hpos, _)| pos.distance(hpos) <= radius);
+                        vfx.write(crate::vfx::VfxEvent::Explosion {
+                            pos,
+                            radius,
+                            color: Color::srgb(1.0, 0.65, 0.18),
+                        });
+                    }
+                } else if strike.cooldown <= 0.0
+                    && hero.is_some_and(|(_, hpos, _)| pos.distance(hpos) <= TILE_SIZE * 1.3)
+                {
+                    strike.windup = 0.65;
+                    vfx.write(crate::vfx::VfxEvent::Text {
+                        pos: pos + Vec2::Y * 32.0,
+                        text: crate::i18n::t("震击蓄力"),
+                        color: Color::srgb(1.0, 0.65, 0.18),
+                        size: 16.0,
+                        life: 0.65,
+                    });
+                    vfx.write(crate::vfx::VfxEvent::ElementPulse {
+                        pos,
+                        color: Color::srgb(1.0, 0.65, 0.18),
+                        strong: true,
+                    });
+                }
+            } else {
+                commands
+                    .entity(enemy_entity)
+                    .insert(ConcussionStrike::default());
+            }
+        }
         let mut best: Option<(Entity, Vec2)> = None;
         let mut bd = engage;
         for (ae, apos) in &allies {
@@ -3176,6 +3320,28 @@ pub fn enemy_vs_ally(
         if let Ok((_, mut s, _)) = summons.get_mut(ae) {
             s.hp -= d;
         }
+    }
+    if stun_hero
+        && let Some((he, hpos, _)) = hero
+        && let Ok((_, mut t)) = heroes.get_mut(he)
+        && t.hp > 0.0
+        && t.hero_stun_immunity <= 0.0
+    {
+        t.hero_stun = 1.2;
+        t.hero_stun_immunity = 4.8;
+        t.hero_attack_timer = 0.0;
+        commands.actions(he).clear();
+        commands
+            .entity(he)
+            .remove::<crate::hero_passives::HeroCast>();
+        sfx.write(crate::audio::SfxEvent(crate::audio::Sound::Freeze));
+        vfx.write(crate::vfx::VfxEvent::Text {
+            pos: hpos + Vec2::Y * 36.0,
+            text: crate::i18n::t("眩晕 1.2s"),
+            color: Color::srgb(1.0, 0.82, 0.22),
+            size: 20.0,
+            life: 1.2,
+        });
     }
     if hero_dmg > 0.0 {
         if let Some((he, hpos, _)) = hero {
@@ -4266,13 +4432,27 @@ fn freeze_control_durations(boss: bool, duration: f32) -> (f32, f32) {
 
 pub fn apply_status(
     mut events: MessageReader<Status>,
-    mut enemies: Query<(&mut Enemy, &mut Transform)>,
+    mut enemies: Query<(
+        &mut Enemy,
+        &mut Transform,
+        Option<&mut crate::boss_reinforcements::BossSummoner>,
+    )>,
     board: Res<Board>,
 ) {
     for s in events.read() {
-        let Ok((mut e, mut tf)) = enemies.get_mut(s.target) else {
+        let Ok((mut e, mut tf, summoner)) = enemies.get_mut(s.target) else {
             continue;
         };
+        // Boss hard control still becomes slow, but it interrupts a summon.
+        let interrupts = matches!(s.kind, StatusKind::Freeze { duration } if duration > 0.0)
+            || matches!(s.kind, StatusKind::Knockback { stun, .. } if stun > 0.0);
+        if e.boss
+            && interrupts
+            && let Some(mut summoner) = summoner
+            && summoner.windup.take().is_some()
+        {
+            summoner.cooldown = 3.0;
+        }
         match s.kind {
             StatusKind::Slow { duration } => {
                 let duration = if e.boss { duration * 0.55 } else { duration };
@@ -4352,6 +4532,9 @@ pub fn apply_damage(
         let Ok((mut e, tf)) = enemies.get_mut(d.target) else {
             continue;
         };
+        if e.hp <= 0.0 || d.amount <= 0.0 {
+            continue;
+        }
         let mut actual = if !d.magic {
             let armor = (e.armor - e.armor_reduce - d.armor_pierce).max(0.0);
             d.amount * (100.0 / (100.0 + armor))
@@ -4386,8 +4569,40 @@ pub fn apply_damage(
         // Juice: pop + spark + damage number for meaningful hits (skip tiny DoT ticks).
         if dealt >= 1.0 {
             let pos = tf.translation.truncate();
-            e.hit_flash = 0.12;
-            let matchup = if element_resist <= -0.15 {
+            let (hero, heavy, ratio, origin) = d
+                .source_tower
+                .and_then(|source| towers.get(source).ok())
+                .map(|tower| {
+                    (
+                        tower.hero,
+                        matches!(
+                            tower.hero_weapon,
+                            Some(
+                                crate::hero::HeroWeapon::BannerSword
+                                    | crate::hero::HeroWeapon::OathShield
+                                    | crate::hero::HeroWeapon::ForgeHammer
+                            )
+                        ),
+                        d.amount / tower.damage.max(1.0),
+                        tower.center(),
+                    )
+                })
+                .unwrap_or((false, false, 1.0, pos - Vec2::X));
+            let tier = crate::combat_feel::impact_tier(
+                hero,
+                heavy,
+                ratio,
+                element_resist <= -0.15,
+                hp_before > 0.0 && e.hp <= 0.0 && e.boss,
+            );
+            let tier = if d.ultimate {
+                tier.max(crate::combat_feel::ImpactTier::Ultimate)
+            } else {
+                tier
+            };
+            let matchup = if tier == crate::combat_feel::ImpactTier::Finisher {
+                Some(("终结", Color::srgb(1.0, 0.84, 0.25)))
+            } else if element_resist <= -0.15 {
                 Some(("易伤", Color::srgb(1.0, 0.78, 0.24)))
             } else if element_resist >= 0.20 {
                 Some(("抗性", Color::srgb(0.62, 0.72, 0.82)))
@@ -4401,21 +4616,23 @@ pub fn apply_damage(
                     color,
                     label: crate::i18n::t(label),
                 });
-                vfx.write(crate::vfx::VfxEvent::ElementPulse {
-                    pos,
-                    color: if element_resist <= -0.15 {
-                        d.element.color()
-                    } else {
-                        Color::srgb(0.48, 0.58, 0.70)
-                    },
-                    strong: element_resist <= -0.15,
-                });
             } else {
                 vfx.write(crate::vfx::VfxEvent::Number { pos, amount: dealt });
             }
-            vfx.write(crate::vfx::VfxEvent::Hit {
+            vfx.write(crate::vfx::VfxEvent::Impact {
+                source: d.source_tower,
+                target: d.target,
                 pos,
-                color: d.element.color(),
+                direction: (pos - origin).normalize_or(Vec2::X),
+                tier,
+                hero,
+                color: if tier == crate::combat_feel::ImpactTier::Finisher {
+                    Color::srgb(1.0, 0.84, 0.25)
+                } else if element_resist >= 0.20 {
+                    Color::srgb(0.48, 0.58, 0.70)
+                } else {
+                    d.element.color()
+                },
                 element: d.element,
             });
         }
@@ -4425,6 +4642,28 @@ pub fn apply_damage(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ordinary_melee_pose_has_preparation_strike_and_return() {
+        let windup = AttackActionTimer {
+            remaining: 0.0,
+            duration: 0.14,
+            phase: AttackMotionPhase::Windup,
+        };
+        let strike = AttackActionTimer {
+            remaining: 0.045,
+            duration: 0.09,
+            phase: AttackMotionPhase::Strike,
+        };
+        let recovery = AttackActionTimer {
+            remaining: 0.0,
+            duration: 0.22,
+            phase: AttackMotionPhase::Recovery,
+        };
+        assert!(windup.presentation_extension() < -0.3);
+        assert!(strike.presentation_extension() > 0.8);
+        assert_eq!(recovery.presentation_extension(), 0.0);
+    }
 
     #[test]
     fn arcane_resonance_extends_runtime_targeting_range() {

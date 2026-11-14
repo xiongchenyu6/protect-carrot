@@ -118,16 +118,18 @@ pub enum EliteAffix {
     Brood,
     Bloodrite,
     Siege,
+    Concussion,
 }
 
 impl EliteAffix {
-    pub const ALL: [EliteAffix; 6] = [
+    pub const ALL: [EliteAffix; 7] = [
         EliteAffix::Frenzy,
         EliteAffix::Carapace,
         EliteAffix::YellowSign,
         EliteAffix::Brood,
         EliteAffix::Bloodrite,
         EliteAffix::Siege,
+        EliteAffix::Concussion,
     ];
 
     pub fn name(self) -> &'static str {
@@ -139,6 +141,7 @@ impl EliteAffix {
             EliteAffix::Brood => "孵化",
             EliteAffix::Bloodrite => "血祭",
             EliteAffix::Siege => "攻城",
+            EliteAffix::Concussion => "震击",
         }
     }
 
@@ -151,6 +154,7 @@ impl EliteAffix {
             EliteAffix::Brood => "死亡时孵化更多幼体",
             EliteAffix::Bloodrite => "缓慢回血并治疗附近眷族",
             EliteAffix::Siege => "离路攻击防御塔",
+            EliteAffix::Concussion => "近身蓄力震击，眩晕英雄；离开范围可躲避",
         }
     }
 
@@ -162,6 +166,7 @@ impl EliteAffix {
             EliteAffix::YellowSign => wave >= 8 && level_index >= 5,
             EliteAffix::Bloodrite => wave >= 8 && level_index >= 6,
             EliteAffix::Siege => wave >= 9 && level_index >= 7,
+            EliteAffix::Concussion => wave >= 5,
         }
     }
 }

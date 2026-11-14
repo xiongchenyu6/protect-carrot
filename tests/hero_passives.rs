@@ -192,6 +192,185 @@ fn step(app: &mut App, seconds: f32) {
     app.world_mut().run_schedule(Last);
 }
 
+fn tick_boss_reinforcements(app: &mut App, seconds: f32) {
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(Duration::from_secs_f32(seconds));
+    app.world_mut()
+        .run_system_once(protect_carrot::boss_reinforcements::update)
+        .unwrap();
+}
+
+#[test]
+fn every_boss_summons_real_enemies_after_warning_with_escalating_pressure() {
+    use protect_carrot::boss_reinforcements::{BossReinforcement, BossSummoner};
+    for species in protect_carrot::monster::MONSTER_SPECIES
+        .iter()
+        .filter(|species| species.is_boss())
+    {
+        for (wave, enraged, expected) in [(5, false, 3), (30, false, 6), (30, true, 8)] {
+            let (mut app, _) = setup(HeroWeapon::ShadowBow);
+            app.world_mut().resource_mut::<RunState>().wave = wave;
+            let mut boss = enemy(2000.0, 2);
+            boss.species_id = species.id;
+            boss.boss = true;
+            boss.enraged = enraged;
+            let owner = app
+                .world_mut()
+                .spawn((
+                    boss,
+                    Transform::from_xyz(90.0, 0.0, 0.0),
+                    BossSummoner {
+                        cooldown: 0.0,
+                        windup: None,
+                    },
+                ))
+                .id();
+            tick_boss_reinforcements(&mut app, 0.1);
+            assert_eq!(
+                count::<BossReinforcement>(&mut app),
+                0,
+                "warning must precede summons"
+            );
+            assert!(
+                app.world()
+                    .get::<BossSummoner>(owner)
+                    .unwrap()
+                    .windup
+                    .is_some()
+            );
+            tick_boss_reinforcements(&mut app, 1.1);
+            assert_eq!(count::<BossReinforcement>(&mut app), expected);
+            let mut query = app.world_mut().query::<(&Enemy, &BossReinforcement)>();
+            for (add, marker) in query.iter(app.world()) {
+                assert_eq!(marker.0, owner);
+                assert!(!add.boss && add.hp > 0.0 && add.melee > 0.0);
+                assert_eq!(add.path_index, 2);
+            }
+        }
+    }
+}
+
+#[test]
+fn boss_summons_respect_cap_pause_control_and_owner_death() {
+    use protect_carrot::boss_reinforcements::{BossReinforcement, BossSummoner};
+    let (mut app, _) = setup(HeroWeapon::ShadowBow);
+    let mut boss = enemy(2000.0, 0);
+    boss.boss = true;
+    let owner = app
+        .world_mut()
+        .spawn((
+            boss,
+            Transform::default(),
+            BossSummoner {
+                cooldown: 0.0,
+                windup: None,
+            },
+        ))
+        .id();
+    tick_boss_reinforcements(&mut app, 0.1);
+    app.world_mut().resource_mut::<Paused>().0 = true;
+    tick_boss_reinforcements(&mut app, 10.0);
+    assert_eq!(count::<BossReinforcement>(&mut app), 0);
+    app.world_mut().resource_mut::<Paused>().0 = false;
+    app.world_mut().write_message(Status {
+        source_tower: None,
+        target: owner,
+        kind: StatusKind::Freeze { duration: 1.0 },
+    });
+    app.world_mut()
+        .run_system_once(tower::apply_status)
+        .unwrap();
+    tick_boss_reinforcements(&mut app, 1.1);
+    assert!(
+        app.world()
+            .get::<BossSummoner>(owner)
+            .unwrap()
+            .windup
+            .is_none()
+    );
+    assert!(
+        !app.world().get::<Enemy>(owner).unwrap().frozen,
+        "boss control remains a slow"
+    );
+    for _ in 0..10 {
+        tick_boss_reinforcements(&mut app, 13.0);
+        tick_boss_reinforcements(&mut app, 1.1);
+    }
+    assert_eq!(count::<BossReinforcement>(&mut app), 12);
+    app.world_mut().get_mut::<Enemy>(owner).unwrap().hp = 0.0;
+    app.world_mut()
+        .get_mut::<BossSummoner>(owner)
+        .unwrap()
+        .windup = Some(0.1);
+    tick_boss_reinforcements(&mut app, 1.1);
+    assert_eq!(count::<BossReinforcement>(&mut app), 12);
+}
+
+#[test]
+fn concussion_strike_is_dodgeable_and_stops_hero_actions() {
+    for dodge in [false, true] {
+        let (mut app, owner) = setup(HeroWeapon::ShadowBow);
+        let mut foe = enemy(2000.0, 0);
+        foe.elite_affix = EliteAffix::Concussion;
+        app.world_mut().spawn((
+            foe,
+            Transform::from_xyz(20.0, 0.0, 0.0),
+            tower::ConcussionStrike {
+                windup: 0.1,
+                cooldown: 0.0,
+            },
+        ));
+        if dodge {
+            app.world_mut().get_mut::<Tower>(owner).unwrap().hero_pos = Vec2::new(300.0, 0.0);
+        } else {
+            start_cast(&mut app, owner, 0);
+        }
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(Duration::from_secs_f32(0.2));
+        app.world_mut()
+            .run_system_once(tower::enemy_vs_ally)
+            .unwrap();
+        assert_eq!(
+            app.world().get::<Tower>(owner).unwrap().hero_stun > 0.0,
+            !dodge
+        );
+        if !dodge {
+            let start = app.world().get::<Tower>(owner).unwrap().hero_pos;
+            app.world_mut().get_mut::<Tower>(owner).unwrap().move_target =
+                Some(Vec2::new(400.0, 0.0));
+            app.world_mut().run_system_once(build::hero_move).unwrap();
+            assert_eq!(app.world().get::<Tower>(owner).unwrap().hero_pos, start);
+            step(&mut app, 0.1);
+            assert!(app.world().get::<HeroCast>(owner).is_none());
+            app.world_mut()
+                .run_system_once(tower::update_towers)
+                .unwrap();
+            assert_eq!(count::<Projectile>(&mut app), 0);
+            // A second ready strike cannot extend the stun during immunity.
+            let remaining = app.world().get::<Tower>(owner).unwrap().hero_stun;
+            let mut strikes = app.world_mut().query::<&mut tower::ConcussionStrike>();
+            for mut strike in strikes.iter_mut(app.world_mut()) {
+                strike.windup = 0.01;
+            }
+            app.world_mut()
+                .run_system_once(tower::enemy_vs_ally)
+                .unwrap();
+            assert!(app.world().get::<Tower>(owner).unwrap().hero_stun < remaining);
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(Duration::from_secs_f32(1.3));
+            app.world_mut()
+                .run_system_once(tower::enemy_vs_ally)
+                .unwrap();
+            assert_eq!(app.world().get::<Tower>(owner).unwrap().hero_stun, 0.0);
+            app.world_mut().run_system_once(build::hero_move).unwrap();
+            assert_ne!(app.world().get::<Tower>(owner).unwrap().hero_pos, start);
+        }
+    }
+}
+
 fn drain<M: Message>(app: &mut App) -> Vec<M> {
     app.world_mut()
         .resource_mut::<Messages<M>>()
@@ -1451,6 +1630,319 @@ fn fallback_hero_recovers_animated_body_when_atlas_becomes_available() {
             .texture_atlas
             .is_some()
     );
+}
+
+#[test]
+fn hero_movement_stops_while_paused_and_clamps_mouse_destination() {
+    let (mut app, owner) = setup(HeroWeapon::ShadowBow);
+    let start = app.world().get::<Tower>(owner).unwrap().hero_pos;
+    app.world_mut().get_mut::<Tower>(owner).unwrap().move_target = Some(Vec2::splat(100_000.0));
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(Duration::from_secs(100));
+    app.world_mut().resource_mut::<Paused>().0 = true;
+    app.world_mut().run_system_once(build::hero_move).unwrap();
+    assert_eq!(app.world().get::<Tower>(owner).unwrap().hero_pos, start);
+    assert!(
+        app.world()
+            .get::<Tower>(owner)
+            .unwrap()
+            .move_target
+            .is_some()
+    );
+    app.world_mut().resource_mut::<Paused>().0 = false;
+    app.world_mut().run_system_once(build::hero_move).unwrap();
+    let hero = app.world().get::<Tower>(owner).unwrap();
+    assert_eq!(
+        hero.hero_pos,
+        Vec2::new(
+            protect_carrot::data::BOARD_W * 0.48,
+            protect_carrot::data::BOARD_H * 0.48
+        )
+    );
+    assert!(hero.move_target.is_none());
+}
+
+#[test]
+fn movement_trail_matches_rendered_hero_frame_size_and_facing() {
+    let (mut app, owner) = setup(HeroWeapon::ShadowBow);
+    let image = app
+        .world_mut()
+        .resource_mut::<Assets<Image>>()
+        .add(Image::default());
+    app.world_mut().entity_mut(owner).insert((
+        Sprite {
+            image: image.clone(),
+            custom_size: Some(Vec2::splat(62.0)),
+            texture_atlas: Some(TextureAtlas {
+                layout: default(),
+                index: 7,
+            }),
+            ..default()
+        },
+        Transform::from_xyz(20.0, 0.0, 5.0).with_scale(Vec3::new(-1.0, 1.0, 1.0)),
+    ));
+    app.world_mut().get_mut::<Tower>(owner).unwrap().hero_pos = Vec2::new(20.0, 0.0);
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(Duration::from_millis(100));
+    app.world_mut()
+        .run_system_once(build::hero_afterimage)
+        .unwrap();
+    let world = app.world_mut();
+    let mut query =
+        world.query_filtered::<(&Sprite, &Transform), With<protect_carrot::components::Particle>>();
+    let trails = query.iter(world).collect::<Vec<_>>();
+    assert_eq!(trails.len(), 1);
+    let (sprite, transform) = trails[0];
+    assert_eq!(sprite.image, image);
+    assert_eq!(sprite.texture_atlas.as_ref().unwrap().index, 7);
+    assert_eq!(sprite.custom_size, Some(Vec2::splat(62.0)));
+    assert_eq!(transform.scale.x, -1.0);
+}
+
+#[test]
+fn walking_pose_wins_over_auto_attack_and_stun_freezes_playback() {
+    use bevy_spritesheet_animation::prelude::SpritesheetAnimation;
+    let (mut app, owner) = setup(HeroWeapon::ShadowBow);
+    app.world_mut().entity_mut(owner).insert((
+        build::HeroWalkAnim {
+            idle: default(),
+            walk: default(),
+            attack: default(),
+            frames: 16,
+            state: build::HeroAnimState::Idle,
+        },
+        SpritesheetAnimation::new(default()),
+    ));
+    {
+        let mut hero = app.world_mut().get_mut::<Tower>(owner).unwrap();
+        hero.hero_pos = Vec2::new(0.1, 0.0);
+        hero.hero_attack_timer = 0.2;
+    }
+    app.world_mut()
+        .run_system_once(build::animate_hero_walk)
+        .unwrap();
+    assert!(
+        app.world().get::<build::HeroWalkAnim>(owner).unwrap().state == build::HeroAnimState::Walk
+    );
+    app.world_mut().get_mut::<Tower>(owner).unwrap().hero_stun = 1.0;
+    app.world_mut()
+        .run_system_once(build::animate_hero_walk)
+        .unwrap();
+    assert!(
+        !app.world()
+            .get::<SpritesheetAnimation>(owner)
+            .unwrap()
+            .playing
+    );
+}
+
+#[test]
+fn changing_gear_does_not_heal_low_health_or_revive_dead_hero() {
+    let mut loadout = HeroLoadout::default();
+    loadout.gear = [None; HeroGearSlot::COUNT];
+    let mut hero = hero::make_hero_tower(&loadout, Vec2::ZERO);
+    hero.hp = hero.max_hp * 0.01;
+    hero.cooldown_timer = 0.4;
+    let mut equipped = HeroLoadout::default();
+    equipped.gear = [None; HeroGearSlot::COUNT];
+    equipped.gear[HeroGearSlot::Armor.idx()] = Some(HeroGear::VowPlate);
+    hero::apply_loadout_to_tower(&equipped, &mut hero);
+    assert!((hero.hp / hero.max_hp - 0.01).abs() < 0.0001);
+    assert_eq!(hero.cooldown_timer, 0.4);
+    hero.hp = 0.0;
+    hero::apply_loadout_to_tower(&loadout, &mut hero);
+    assert_eq!(hero.hp, 0.0);
+}
+
+#[test]
+fn impact_feedback_requires_real_damage_and_never_replays_on_corpses() {
+    use protect_carrot::combat_feel::ImpactTier;
+    let (mut app, owner) = setup(HeroWeapon::ForgeHammer);
+    let target = spawn_enemy(&mut app, Vec2::new(40.0, 0.0), 1000.0, 0);
+    let damage = app.world().get::<Tower>(owner).unwrap().damage;
+    app.world_mut().write_message(Damage {
+        ultimate: false,
+        source_tower: Some(owner),
+        target,
+        amount: damage,
+        magic: false,
+        element: Element::Physical,
+        armor_pierce: 0.0,
+    });
+    app.world_mut()
+        .run_system_once(tower::apply_damage)
+        .unwrap();
+    let effects = drain::<vfx::VfxEvent>(&mut app);
+    assert!(effects.iter().any(|effect| matches!(effect,
+        vfx::VfxEvent::Impact { source: Some(source), target: victim, tier: ImpactTier::Heavy, hero: true, .. }
+        if *source == owner && *victim == target)));
+    app.world_mut().resource_mut::<Messages<Damage>>().clear();
+    app.world_mut().get_mut::<Enemy>(target).unwrap().hp = 0.0;
+    app.world_mut().get_mut::<Enemy>(target).unwrap().shield = 100.0;
+    app.world_mut().write_message(Damage {
+        ultimate: false,
+        source_tower: Some(owner),
+        target,
+        amount: damage,
+        magic: false,
+        element: Element::Physical,
+        armor_pierce: 0.0,
+    });
+    app.world_mut()
+        .run_system_once(tower::apply_damage)
+        .unwrap();
+    assert!(
+        !drain::<vfx::VfxEvent>(&mut app)
+            .iter()
+            .any(|effect| matches!(effect, vfx::VfxEvent::Impact { .. }))
+    );
+    assert_eq!(app.world().get::<Enemy>(target).unwrap().shield, 100.0);
+}
+
+#[test]
+fn release_must_reach_contact_before_damage_and_can_only_hit_once() {
+    let (mut app, owner) = setup(HeroWeapon::BannerSword);
+    spawn_enemy(&mut app, Vec2::new(30.0, 0.0), 1000.0, 0);
+    app.world_mut().entity_mut(owner).insert(HeroCast {
+        weapon: HeroWeapon::BannerSword,
+        gear: [None; HeroGearSlot::COUNT],
+        slot: 1,
+        phase: CastPhase::Release,
+        remaining: 1.0,
+        duration: 1.0,
+        released: false,
+    });
+    step(&mut app, 0.20);
+    assert_no_gameplay_effect(&mut app);
+    step(&mut app, 0.20);
+    assert_eq!(drain::<HeroSkillCastEvent>(&mut app).len(), 1);
+    assert!(!drain::<Damage>(&mut app).is_empty());
+    step(&mut app, 0.20);
+    assert!(drain::<HeroSkillCastEvent>(&mut app).is_empty());
+    assert!(drain::<Damage>(&mut app).is_empty());
+}
+
+#[test]
+fn ultimate_contact_keeps_its_origin_after_the_cast_has_ended() {
+    let (mut app, owner) = setup(HeroWeapon::BannerSword);
+    let target = spawn_enemy(&mut app, Vec2::new(30.0, 0.0), 1000.0, 0);
+    let damage = app.world().get::<Tower>(owner).unwrap().damage;
+    app.world_mut().entity_mut(owner).insert(HeroCast {
+        weapon: HeroWeapon::BannerSword,
+        gear: [None; HeroGearSlot::COUNT],
+        slot: 2,
+        phase: CastPhase::Release,
+        remaining: 0.05,
+        duration: 0.1,
+        released: true,
+    });
+    app.world_mut().entity_mut(owner).remove::<HeroCast>();
+    app.world_mut().write_message(Damage {
+        ultimate: true,
+        source_tower: Some(owner),
+        target,
+        amount: damage,
+        magic: false,
+        element: Element::Physical,
+        armor_pierce: 0.0,
+    });
+    app.world_mut()
+        .run_system_once(tower::apply_damage)
+        .unwrap();
+    assert!(app.world().get::<Enemy>(target).unwrap().hp > 0.0);
+    assert!(
+        drain::<vfx::VfxEvent>(&mut app)
+            .iter()
+            .any(|event| matches!(
+                event,
+                vfx::VfxEvent::Impact {
+                    tier: protect_carrot::combat_feel::ImpactTier::Ultimate,
+                    ..
+                }
+            ))
+    );
+    app.world_mut().resource_mut::<Messages<Damage>>().clear();
+    app.world_mut().entity_mut(owner).insert(HeroCast {
+        weapon: HeroWeapon::BannerSword,
+        gear: [None; HeroGearSlot::COUNT],
+        slot: 2,
+        phase: CastPhase::Release,
+        remaining: 0.05,
+        duration: 0.1,
+        released: true,
+    });
+    app.world_mut().write_message(Damage {
+        ultimate: false,
+        source_tower: Some(owner),
+        target,
+        amount: damage,
+        magic: false,
+        element: Element::Physical,
+        armor_pierce: 0.0,
+    });
+    app.world_mut()
+        .run_system_once(tower::apply_damage)
+        .unwrap();
+    assert!(
+        !drain::<vfx::VfxEvent>(&mut app)
+            .iter()
+            .any(|event| matches!(
+                event,
+                vfx::VfxEvent::Impact {
+                    tier: protect_carrot::combat_feel::ImpactTier::Ultimate,
+                    ..
+                }
+            ))
+    );
+}
+
+#[test]
+fn arrow_storm_projectiles_keep_ultimate_identity_after_cast_and_weapon_change() {
+    let (mut app, owner) = setup_skill(HeroWeapon::ShadowBow, 2);
+    spawn_enemy(&mut app, Vec2::new(100.0, 0.0), 1000.0, 0);
+    cast(&mut app, owner, 2);
+    step(&mut app, 0.1);
+    assert!(count::<Projectile>(&mut app) > 0);
+    app.world_mut().entity_mut(owner).remove::<HeroCast>();
+    app.world_mut().resource_mut::<HeroLoadout>().weapon = HeroWeapon::ForgeHammer;
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(Duration::from_secs_f32(1.0));
+    app.world_mut()
+        .run_system_once(tower::build_snapshot)
+        .unwrap();
+    app.world_mut()
+        .run_system_once(tower::update_projectiles)
+        .unwrap();
+    app.world_mut()
+        .run_system_once(tower::update_projectiles)
+        .unwrap();
+    let hits = drain::<Damage>(&mut app);
+    assert!(!hits.is_empty());
+    assert!(
+        hits.iter()
+            .all(|hit| hit.ultimate && hit.source_tower == Some(owner))
+    );
+}
+
+#[test]
+fn release_feedback_records_actual_aim_instead_of_idle_facing() {
+    let (mut app, owner) = setup_skill(HeroWeapon::SentryCrossbow, 1);
+    spawn_enemy(&mut app, Vec2::new(0.0, 100.0), 1000.0, 0);
+    app.world_mut().get_mut::<Tower>(owner).unwrap().angle = 0.0;
+    start_cast(&mut app, owner, 1);
+    for _ in 0..120 {
+        step(&mut app, 0.025);
+        let events = drain::<HeroSkillCastEvent>(&mut app);
+        if let Some(event) = events.first() {
+            assert_eq!(events.len(), 1);
+            assert!(event.direction.dot(Vec2::Y) > 0.99);
+            return;
+        }
+    }
+    panic!("ice lance never released");
 }
 
 #[test]

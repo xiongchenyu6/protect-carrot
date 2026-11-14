@@ -4669,6 +4669,7 @@ dependencies = [
  "js-sys",
  "moonshine-kind",
  "serde",
+ "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

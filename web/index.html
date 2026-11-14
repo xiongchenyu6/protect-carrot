@@ -81,6 +81,33 @@
     <div class="hint">请把手机旋转到<b>横屏</b>开始游戏 🥕</div>
     <div class="sub">Rotate your device to landscape</div>
   </div>
+  <script>
+    // Install before the wasm-bindgen module captures the AudioContext constructor.
+    // CPAL creates its stream during loading, before autoplay is permitted.
+    (() => {
+      const contexts = new Set();
+      for (const name of ['AudioContext', 'webkitAudioContext']) {
+        const NativeContext = window[name];
+        if (!NativeContext) continue;
+        window[name] = class extends NativeContext {
+          constructor(...args) {
+            super(...args);
+            contexts.add(this);
+          }
+        };
+      }
+      function unlockAudio() {
+        for (const context of contexts) {
+          if (context.state === 'closed') contexts.delete(context);
+          else if (context.state === 'suspended') context.resume().catch(() => {});
+        }
+      }
+      // Keep retrying on later gestures after tab/background interruptions.
+      for (const event of ['pointerdown', 'touchend', 'keydown']) {
+        window.addEventListener(event, unlockAudio, { capture: true, passive: true });
+      }
+    })();
+  </script>
   <script type="module">
     // WebGPU is required. If the browser lacks it, show the fallback message ON TOP
     // (z-index 40 > loader) and hide the loader, instead of fading into a blank canvas.

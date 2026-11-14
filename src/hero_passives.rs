@@ -4,7 +4,7 @@ use crate::components::Enemy;
 pub use crate::data::MAX_HERO_SUMMONS;
 use crate::game::{Paused, RunState};
 use crate::hero::{HeroLoadout, HeroWeapon};
-use crate::hero_skill_effects::{PassiveSource, skill_ready, trigger_weapon_skill};
+use crate::hero_skill_effects::{PassiveSource, aim_direction, skill_ready, trigger_weapon_skill};
 use crate::sprites::Sprites;
 use crate::tower::{BuffTower, Damage, Status, Summon, Tower};
 use bevy::prelude::*;
@@ -35,6 +35,7 @@ pub struct HeroSkillCastEvent {
     pub owner: Entity,
     pub weapon: HeroWeapon,
     pub slot: usize,
+    pub direction: Vec2,
 }
 
 struct CastAction {
@@ -104,13 +105,7 @@ pub fn displaces_hero(weapon: HeroWeapon, slot: usize) -> bool {
 fn queue_cast(commands: &mut Commands, owner: Entity, loadout: &HeroLoadout, slot: usize) {
     let weapon = loadout.weapon;
     let gear = loadout.gear;
-    let windup = if slot == 2 {
-        0.8
-    } else if matches!(weapon, HeroWeapon::SummonStaff | HeroWeapon::ForgeHammer) {
-        0.65
-    } else {
-        0.42
-    };
+    let rhythm = crate::combat_feel::cast_rhythm(weapon, slot);
     commands.entity(owner).insert(SequentialActions);
     commands.actions(owner).add((
         CastAction {
@@ -118,21 +113,21 @@ fn queue_cast(commands: &mut Commands, owner: Entity, loadout: &HeroLoadout, slo
             gear,
             slot,
             phase: CastPhase::Windup,
-            duration: windup,
+            duration: rhythm.windup,
         },
         CastAction {
             weapon,
             gear,
             slot,
             phase: CastPhase::Release,
-            duration: 0.32,
+            duration: rhythm.release,
         },
         CastAction {
             weapon,
             gear,
             slot,
             phase: CastPhase::Recovery,
-            duration: 0.3,
+            duration: rhythm.recovery,
         },
     ));
 }
@@ -191,6 +186,11 @@ pub fn update_hero_passives(
     let Some((owner, hero)) = towers.iter().find(|(_, t)| t.hero && t.hp > 0.0) else {
         return;
     };
+    if hero.hero_stun > 0.0 {
+        commands.actions(owner).clear();
+        commands.entity(owner).remove::<HeroCast>();
+        return;
+    }
     let source = PassiveSource {
         pos: hero.center(),
         damage: hero.damage,
@@ -207,6 +207,10 @@ pub fn update_hero_passives(
         if cast.phase != CastPhase::Release || cast.released {
             return;
         }
+        let progress = 1.0 - cast.remaining / cast.duration.max(f32::EPSILON);
+        if progress < crate::combat_feel::CONTACT_FRACTION {
+            return;
+        }
         if !skill_ready(
             cast.slot, owner, source, &loadout, &towers, &enemies, &summons, &run,
         ) {
@@ -220,6 +224,7 @@ pub fn update_hero_passives(
                 .filter(|s| s.owner == owner && s.hp > 0.0 && s.lifetime > 0.0)
                 .count(),
         );
+        let direction = aim_direction(source, &enemies);
         let triggered = trigger_weapon_skill(
             cast.slot,
             &mut commands,
@@ -246,6 +251,16 @@ pub fn update_hero_passives(
                 owner,
                 weapon: loadout.weapon,
                 slot: cast.slot,
+                direction: if matches!(
+                    loadout.weapon,
+                    HeroWeapon::BannerSword | HeroWeapon::OathShield
+                ) {
+                    towers
+                        .get(owner)
+                        .map_or(direction, |(_, tower)| Vec2::from_angle(tower.angle))
+                } else {
+                    direction
+                },
             });
             sfx.write(crate::audio::SfxEvent(match loadout.weapon {
                 HeroWeapon::BannerSword => crate::audio::Sound::Boss,

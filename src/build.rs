@@ -171,7 +171,20 @@ pub fn mouse_build(
     mut sfx: MessageWriter<crate::audio::SfxEvent>,
     mut vfx: MessageWriter<crate::vfx::VfxEvent>,
     ui_buttons: Query<(&Interaction, &UiAction)>,
+    ui_pointer: crate::ui::UiPointerBlocker,
 ) {
+    // UI actions and world selection see the same raw press. Hit-test visible
+    // geometry, not Interaction (which can still describe the previous frame).
+    if let (Ok(window), Ok((camera, _))) = (windows.single(), camera.single()) {
+        if window
+            .cursor_position()
+            .is_some_and(|screen| ui_pointer.contains(screen, window, camera))
+            && (buttons.just_pressed(MouseButton::Left) || buttons.just_pressed(MouseButton::Right))
+            && touches.iter_just_pressed().next().is_none()
+        {
+            return;
+        }
+    }
     if buttons.just_pressed(MouseButton::Right) {
         // Right-click cancels an in-progress build/drag. With nothing armed it is a
         // hero move command (handled in `hero_control`), so keep the selection.
@@ -245,6 +258,12 @@ pub fn mouse_build(
     }
 
     // --- Touch press on the open board (not a palette grab) ---
+    if let (Some(touch), Ok(window)) = (touches.iter_just_pressed().next(), windows.single()) {
+        if ui_pointer.contains(touch.position(), window, cam) {
+            sel.touch_from_ui = true;
+            return;
+        }
+    }
     if touches.iter_just_pressed().next().is_some() {
         sel.touch_from_ui = false;
     }
@@ -491,7 +510,6 @@ pub fn spawn_tower(
 /// frame 0 = idle portrait, frames 1.. = walk poses (Flux-Kontext generated, see
 /// `tools/comfy_kontext.py`). Plugged into Bevy's `TextureAtlas` like the creatures.
 const HERO_WORLD_SIZE: f32 = TILE_SIZE * 1.18;
-const HERO_GHOST_SIZE: f32 = TILE_SIZE * 1.04;
 
 pub struct HeroWalkCfg {
     pub image: Handle<Image>,
@@ -684,18 +702,20 @@ pub fn animate_hero_walk(
         if !t.hero {
             continue;
         }
-        animation.playing = !paused.0 && cast.is_none();
+        animation.playing = !paused.0 && t.hero_stun <= 0.0 && cast.is_none();
         animation.speed_factor = run.game_speed;
+        let pos = t.center();
+        let moving = pos.distance_squared(*last) > 0.0001;
+        *last = pos;
         if cast.is_some() {
             continue;
         }
-        let pos = t.center();
-        let moving = pos.distance(*last) > 0.4;
-        *last = pos;
-        let next = if t.hero_attack_timer > 0.0 {
-            HeroAnimState::Attack
-        } else if moving && a.frames > 1 {
+        // Travel takes precedence over an auto-attack timer: otherwise firing
+        // while moving holds an attack pose and the hero slides across the map.
+        let next = if moving && a.frames > 1 {
             HeroAnimState::Walk
+        } else if t.hero_attack_timer > 0.0 {
+            HeroAnimState::Attack
         } else {
             HeroAnimState::Idle
         };
@@ -825,14 +845,21 @@ pub fn spawn_hero(
 pub fn hero_move(
     time: Res<Time>,
     run: Res<RunState>,
+    paused: Res<crate::game::Paused>,
     loadout: Res<HeroLoadout>,
     joystick: Res<crate::ui::JoystickState>,
     mut q: Query<&mut Tower>,
 ) {
+    if paused.0 {
+        return;
+    }
     let dt = time.delta_secs() * run.game_speed;
     let speed = hero_move_speed(&loadout);
     for mut t in &mut q {
         if !t.hero {
+            continue;
+        }
+        if t.hero_stun > 0.0 {
             continue;
         }
         if joystick.dir.length_squared() > 0.0025 {
@@ -847,6 +874,11 @@ pub fn hero_move(
         let Some(target) = t.move_target else {
             continue;
         };
+        let target = target.clamp(
+            Vec2::new(-BOARD_W * 0.48, -BOARD_H * 0.48),
+            Vec2::new(BOARD_W * 0.48, BOARD_H * 0.48),
+        );
+        t.move_target = Some(target);
         let delta = target - t.hero_pos;
         let dist = delta.length();
         let step = speed * dt;
@@ -869,15 +901,12 @@ pub fn hero_afterimage(
     time: Res<Time>,
     run: Res<RunState>,
     loadout: Res<HeroLoadout>,
-    sprites: Res<Sprites>,
-    walks: Res<HeroWalks>,
-    paperdoll: Option<Res<crate::hero_paperdoll::HeroPaperdollRuntime>>,
-    heroes: Query<&Tower>,
+    heroes: Query<(&Tower, &Sprite, &Transform)>,
     mut commands: Commands,
     mut last: Local<Vec2>,
     mut acc: Local<f32>,
 ) {
-    let Some(t) = heroes.iter().find(|t| t.hero && t.hp > 0.0) else {
+    let Some((t, body, transform)) = heroes.iter().find(|(t, _, _)| t.hero && t.hp > 0.0) else {
         return;
     };
     let pos = t.center();
@@ -892,33 +921,9 @@ pub fn hero_afterimage(
         return;
     }
     *acc = 0.0;
-    // Match the hero's left/right facing so the ghost isn't mirrored wrong.
-    let flip = if t.angle.cos() < 0.0 { -1.0 } else { 1.0 };
-    let mut sprite = if let Some(image) = paperdoll.as_ref().and_then(|runtime| runtime.image()) {
-        Sprite {
-            image,
-            custom_size: Some(Vec2::splat(
-                crate::hero_paperdoll::HERO_PAPERDOLL_GHOST_SIZE,
-            )),
-            ..default()
-        }
-    } else if let Some(cfg) = hero_world_cfg(&walks, loadout.weapon, loadout.race) {
-        let mut sprite = Sprite::from_atlas_image(
-            cfg.image.clone(),
-            TextureAtlas {
-                layout: cfg.layout.clone(),
-                index: 0,
-            },
-        );
-        sprite.custom_size = Some(Vec2::splat(cfg.size * (HERO_GHOST_SIZE / HERO_WORLD_SIZE)));
-        sprite
-    } else {
-        Sprite {
-            image: sprites.heroes[&loadout.weapon].clone(),
-            custom_size: Some(Vec2::splat(HERO_GHOST_SIZE)),
-            ..default()
-        }
-    };
+    // Copy the rendered pose, atlas cell and facing. A separately composed
+    // portrait made the trail show a different outfit and a much larger body.
+    let mut sprite = body.clone();
     sprite.color = loadout
         .race
         .color()
@@ -926,7 +931,8 @@ pub fn hero_afterimage(
         .with_alpha(0.58);
     commands.spawn((
         sprite,
-        Transform::from_translation(pos.extend(4.6)).with_scale(Vec3::new(flip, 1.0, 1.0)),
+        Transform::from_translation(transform.translation.truncate().extend(4.6))
+            .with_scale(transform.scale),
         // life < max_life → starts at ~0.5 alpha, fades to 0 over `life` seconds.
         Particle {
             vel: Vec2::ZERO,
@@ -949,6 +955,7 @@ pub fn hero_control(
     mut sel: ResMut<Selection>,
     mut panels: ResMut<HudPanels>,
     mut heroes: Query<(Entity, &mut Tower)>,
+    ui_pointer: crate::ui::UiPointerBlocker,
 ) {
     if sel.build_kind.is_some() {
         return; // a tower is armed — that gesture is for building
@@ -959,11 +966,19 @@ pub fn hero_control(
     let Ok(win) = windows.single() else {
         return;
     };
-    // Mouse → world (desktop has no on-screen joystick, so clicks are never gated).
-    let raw = |screen: Vec2| -> Option<Vec2> { cam.viewport_to_world_2d(cam_tf, screen).ok() };
+    let raw = |screen: Vec2| -> Option<Vec2> {
+        if ui_pointer.contains(screen, win, cam) {
+            return None;
+        }
+        cam.viewport_to_world_2d(cam_tf, screen).ok()
+    };
     // Touch → world, ignoring taps in the floating-joystick movement zone.
+    let touch_from_ui = sel.touch_from_ui;
     let to_world_touch = |screen: Vec2| -> Option<Vec2> {
-        if crate::ui::in_joystick(screen, win) {
+        if crate::ui::in_joystick(screen, win)
+            || touch_from_ui
+            || ui_pointer.contains(screen, win, cam)
+        {
             return None;
         }
         cam.viewport_to_world_2d(cam_tf, screen).ok()
@@ -1156,13 +1171,24 @@ pub fn update_tower_upgrade_visuals(mut towers: Query<(&Tower, &mut Sprite), Wit
 /// for a full walk-cycle sprite sheet) instead of rotating.
 pub fn rotate_towers(
     time: Res<Time>,
-    mut towers: Query<(&mut Tower, &mut Transform)>,
+    run: Res<RunState>,
+    paused: Res<crate::game::Paused>,
+    mut towers: Query<(
+        &mut Tower,
+        &mut Transform,
+        Option<&crate::hero_passives::HeroCast>,
+        Option<&crate::tower::AttackActionTimer>,
+    )>,
     mut last_hero: Local<Vec2>,
     mut facing_smooth: Local<f32>,
     mut move_smooth: Local<f32>,
 ) {
-    let dt = time.delta_secs();
-    for (mut t, mut tf) in &mut towers {
+    let dt = if paused.0 {
+        0.0
+    } else {
+        time.delta_secs() * run.game_speed
+    };
+    for (mut t, mut tf, cast, motion) in &mut towers {
         tf.rotation = Quat::IDENTITY; // never spin
         if t.hero {
             let c = t.center();
@@ -1193,13 +1219,33 @@ pub fn rotate_towers(
             } else {
                 0.0
             };
-            tf.scale.x = facing_sign * (1.0 + attack_pop * 0.10);
-            tf.scale.y = 1.0 - attack_pop * 0.035;
+            let extension = cast
+                .map(|cast| {
+                    crate::combat_feel::cast_extension(
+                        cast.phase,
+                        1.0 - cast.remaining / cast.duration.max(f32::EPSILON),
+                    )
+                })
+                .or_else(|| motion.map(crate::tower::AttackActionTimer::presentation_extension));
+            let pop = extension.unwrap_or(attack_pop);
+            tf.scale.x = facing_sign * (1.0 + pop * 0.10);
+            tf.scale.y = 1.0 - pop * 0.06;
             // 战场英雄已恢复逐帧行走动画（heroes_world 帧图），步伐由帧图
             // 自带——不再叠加程序化 bob，避免双重起伏。
             let _ = moving;
             let bob = 0.0;
-            let attack_step = Vec2::from_angle(t.angle) * (attack_pop * 5.0);
+            let lunge = cast.map_or_else(
+                || {
+                    if motion.is_some() {
+                        t.hero_weapon
+                            .map_or(5.0, |weapon| crate::combat_feel::cast_lunge(weapon) * 0.7)
+                    } else {
+                        5.0
+                    }
+                },
+                |cast| crate::combat_feel::cast_lunge(cast.weapon),
+            );
+            let attack_step = Vec2::from_angle(t.angle) * (pop * lunge);
             t.recoil *= (1.0 - 16.0 * dt).clamp(0.0, 1.0);
             if t.recoil.length_squared() < 0.05 {
                 t.recoil = Vec2::ZERO;
@@ -1249,7 +1295,9 @@ pub fn tint_silenced_towers(
     mut towers: Query<(&Tower, &mut Sprite)>,
 ) {
     for (tower, mut sprite) in &mut towers {
-        sprite.color = if snap.tower_silenced(tower.center()) {
+        sprite.color = if tower.hero && tower.hero_stun > 0.0 {
+            Color::srgb(1.0, 0.72, 0.22)
+        } else if snap.tower_silenced(tower.center()) {
             Color::srgb(0.78, 0.48, 1.0)
         } else {
             Color::WHITE

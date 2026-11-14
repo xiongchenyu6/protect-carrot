@@ -14,9 +14,9 @@ pub fn pose_casts(
         };
         let progress = (1.0 - cast.remaining / cast.duration).clamp(0.0, 1.0);
         let fraction = match cast.phase {
-            CastPhase::Windup => progress * 0.4,
-            CastPhase::Release => 0.4 + progress * 0.6,
-            CastPhase::Recovery => 1.0 - progress,
+            CastPhase::Windup => 0.2 * progress * progress,
+            CastPhase::Release => 0.2 + 0.8 * (1.0 - (1.0 - progress).powi(3)),
+            CastPhase::Recovery => (1.0 - progress).powi(3),
         };
         atlas.index = (fraction * animation.frames.saturating_sub(1) as f32).round() as usize;
     }

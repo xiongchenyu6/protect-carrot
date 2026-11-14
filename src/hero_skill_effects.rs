@@ -61,6 +61,17 @@ fn targets(source: PassiveSource, enemies: &Query<(Entity, &Enemy, &Transform)>)
     targets
 }
 
+pub(crate) fn aim_direction(
+    source: PassiveSource,
+    enemies: &Query<(Entity, &Enemy, &Transform)>,
+) -> Vec2 {
+    targets(source, enemies)
+        .first()
+        .map_or(source.facing, |target| {
+            (target.pos - source.pos).normalize_or(source.facing)
+        })
+}
+
 pub(crate) fn skill_ready(
     slot: usize,
     hero_entity: Entity,
@@ -262,8 +273,10 @@ fn projectile(
     target: Target,
     amount: f32,
     element: Element,
+    ultimate: bool,
 ) -> crate::tower::Projectile {
     crate::tower::Projectile {
+        ultimate,
         source_tower: Some(owner),
         target: target.entity,
         speed: 440.0,

@@ -10,7 +10,10 @@ use std::{collections::HashSet, env, path::PathBuf, process, time::Duration};
 
 #[path = "capture/class_skills.rs"]
 mod class_skills;
+#[path = "capture/combat_feel.rs"]
+mod combat_feel;
 use class_skills::{CaptureHeroPassiveSmoke, drive_hero_passive_smoke};
+use combat_feel::{CaptureCombatFeel, drive_combat_feel};
 
 use bevy::{
     app::{AppExit, ScheduleRunnerPlugin},
@@ -103,6 +106,7 @@ struct CaptureTarget(Handle<Image>);
 struct CapturePrepared {
     level_ready: bool,
     scenario_ready: bool,
+    paperdoll_verified: bool,
 }
 
 #[derive(Resource, Default)]
@@ -118,6 +122,7 @@ struct CaptureMouseInputSmoke {
     tower_count_before: usize,
     hero_entity: Option<Entity>,
     move_target: Option<Vec2>,
+    move_frames: u32,
 }
 
 #[derive(Resource, Default)]
@@ -154,6 +159,7 @@ enum CaptureScenario {
     HeroSelected,
     MouseInputSmoke,
     HeroPassiveSmoke,
+    CombatFeel,
     RogueliteDraft,
     RoguelitePick,
     RunStats,
@@ -221,6 +227,8 @@ fn main() -> AppExit {
     .add_plugins(protect_carrot::polish::PolishPlugin)
     .add_plugins(protect_carrot::augment_fx::AugmentFxPlugin)
     .add_plugins(SpritesheetAnimationPlugin)
+    .add_plugins(protect_carrot::combat_feedback::CombatFeedbackPlugin)
+    .add_plugins(protect_carrot::pixelfx::PixelFxPlugin)
     .add_systems(
         PostUpdate,
         protect_carrot::hero_cast_visuals::pose_casts
@@ -274,6 +282,7 @@ fn main() -> AppExit {
     .init_resource::<CaptureEscapeAfterScenario>()
     .init_resource::<CaptureMouseInputSmoke>()
     .init_resource::<CaptureHeroPassiveSmoke>()
+    .init_resource::<CaptureCombatFeel>()
     .init_resource::<CaptureFogProbeSeeded>()
     .insert_resource(capture_screen)
     .insert_resource(capture_scenario)
@@ -355,13 +364,17 @@ fn main() -> AppExit {
             drive_mouse_input_smoke.before(build::mouse_build),
             build::mouse_build,
             build::hero_control.after(build::mouse_build),
+            build::hero_move.after(build::hero_control),
             prepare_capture_level,
             drive_hero_passive_smoke,
+            drive_combat_feel
+                .after(prepare_capture_level)
+                .before(tower::build_snapshot),
             ui::hero_buttons,
             prepare_roguelite_draft_capture.after(prepare_capture_level),
             seed_fog_probe_enemy.after(prepare_capture_level),
             (
-                tower::build_snapshot,
+                tower::build_snapshot.after(build::hero_move),
                 hero::hero_doctrine,
                 protect_carrot::hero_passives::update_hero_passives,
                 protect_carrot::hero_skill_effects::update_skill_fields,
@@ -380,6 +393,7 @@ fn main() -> AppExit {
                 tower::enemy_vs_ally,
                 tower::enemy_vs_tower,
                 enemy::boss_specials,
+                protect_carrot::boss_reinforcements::update,
                 tower::update_fire_grounds,
                 enemy::spawn_enemies,
                 enemy::update_enemies,
@@ -402,17 +416,16 @@ fn main() -> AppExit {
             (build::refresh_hero_visual, build::animate_hero_walk)
                 .chain()
                 .after(drive_hero_passive_smoke),
-            build::rotate_towers,
+            build::rotate_towers.after(build::hero_move),
             build::update_hero_race_badges,
             build::tint_silenced_towers,
             build::update_tower_upgrade_visuals.after(build::tint_silenced_towers),
             build::update_tower_hp_bars,
             enemy::update_hp_bars,
             tower::update_summon_hp_bars,
-            vfx::spawn_vfx,
+            vfx::spawn_vfx.after(tower::apply_damage),
             vfx::run_vfx_timelines,
             vfx::update_particles,
-            vfx::animate_sword_swing,
             vfx::update_float_text,
             vfx::update_shockwaves,
             vfx::enemy_hit_pop,
@@ -678,6 +691,7 @@ fn capture_scenario_from_env() -> CaptureScenario {
         | Some("input_smoke")
         | Some("input-smoke") => CaptureScenario::MouseInputSmoke,
         Some("passive-smoke") => CaptureScenario::HeroPassiveSmoke,
+        Some("combat-feel") | Some("combat_feel") => CaptureScenario::CombatFeel,
         Some("roguelite") | Some("roguelite_draft") | Some("roguelite-draft") => {
             CaptureScenario::RogueliteDraft
         }
@@ -858,10 +872,25 @@ fn drive_mouse_input_smoke(
                     "[capture/input] right-click move failed: target={actual:?}, expected={target:?}"
                 );
             }
-            run.show(crate::i18n::t("capture: 鼠标建塔、英雄选择与右键移动通过"));
-            prepared.scenario_ready = true;
             state.step = 6;
-            println!("[capture/input] hero right-click move succeeded");
+            println!("[capture/input] hero right-click move order succeeded");
+        }
+        6 => {
+            let owner = state.hero_entity.expect("stored movement hero");
+            let target = state.move_target.expect("stored movement destination");
+            let (_, hero) = towers.get(owner).expect("movement hero remains alive");
+            if hero.hero_pos.distance(target) < 0.5 && hero.move_target.is_none() {
+                run.show(crate::i18n::t("capture: 鼠标建塔、英雄选择与右键移动通过"));
+                prepared.scenario_ready = true;
+                state.step = 7;
+                println!("[capture/input] hero reached the right-click destination");
+            } else {
+                state.move_frames += 1;
+                assert!(
+                    state.move_frames < 180,
+                    "[capture/input] hero received a move order but did not reach its destination"
+                );
+            }
         }
         _ => {}
     }
@@ -983,12 +1012,14 @@ fn verify_tower_gems(
 
 fn verify_hero_paperdoll(
     scenario: Res<CaptureScenario>,
-    prepared: Res<CapturePrepared>,
+    mut prepared: ResMut<CapturePrepared>,
     loadout: Res<hero::HeroLoadout>,
     runtime: Res<hero_paperdoll::HeroPaperdollRuntime>,
-    heroes: Query<(&tower::Tower, &Sprite), With<hero_paperdoll::HeroPaperdollSprite>>,
+    heroes: Query<(&tower::Tower, &Sprite, Option<&build::HeroWalkAnim>)>,
     mut ticks: Local<u32>,
     mut done: Local<bool>,
+    mut stable_image: Local<Option<Handle<Image>>>,
+    mut stable_frames: Local<u32>,
 ) {
     if *done
         || !matches!(
@@ -1009,7 +1040,7 @@ fn verify_hero_paperdoll(
         );
     }
 
-    let Some(image) = runtime.image() else {
+    let Some(image) = runtime.image_for(&loadout) else {
         if *ticks < 150 {
             return;
         }
@@ -1018,16 +1049,21 @@ fn verify_hero_paperdoll(
             *ticks
         );
     };
-    let applied = heroes.iter().any(|(tower, sprite)| {
+    let world_image = runtime.world_image_for(&loadout);
+    let applied = heroes.iter().any(|(tower, sprite, animation)| {
         tower.hero
-            && sprite.image == image
-            && sprite
-                .custom_size
-                .map(|size| {
-                    (size.x - hero_paperdoll::HERO_PAPERDOLL_WORLD_SIZE).abs() < 0.5
-                        && (size.y - hero_paperdoll::HERO_PAPERDOLL_WORLD_SIZE).abs() < 0.5
-                })
-                .unwrap_or(false)
+            && if animation.is_some() {
+                world_image.as_ref() == Some(&sprite.image) && sprite.texture_atlas.is_some()
+            } else {
+                sprite.image == image
+                    && sprite
+                        .custom_size
+                        .map(|size| {
+                            (size.x - hero_paperdoll::HERO_PAPERDOLL_WORLD_SIZE).abs() < 0.5
+                                && (size.y - hero_paperdoll::HERO_PAPERDOLL_WORLD_SIZE).abs() < 0.5
+                        })
+                        .unwrap_or(false)
+            }
     });
     if !applied {
         if *ticks < 150 {
@@ -1036,7 +1072,22 @@ fn verify_hero_paperdoll(
         panic!("[capture/paperdoll] composed paperdoll image was not applied to battlefield hero");
     }
 
+    let rendered_image = world_image.unwrap_or(image);
+    if stable_image.as_ref() == Some(&rendered_image) {
+        *stable_frames += 1;
+    } else {
+        *stable_image = Some(rendered_image);
+        *stable_frames = 0;
+    }
+    assert!(
+        *ticks < 180,
+        "[capture/paperdoll] outfit cache is rebuilding every frame"
+    );
+    if *stable_frames < 3 {
+        return;
+    }
     *done = true;
+    prepared.paperdoll_verified = true;
     println!(
         "[capture/paperdoll] {} hero composed and applied with {equipped_gear} gear pieces",
         loadout.race.name()
@@ -1229,20 +1280,10 @@ fn verify_roguelite_draft(
         eprintln!("[capture/roguelite] expected an active draft");
         process::exit(1);
     };
-    let pools = draft
-        .choices
-        .iter()
-        .map(|choice| choice.pool())
-        .collect::<HashSet<_>>();
-    for required in [
-        roguelite::TalentPool::Race,
-        roguelite::TalentPool::Weapon,
-        roguelite::TalentPool::Common,
-    ] {
-        if !pools.contains(&required) {
-            eprintln!("[capture/roguelite] missing required choice pool");
-            process::exit(1);
-        }
+    let unique_choices = draft.choices.iter().copied().collect::<HashSet<_>>();
+    if unique_choices.len() != draft.choices.len() {
+        eprintln!("[capture/roguelite] expected three distinct draft choices");
+        process::exit(1);
     }
     if !roots.iter().any(|node| node.display == Display::Flex) {
         eprintln!("[capture/roguelite] draft panel root is not visible");
@@ -1293,6 +1334,17 @@ fn verify_roguelite_pick(
     let before_tower_damage = talents.rogue_damage_mult;
     let before_tower_range = talents.rogue_range_mult;
     let before_tower_cooldown = talents.rogue_firerate_mult;
+    let before_tower_special = (
+        talents.rogue_arrow_damage_mult,
+        talents.rogue_arrow_range_mult,
+        talents.rogue_cannon_radius_mult,
+        talents.rogue_cannon_firerate_mult,
+        talents.rogue_magic_damage_mult,
+        talents.rogue_magic_firerate_mult,
+        talents.rogue_ice_damage_mult,
+        talents.rogue_ice_slow_mult,
+        talents.rogue_detection_range_mult,
+    );
     let wave = roguelite.draft.as_ref().map_or(run.wave, |d| d.wave);
     let picked = roguelite.pick(0, &mut loadout, &mut talents, &mut run, &mut towers);
     let Some(picked) = picked else {
@@ -1316,7 +1368,19 @@ fn verify_roguelite_pick(
         || run.gold != before_gold
         || (talents.rogue_damage_mult - before_tower_damage).abs() > 0.001
         || (talents.rogue_range_mult - before_tower_range).abs() > 0.001
-        || (talents.rogue_firerate_mult - before_tower_cooldown).abs() > 0.001;
+        || (talents.rogue_firerate_mult - before_tower_cooldown).abs() > 0.001
+        || before_tower_special
+            != (
+                talents.rogue_arrow_damage_mult,
+                talents.rogue_arrow_range_mult,
+                talents.rogue_cannon_radius_mult,
+                talents.rogue_cannon_firerate_mult,
+                talents.rogue_magic_damage_mult,
+                talents.rogue_magic_firerate_mult,
+                talents.rogue_ice_damage_mult,
+                talents.rogue_ice_slow_mult,
+                talents.rogue_detection_range_mult,
+            );
     if !changed {
         eprintln!("[capture/roguelite] pick produced no gameplay modifier");
         process::exit(1);
@@ -1564,7 +1628,7 @@ fn apply_capture_scenario(
     match scenario {
         CaptureScenario::Default => true,
         CaptureScenario::MouseInputSmoke => false,
-        CaptureScenario::HeroPassiveSmoke => false,
+        CaptureScenario::HeroPassiveSmoke | CaptureScenario::CombatFeel => false,
         CaptureScenario::RogueliteDraft => false,
         CaptureScenario::RoguelitePick => false,
         CaptureScenario::RunStats => {
@@ -1833,6 +1897,13 @@ fn drive_capture(
         *scenario == CaptureScenario::HeroPassiveSmoke && matches!(job.mode, CaptureMode::Frames);
     if matches!(*screen, CaptureScreen::Playing) {
         if !prepared.level_ready || (!prepared.scenario_ready && !passive_frames) {
+            return;
+        }
+        if matches!(
+            *scenario,
+            CaptureScenario::HeroPaperdoll | CaptureScenario::HeroPaperdollEscClosed
+        ) && !prepared.paperdoll_verified
+        {
             return;
         }
     }

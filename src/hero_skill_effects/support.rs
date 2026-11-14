@@ -41,6 +41,7 @@ pub(super) fn release(
                         || t.pos.distance(source.pos) < 20.0)
             }) {
                 dmg.write(Damage {
+                    ultimate: slot == 2,
                     source_tower: Some(owner),
                     target: target.entity,
                     amount: (80.0 + source.damage * 0.8) * power,
@@ -147,6 +148,7 @@ pub(super) fn release(
                         target,
                         (65.0 + source.damage * 0.5) * power,
                         Element::Frost,
+                        slot == 2,
                     );
                     shot.kind = ProjKind::Slow;
                     shot.slow_duration = 1.4 + rank * 0.15;
@@ -177,6 +179,7 @@ pub(super) fn release(
                 target,
                 (85.0 + source.damage * 0.7) * power,
                 Element::Frost,
+                slot == 2,
             );
             shot.kind = ProjKind::Curse;
             shot.freeze_duration = 0.9 + rank * 0.16;
@@ -390,6 +393,7 @@ pub(super) fn release(
                     target,
                     (110.0 + source.damage * 0.5) * power,
                     Element::Fire,
+                    slot == 2,
                 );
                 shot.kind = ProjKind::Missile;
                 shot.speed = 360.0;

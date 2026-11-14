@@ -106,6 +106,7 @@ impl AutostartLevel {
 fn signal_game_ready(
     assets: Res<AssetServer>,
     sprites: Res<sprites::Sprites>,
+    effects: Res<protect_carrot::pixelfx::PixelFxLibrary>,
     mut frames: Local<u32>,
     mut done: Local<bool>,
 ) {
@@ -117,7 +118,7 @@ fn signal_game_ready(
         && assets.is_loaded(sprites.carrot.id());
     // Signal once the menu's sprites are loaded; fall back after ~4s so the "enter"
     // button always appears even if asset load-state never reports ready.
-    if (*frames > 3 && sprites_ready) || *frames > 240 {
+    if ((*frames > 3 && sprites_ready) || *frames > 240) && effects.ready(&assets) {
         *done = true;
         carrot_game_ready();
     }
@@ -254,6 +255,8 @@ fn main() {
     .add_plugins(lighting::LightingPlugin)
     .add_plugins(SequentialActionsPlugin)
     .add_plugins(SpritesheetAnimationPlugin)
+    .add_plugins(protect_carrot::combat_feedback::CombatFeedbackPlugin)
+    .add_plugins(protect_carrot::pixelfx::PixelFxPlugin)
     .add_systems(
         PostUpdate,
         protect_carrot::hero_cast_visuals::pose_casts
@@ -334,7 +337,7 @@ fn main() {
             apply_carrot_cursor,
             signal_game_ready.run_if(in_state(GameState::Menu)),
             toggle_fullscreen,
-            audio::play_sfx,
+            audio::play_sfx.after(vfx::spawn_vfx),
             ui::attach_widget_buttons,
             hero::validate_hero_gear_inventory,
             ui::passthrough_button_children,
@@ -475,6 +478,7 @@ fn main() {
             tower::enemy_vs_ally,
             tower::enemy_vs_tower,
             enemy::boss_specials,
+            protect_carrot::boss_reinforcements::update,
             tower::update_fire_grounds,
             enemy::spawn_enemies,
             enemy::update_enemies,
@@ -511,9 +515,11 @@ fn main() {
             ),
             tower::draw_tower_raider_threats,
             tower::draw_equipment_resonance,
-            build::hero_afterimage,
-            build::animate_hero_walk,
-            build::rotate_towers,
+            build::hero_afterimage
+                .after(build::rotate_towers)
+                .run_if(not_paused),
+            build::animate_hero_walk.after(build::hero_move),
+            build::rotate_towers.after(build::hero_move),
             build::update_hero_race_badges,
             build::tint_silenced_towers,
             build::update_tower_upgrade_visuals.after(build::tint_silenced_towers),
@@ -545,10 +551,9 @@ fn main() {
         (
             enemy::update_hp_bars,
             tower::update_summon_hp_bars,
-            vfx::spawn_vfx,
+            vfx::spawn_vfx.after(tower::apply_damage),
             vfx::run_vfx_timelines,
             vfx::update_particles,
-            vfx::animate_sword_swing,
             vfx::update_float_text,
             vfx::update_shockwaves,
             vfx::enemy_hit_pop,

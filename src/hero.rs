@@ -996,7 +996,7 @@ pub fn apply_loadout_to_tower(loadout: &HeroLoadout, t: &mut Tower) {
     }
     let m = loadout.race.mods();
     let hp_frac = if t.max_hp > 0.0 {
-        (t.hp / t.max_hp).clamp(0.05, 1.0)
+        (t.hp / t.max_hp).clamp(0.0, 1.0)
     } else {
         1.0
     };
@@ -1109,12 +1109,10 @@ pub fn apply_loadout_to_tower(loadout: &HeroLoadout, t: &mut Tower) {
     t.damage = t.base_damage;
     t.range = base.range * m.range * range_mult;
     t.cooldown = (base.cooldown * m.cooldown * cooldown_mult.max(0.35)).max(0.05);
-    t.cooldown_timer = 0.0;
     t.max_hp = (base.hp * m.hp * hp_mult * HERO_HP).floor();
-    t.hp = (t.max_hp * hp_frac).clamp(1.0, t.max_hp);
+    t.hp = (t.max_hp * hp_frac).clamp(0.0, t.max_hp);
     t.armor = 6.0 + armor_bonus;
     t.armor_pierce = armor_pierce_bonus;
-    t.hp = (t.max_hp * hp_frac).clamp(1.0, t.max_hp);
 }
 
 /// Default world spawn point for the hero: lower-middle of the board (the player

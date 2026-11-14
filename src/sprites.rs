@@ -40,9 +40,6 @@ pub struct Sprites {
     pub carrot_hurt: Handle<Image>,
     pub carrot_crit: Handle<Image>,
     pub spawn_portal: Handle<Image>,
-    /// Melee slash effect (physical) and a toxic variant (poison melee).
-    pub slash: Handle<Image>,
-    pub slash_poison: Handle<Image>,
     /// Race face icons (human / elf / orc) for the visual hero selector.
     pub races: HashMap<Race, Handle<Image>>,
     /// Small HUD icons keyed by name (coin / heart / wave / intel) replacing text.
@@ -175,8 +172,6 @@ pub fn build_sprites(assets: &AssetServer) -> Sprites {
         carrot_hurt: assets.load("sprites/carrot_hurt.webp"),
         carrot_crit: assets.load("sprites/carrot_crit.webp"),
         spawn_portal: assets.load("sprites/portal.webp"),
-        slash: assets.load("sprites/slash.webp"),
-        slash_poison: assets.load("sprites/slash_poison.webp"),
         races: Race::ALL
             .into_iter()
             .map(|r| {

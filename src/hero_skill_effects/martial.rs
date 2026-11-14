@@ -45,6 +45,7 @@ pub(super) fn release(
                     || t.pos.distance(destination) <= 72.0
             }) {
                 dmg.write(Damage {
+                    ultimate: slot == 2,
                     source_tower: Some(owner),
                     target: target.entity,
                     amount: (125.0 + source.damage * 0.95) * power,
@@ -84,6 +85,7 @@ pub(super) fn release(
                         || t.pos.distance(source.pos) < 20.0)
             }) {
                 dmg.write(Damage {
+                    ultimate: slot == 2,
                     source_tower: Some(owner),
                     target: target.entity,
                     amount: (100.0 + source.damage * 1.15) * power,
@@ -145,6 +147,7 @@ pub(super) fn release(
                     } else {
                         Element::Physical
                     },
+                    slot == 2,
                 );
                 shot.kind = ProjKind::Poison;
                 shot.dot_damage = (28.0 + rank * 5.0) * power;
@@ -176,6 +179,7 @@ pub(super) fn release(
                 .filter(|t| point_segment_distance(t.pos, source.pos, end) <= 22.0 + rank * 2.0)
             {
                 dmg.write(Damage {
+                    ultimate: slot == 2,
                     source_tower: Some(owner),
                     target: target.entity,
                     amount: (140.0 + source.damage * 1.25) * power,
@@ -226,6 +230,7 @@ pub(super) fn release(
             hero.move_target = None;
             hero.angle = facing.to_angle();
             dmg.write(Damage {
+                ultimate: slot == 2,
                 source_tower: Some(owner),
                 target: target.entity,
                 amount: (180.0 + source.damage * 1.4) * power * if target.boss { 1.2 } else { 1.0 },
@@ -263,6 +268,7 @@ pub(super) fn release(
             let execution =
                 (missing * if target.boss { 0.16 } else { 0.5 }).min(1500.0 + source.damage * 2.0);
             dmg.write(Damage {
+                ultimate: slot == 2,
                 source_tower: Some(owner),
                 target: target.entity,
                 amount: (260.0 + source.damage * 1.8) * power + execution,

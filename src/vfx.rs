@@ -10,6 +10,7 @@ use crate::lighting;
 use crate::sprites::Sprites;
 use crate::ui::UiFont;
 use bevy::prelude::*;
+use std::collections::HashMap;
 
 #[derive(Resource, Default)]
 pub struct ScreenShake {
@@ -18,7 +19,7 @@ pub struct ScreenShake {
 
 impl ScreenShake {
     pub fn add(&mut self, amount: f32) {
-        self.trauma = (self.trauma + amount).clamp(0.0, 1.0);
+        self.trauma = (self.trauma + amount).clamp(0.0, 0.65);
     }
 }
 
@@ -27,20 +28,20 @@ pub struct ShakeCamera {
     pub base: Vec3,
 }
 
-/// A melee sword-swing arc: the slash sprite sweeps through `arc` radians around
-/// `base` (the attack direction) over its short life, popping in scale and fading
-/// out — so a melee hero reads as actually chopping, not flashing a static decal.
-#[derive(Component)]
-pub struct SwordSwing {
-    pub life: f32,
-    pub max_life: f32,
-    pub base: f32,
-    pub arc: f32,
-}
-
 /// A request for a one-off visual effect at a world position.
 #[derive(Message, Clone)]
 pub enum VfxEvent {
+    /// A confirmed hit, shared by graded particles and local hit-stop.
+    Impact {
+        source: Option<Entity>,
+        target: Entity,
+        pos: Vec2,
+        direction: Vec2,
+        tier: crate::combat_feel::ImpactTier,
+        hero: bool,
+        color: Color,
+        element: Element,
+    },
     /// Spark burst (a tower hit landed). `element` adds flavored particles
     /// (frost shards, toxic drips, fire embers, …) on top of the base impact.
     Hit {
@@ -265,75 +266,6 @@ fn element_hit_flourish(commands: &mut Commands, rng: &mut Rng, pos: Vec2, eleme
     }
 }
 
-fn spawn_holy_strike(
-    commands: &mut Commands,
-    rng: &mut Rng,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<ColorMaterial>,
-    pos: Vec2,
-    strong: bool,
-) {
-    let gold = Color::srgb(1.0, 0.88, 0.36);
-    let white = Color::srgb(1.0, 0.98, 0.82);
-    let radius = if strong { 28.0 } else { 20.0 };
-    let life = if strong { 0.34 } else { 0.24 };
-
-    // A vertical light column pins the impact to the monster body instead of
-    // reading as another projectile fired from the summon staff.
-    commands.spawn((
-        Sprite {
-            color: white.with_alpha(if strong { 0.95 } else { 0.72 }),
-            custom_size: Some(Vec2::new(if strong { 10.0 } else { 7.0 }, radius * 2.8)),
-            ..default()
-        },
-        Transform::from_translation((pos + Vec2::new(0.0, radius * 0.35)).extend(18.2)),
-        Particle {
-            vel: Vec2::ZERO,
-            life,
-            max_life: life,
-        },
-        LevelEntity,
-    ));
-    commands.spawn((
-        Sprite {
-            color: gold.with_alpha(if strong { 0.9 } else { 0.62 }),
-            custom_size: Some(Vec2::new(radius * 1.9, if strong { 7.0 } else { 5.0 })),
-            ..default()
-        },
-        Transform::from_translation(pos.extend(18.3)),
-        Particle {
-            vel: Vec2::ZERO,
-            life: life * 0.82,
-            max_life: life * 0.82,
-        },
-        LevelEntity,
-    ));
-    spawn_ring(
-        commands,
-        meshes,
-        materials,
-        pos,
-        radius,
-        gold.mix(&Color::WHITE, 0.35),
-        if strong { 0.68 } else { 0.42 },
-        life,
-        18.0,
-    );
-    let sparks = if strong { 9 } else { 5 };
-    for _ in 0..sparks {
-        let ang = -std::f32::consts::FRAC_PI_2 + (rng.frac() - 0.5) * 1.1;
-        let vel = Vec2::from_angle(ang) * (70.0 + rng.frac() * 90.0);
-        spark_vel(
-            commands,
-            pos + Vec2::new((rng.frac() - 0.5) * 14.0, 10.0),
-            gold.mix(&Color::WHITE, rng.frac() * 0.55),
-            vel,
-            if strong { 4.2 } else { 3.2 },
-            life + rng.frac() * 0.16,
-        );
-    }
-}
-
 fn spawn_ring(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -420,6 +352,58 @@ fn spawn_text(
     ));
 }
 
+type NumberKey = (u32, u32, Option<String>);
+
+fn aggregate_numbers(events: &[&VfxEvent]) -> HashMap<NumberKey, f32> {
+    let mut totals = HashMap::new();
+    for event in events {
+        let (pos, amount, label) = match event {
+            VfxEvent::Number { pos, amount } => (pos, amount, None),
+            VfxEvent::TaggedNumber {
+                pos, amount, label, ..
+            } => (pos, amount, Some(label.clone())),
+            _ => continue,
+        };
+        *totals
+            .entry((pos.x.to_bits(), pos.y.to_bits(), label))
+            .or_insert(0.0) += *amount;
+    }
+    totals
+}
+
+#[cfg(test)]
+mod number_tests {
+    use super::*;
+    #[test]
+    fn simultaneous_damage_is_summed_without_mixing_positions_or_labels() {
+        let events = [
+            VfxEvent::Number {
+                pos: Vec2::ZERO,
+                amount: 10.0,
+            },
+            VfxEvent::Number {
+                pos: Vec2::ZERO,
+                amount: 20.0,
+            },
+            VfxEvent::Number {
+                pos: Vec2::X,
+                amount: 7.0,
+            },
+            VfxEvent::TaggedNumber {
+                pos: Vec2::ZERO,
+                amount: 5.0,
+                color: Color::WHITE,
+                label: "weak".into(),
+            },
+        ];
+        let refs = events.iter().collect::<Vec<_>>();
+        let totals = aggregate_numbers(&refs);
+        assert_eq!(totals.len(), 3);
+        assert_eq!(totals[&(0.0_f32.to_bits(), 0.0_f32.to_bits(), None)], 30.0);
+        assert_eq!(totals.values().sum::<f32>(), 42.0);
+    }
+}
+
 /// Turn queued `VfxEvent`s into entities.
 pub fn spawn_vfx(
     mut commands: Commands,
@@ -431,16 +415,47 @@ pub fn spawn_vfx(
     mut sfx: MessageWriter<crate::audio::SfxEvent>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
+    time: Res<Time>,
+    mut budget: Local<crate::combat_feel::ImpactBudget>,
 ) {
     use crate::audio::{SfxEvent, Sound};
-    for ev in events.read() {
+    use crate::combat_feel::ImpactTier;
+    budget.begin_frame(time.delta_secs());
+    let mut strongest = ImpactTier::Normal;
+    let batch: Vec<_> = events.read().collect();
+    let mut numbers = aggregate_numbers(&batch);
+    for ev in batch {
         match ev {
             VfxEvent::Hit {
                 pos,
                 color,
                 element,
+            }
+            | VfxEvent::Impact {
+                pos,
+                color,
+                element,
+                ..
             } => {
-                sfx.write(SfxEvent(Sound::Hit));
+                let tier = match ev {
+                    VfxEvent::Impact { tier, .. } => *tier,
+                    _ => ImpactTier::Normal,
+                };
+                if !budget.admit(tier) {
+                    continue;
+                }
+                if matches!(ev, VfxEvent::Impact { hero: true, .. }) || tier == ImpactTier::Finisher
+                {
+                    strongest = strongest.max(tier);
+                }
+                let scale = tier.scale();
+                sfx.write(SfxEvent(match tier {
+                    ImpactTier::Normal => Sound::Hit,
+                    ImpactTier::Heavy => Sound::HeavyHit,
+                    ImpactTier::Empowered => Sound::EmpoweredHit,
+                    ImpactTier::Ultimate => Sound::FinisherHit,
+                    ImpactTier::Finisher => Sound::FinisherHit,
+                }));
                 // Bright white core flash (stationary, very short) for a snappy pop.
                 spark(
                     &mut commands,
@@ -449,25 +464,40 @@ pub fn spawn_vfx(
                     Color::WHITE,
                     0.0,
                     0.0,
-                    12.0,
-                    0.1,
+                    12.0 * scale,
+                    0.065,
                 );
                 // A larger element-tinted flash behind it.
-                spark(&mut commands, &mut rng, *pos, *color, 0.0, 0.0, 18.0, 0.16);
+                spark(
+                    &mut commands,
+                    &mut rng,
+                    *pos,
+                    *color,
+                    0.0,
+                    0.0,
+                    18.0 * scale,
+                    0.12,
+                );
                 // Quick expanding impact ring.
                 spawn_ring(
                     &mut commands,
                     &mut meshes,
                     &mut materials,
                     *pos,
-                    15.0,
+                    15.0 * scale,
                     *color,
                     0.5,
                     0.26,
                     16.5,
                 );
                 // Directional debris sparks (more + faster than before).
-                for _ in 0..9 {
+                for _ in 0..match tier {
+                    ImpactTier::Normal => 3,
+                    ImpactTier::Heavy => 8,
+                    ImpactTier::Empowered => 12,
+                    ImpactTier::Ultimate => 16,
+                    ImpactTier::Finisher => 18,
+                } {
                     spark(
                         &mut commands,
                         &mut rng,
@@ -481,7 +511,15 @@ pub fn spawn_vfx(
                 }
                 // Element-specific flourish on top of the generic impact.
                 element_hit_flourish(&mut commands, &mut rng, *pos, *element);
-                lighting::pulse_light(&mut commands, *pos, *color, 58.0, 0.92, 0.18, false);
+                lighting::pulse_light(
+                    &mut commands,
+                    *pos,
+                    *color,
+                    58.0 * scale,
+                    0.92 * scale,
+                    0.18,
+                    false,
+                );
             }
             VfxEvent::Muzzle { pos, dir, color } => {
                 // Bright stationary flash at the barrel.
@@ -512,115 +550,8 @@ pub fn spawn_vfx(
                 }
                 lighting::pulse_light(&mut commands, *pos, *color, 48.0, 0.72, 0.13, false);
             }
-            VfxEvent::Slash {
-                pos,
-                angle,
-                color,
-                poison,
-            } => {
-                let img = if *poison {
-                    sprites.slash_poison.clone()
-                } else {
-                    sprites.slash.clone()
-                };
-                // The blade sweeps through an arc (劈砍): start raised, chop through
-                // the target. `animate_sword_swing` drives the rotation/scale/fade.
-                let arc = 2.35; // ~135° sweep
-                let life = 0.30;
-                commands.spawn((
-                    Sprite {
-                        image: img,
-                        color: color.with_alpha(0.95),
-                        custom_size: Some(Vec2::splat(crate::data::TILE_SIZE * 2.35)),
-                        ..default()
-                    },
-                    Transform::from_translation(pos.extend(16.0))
-                        .with_rotation(Quat::from_rotation_z(*angle + arc * 0.5)),
-                    SwordSwing {
-                        life,
-                        max_life: life,
-                        base: *angle,
-                        arc,
-                    },
-                    LevelEntity,
-                ));
-                // A bright glint at the impact point sells the contact.
-                spark(
-                    &mut commands,
-                    &mut rng,
-                    *pos,
-                    color.mix(&Color::WHITE, 0.6),
-                    60.0,
-                    220.0,
-                    3.0,
-                    0.22,
-                );
-                // A few sparks fly off along the swing direction.
-                for _ in 0..7 {
-                    let jitter = (rng.frac() - 0.5) * 0.6;
-                    spark_vel(
-                        &mut commands,
-                        *pos,
-                        color.mix(&Color::WHITE, 0.35),
-                        Vec2::from_angle(*angle + jitter) * (90.0 + rng.frac() * 90.0),
-                        3.0,
-                        0.26,
-                    );
-                }
+            VfxEvent::Slash { pos, color, .. } | VfxEvent::HammerImpact { pos, color, .. } => {
                 lighting::pulse_light(&mut commands, *pos, *color, 68.0, 0.78, 0.18, false);
-            }
-            VfxEvent::HammerImpact { pos, angle, color } => {
-                let impact = color.mix(&Color::WHITE, 0.18);
-                spawn_ring(
-                    &mut commands,
-                    &mut meshes,
-                    &mut materials,
-                    *pos,
-                    crate::data::TILE_SIZE * 0.46,
-                    impact,
-                    0.58,
-                    0.18,
-                    16.0,
-                );
-                spawn_ring(
-                    &mut commands,
-                    &mut meshes,
-                    &mut materials,
-                    *pos,
-                    crate::data::TILE_SIZE * 0.26,
-                    Color::srgb(0.76, 0.68, 0.54),
-                    0.42,
-                    0.12,
-                    16.2,
-                );
-                spark(
-                    &mut commands,
-                    &mut rng,
-                    *pos,
-                    Color::srgb(1.0, 0.93, 0.62),
-                    50.0,
-                    180.0,
-                    4.4,
-                    0.20,
-                );
-                let side = *angle + std::f32::consts::FRAC_PI_2;
-                for i in 0..10 {
-                    let spread = (rng.frac() - 0.5) * 0.9;
-                    let dir = if i % 2 == 0 {
-                        side
-                    } else {
-                        side + std::f32::consts::PI
-                    };
-                    spark_vel(
-                        &mut commands,
-                        *pos,
-                        impact,
-                        Vec2::from_angle(dir + spread) * (85.0 + rng.frac() * 110.0),
-                        3.6,
-                        0.22,
-                    );
-                }
-                lighting::pulse_light(&mut commands, *pos, impact, 78.0, 0.86, 0.20, true);
             }
             VfxEvent::MeleeCleave { pos, radius, color } => {
                 spawn_ring(
@@ -690,29 +621,34 @@ pub fn spawn_vfx(
                     false,
                 );
             }
-            VfxEvent::Number { pos, amount } => {
+            VfxEvent::Number { pos, .. } => {
+                let Some(amount) = numbers.remove(&(pos.x.to_bits(), pos.y.to_bits(), None)) else {
+                    continue;
+                };
                 spawn_number(
                     &mut commands,
                     &mut rng,
                     &font,
                     *pos,
-                    *amount,
+                    amount,
                     Color::srgb(1.0, 0.95, 0.6),
                     None,
                 );
             }
             VfxEvent::TaggedNumber {
-                pos,
-                amount,
-                color,
-                label,
+                pos, color, label, ..
             } => {
+                let Some(amount) =
+                    numbers.remove(&(pos.x.to_bits(), pos.y.to_bits(), Some(label.clone())))
+                else {
+                    continue;
+                };
                 spawn_number(
                     &mut commands,
                     &mut rng,
                     &font,
                     *pos,
-                    *amount,
+                    amount,
                     *color,
                     Some(label),
                 );
@@ -754,14 +690,6 @@ pub fn spawn_vfx(
                 );
             }
             VfxEvent::HolyStrike { pos, strong } => {
-                spawn_holy_strike(
-                    &mut commands,
-                    &mut rng,
-                    &mut meshes,
-                    &mut materials,
-                    *pos,
-                    *strong,
-                );
                 lighting::pulse_light(
                     &mut commands,
                     *pos,
@@ -1179,7 +1107,9 @@ pub fn spawn_vfx(
             }
             VfxEvent::Death { pos, color, big } => {
                 sfx.write(SfxEvent(Sound::Death));
-                shake.add(if *big { 0.42 } else { 0.035 });
+                if *big {
+                    shake.add(0.30);
+                }
                 // A burst flash + expanding ring so a kill reads as a pop, not just
                 // scattered dots. Bosses/elites (`big`) get a much larger blast.
                 let scale = if *big { 1.0 } else { 0.5 };
@@ -1314,7 +1244,9 @@ pub fn spawn_vfx(
             }
             VfxEvent::Explosion { pos, radius, color } => {
                 sfx.write(SfxEvent(Sound::Explosion));
-                shake.add((*radius / 520.0).clamp(0.05, 0.34));
+                if *radius >= 100.0 {
+                    strongest = strongest.max(ImpactTier::Heavy);
+                }
                 // Expanding ring (its own material so we can fade alpha).
                 spawn_ring(
                     &mut commands,
@@ -1610,6 +1542,7 @@ pub fn spawn_vfx(
             }
         }
     }
+    shake.add(budget.take_shake(strongest));
 }
 
 pub fn update_camera_shake(
@@ -1634,34 +1567,6 @@ pub fn update_camera_shake(
     tf.translation = camera.base + Vec3::new(offset.x, offset.y, 0.0);
     tf.rotation = Quat::from_rotation_z((phase * 0.43).sin() * 0.012 * power);
     shake.trauma = (shake.trauma - dt * 1.7).max(0.0);
-}
-
-/// Drive the melee sword-swing arc: sweep rotation from raised → chopped-through,
-/// pop the scale, and fade out. Despawns when its life expires.
-pub fn animate_sword_swing(
-    mut commands: Commands,
-    time: Res<Time>,
-    mut q: Query<(Entity, &mut SwordSwing, &mut Transform, &mut Sprite)>,
-) {
-    let dt = time.delta_secs();
-    for (e, mut s, mut tf, mut sprite) in &mut q {
-        s.life -= dt;
-        if s.life <= 0.0 {
-            commands.entity(e).despawn();
-            continue;
-        }
-        let progress = 1.0 - (s.life / s.max_life); // 0 → 1
-        // Smoothstep for a fast "whoosh" through the middle of the swing.
-        let ease = progress * progress * (3.0 - 2.0 * progress);
-        // Sweep from +arc/2 (blade raised) down through −arc/2 (chopped through).
-        let angle = s.base + s.arc * (0.5 - ease);
-        // Scale pops out at mid-swing then settles — sin gives 0→1→0 over the life.
-        let pop = 0.78 + 0.42 * (progress * std::f32::consts::PI).sin();
-        tf.rotation = Quat::from_rotation_z(angle);
-        tf.scale = Vec3::splat(pop);
-        // Bright at the strike, fading toward the end.
-        sprite.color.set_alpha((1.0 - progress).powf(0.55) * 0.95);
-    }
 }
 
 pub fn update_particles(

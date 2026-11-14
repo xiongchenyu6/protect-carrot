@@ -56,6 +56,7 @@ pub(super) fn release(
                 .filter(|t| point_segment_distance(t.pos, source.pos, center) <= width)
             {
                 dmg.write(Damage {
+                    ultimate: slot == 2,
                     source_tower: Some(owner),
                     target: target.entity,
                     amount: (115.0 + source.damage * 0.7) * power,
@@ -139,6 +140,7 @@ pub(super) fn release(
             let mut previous = source.pos;
             for (index, target) in chain.into_iter().enumerate() {
                 dmg.write(Damage {
+                    ultimate: slot == 2,
                     source_tower: Some(owner),
                     target: target.entity,
                     amount: (160.0 + source.damage * 0.7) * power * 0.86_f32.powi(index as i32),

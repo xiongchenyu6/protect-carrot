@@ -16,6 +16,12 @@ pub enum SkillFieldKind {
     Workshop,
 }
 
+impl SkillFieldKind {
+    pub fn is_ultimate(self) -> bool {
+        !matches!(self, Self::FrostPrison | Self::Vortex)
+    }
+}
+
 #[derive(Component)]
 pub struct SkillField {
     pub kind: SkillFieldKind,
@@ -30,6 +36,12 @@ pub struct SkillField {
     damage: f32,
     max_hp: f32,
     power: f32,
+}
+
+impl SkillField {
+    pub fn remaining_duration(&self) -> f32 {
+        self.timer.max(0.0) + self.remaining.saturating_sub(1) as f32 * self.interval
+    }
 }
 
 pub(super) fn spawn(
@@ -158,6 +170,7 @@ pub fn update_skill_fields(
                             target,
                             (48.0 + field.damage * 0.30) * field.power,
                             Element::Physical,
+                            field.kind.is_ultimate(),
                         );
                         shot.speed = 520.0;
                         shot.armor_pierce = 24.0;
@@ -207,6 +220,7 @@ pub fn update_skill_fields(
                         }
                         for target in &local {
                             dmg.write(Damage {
+                                ultimate: field.kind.is_ultimate(),
                                 source_tower: Some(owner),
                                 target: target.entity,
                                 amount: (30.0 + field.damage * 0.20) * field.power,
@@ -246,6 +260,7 @@ pub fn update_skill_fields(
                             5.0,
                         );
                         dmg.write(Damage {
+                            ultimate: field.kind.is_ultimate(),
                             source_tower: Some(owner),
                             target: target.entity,
                             amount: (160.0 + field.damage * 0.62) * field.power,
@@ -277,6 +292,7 @@ pub fn update_skill_fields(
                         );
                         for hit in local.iter().filter(|t| t.pos.distance(impact) <= 85.0) {
                             dmg.write(Damage {
+                                ultimate: field.kind.is_ultimate(),
                                 source_tower: Some(owner),
                                 target: hit.entity,
                                 amount: (145.0 + field.damage * 0.5) * field.power,
@@ -326,6 +342,7 @@ pub fn update_skill_fields(
                             ),
                         };
                         dmg.write(Damage {
+                            ultimate: field.kind.is_ultimate(),
                             source_tower: Some(owner),
                             target: target.entity,
                             amount,

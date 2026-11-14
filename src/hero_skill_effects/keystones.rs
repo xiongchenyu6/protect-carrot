@@ -51,6 +51,7 @@ pub(super) fn trigger(
                 let hp_scale = (target.max_hp * if target.boss { 0.012 } else { 0.035 })
                     .min(900.0 + source.damage * power);
                 dmg.write(Damage {
+                    ultimate: false,
                     source_tower: Some(owner),
                     target: target.entity,
                     amount: (90.0 + source.damage * 0.65) * power + hp_scale,
@@ -82,6 +83,7 @@ pub(super) fn trigger(
                 let execute = (target.max_hp * missing * if target.boss { 0.045 } else { 0.12 })
                     .min(1800.0 + source.damage * power * 2.0);
                 dmg.write(Damage {
+                    ultimate: false,
                     source_tower: Some(owner),
                     target: target.entity,
                     amount: (72.0 + source.damage * 0.48) * power + execute,

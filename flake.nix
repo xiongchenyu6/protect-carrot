@@ -97,7 +97,6 @@
                 rustfmt
                 # Web (WebGPU/wasm) build toolchain.
                 wasm-bindgen-cli_0_2_126
-                trunk
                 lld # wasm32-unknown-unknown linker
                 binaryen # wasm-opt (release size/perf optimization)
                 brotli # pre-compress wasm/js (.br) — smaller than gzip on slow links

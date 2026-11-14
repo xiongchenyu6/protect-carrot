@@ -6,6 +6,7 @@ pub(super) struct CaptureHeroPassiveSmoke {
     cursor: usize,
     pending: bool,
     released: bool,
+    fx_seen: bool,
     phase_images: [bool; 3],
     wait_frames: u32,
     settle_frames: u32,
@@ -56,20 +57,31 @@ pub(super) fn drive_hero_passive_smoke(
             With<tower::Projectile>,
             With<protect_carrot::hero_skill_effects::SkillField>,
             With<protect_carrot::components::FireGround>,
+            With<protect_carrot::pixelfx::PixelFxAnimation>,
         )>,
     >,
     mut events: MessageReader<HeroSkillCastEvent>,
-    (target, job, summons): (Res<CaptureTarget>, Res<CaptureJob>, Query<&tower::Summon>),
-    (creatures, sprites, talents, board): (
+    (target, job, summons, animations, cards): (
+        Res<CaptureTarget>,
+        Res<CaptureJob>,
+        Query<&tower::Summon>,
+        Query<&protect_carrot::pixelfx::PixelFxAnimation>,
+        Query<(), With<protect_carrot::polish::EpisodeCard>>,
+    ),
+    (creatures, sprites, talents, board, effects, assets): (
         Res<creatures::Creatures>,
         Res<sprites::Sprites>,
         Res<meta::Talents>,
         Res<Board>,
+        Res<protect_carrot::pixelfx::PixelFxLibrary>,
+        Res<AssetServer>,
     ),
 ) {
     if *scenario != CaptureScenario::HeroPassiveSmoke
         || !prepared.level_ready
         || prepared.scenario_ready
+        || !effects.ready(&assets)
+        || !cards.is_empty()
     {
         return;
     }
@@ -183,6 +195,10 @@ pub(super) fn drive_hero_passive_smoke(
                 state.released = true;
             }
         }
+        if state.released {
+            let id = protect_carrot::pixelfx::skill_effect(weapon, slot).0;
+            state.fx_seen |= animations.iter().any(|animation| animation.id() == id);
+        }
         if let Ok(cast) = casts.get(owner) {
             let (phase, label) = match cast.phase {
                 CastPhase::Windup => (0, "windup"),
@@ -207,6 +223,10 @@ pub(super) fn drive_hero_passive_smoke(
                 );
             }
         } else if state.released {
+            assert!(
+                state.fx_seen,
+                "skill {weapon:?} {slot} did not play its PixelFX clip"
+            );
             assert_eq!(
                 state.phase_images, [true; 3],
                 "capture must observe all cast phases"
@@ -332,6 +352,7 @@ pub(super) fn drive_hero_passive_smoke(
     panels.settings_open = false;
     state.pending = true;
     state.released = false;
+    state.fx_seen = false;
     state.phase_images = [false; 3];
     state.wait_frames = 0;
     println!(

@@ -67,7 +67,8 @@ if [ "$PROFILE" = "release" ] && command -v wasm-opt >/dev/null; then
   opt_ok=0
   for attempt in 1 2 3; do
     rm -f "$BG.opt"
-    if wasm-opt -Oz --strip-debug --all-features -o "$BG.opt" "$BG" && [ -f "$BG.opt" ]; then
+    # Compact imports currently require an experimental V8 flag in Chrome.
+    if wasm-opt -Oz --strip-debug --all-features --disable-compact-imports -o "$BG.opt" "$BG" && [ -f "$BG.opt" ]; then
       mv "$BG.opt" "$BG"
       opt_ok=1
       break
@@ -107,3 +108,15 @@ if [ "$PROFILE" = "release" ]; then
 fi
 
 echo ">> done. Serve:  ./tools/serve_https.sh 8443   (HTTPS, gzip-aware)"
+
+# The public receipt identifies the exact source and executable being served.
+python3 - <<'PY'
+import hashlib, json, pathlib, subprocess
+wasm = pathlib.Path('web/protect_carrot_bg.wasm')
+receipt = {
+    'revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+    'wasm_sha256': hashlib.sha256(wasm.read_bytes()).hexdigest(),
+    'wasm_bytes': wasm.stat().st_size,
+}
+pathlib.Path('web/build.json').write_text(json.dumps(receipt, indent=2) + '\n')
+PY

@@ -58,15 +58,63 @@ pub struct HeroPaperdollRuntime {
     key: Option<HeroPaperdollKey>,
     image: Option<Handle<Image>>,
     error_key: Option<HeroPaperdollKey>,
+    world_key: Option<HeroPaperdollKey>,
+    world_source: Option<Handle<Image>>,
+    world_image: Option<Handle<Image>>,
 }
 
 impl HeroPaperdollRuntime {
     pub fn image(&self) -> Option<Handle<Image>> {
         self.image.clone()
     }
+
+    /// Never show a previous race/weapon/outfit while the new one is loading.
+    pub fn image_for(&self, loadout: &HeroLoadout) -> Option<Handle<Image>> {
+        (self.key == Some(HeroPaperdollKey::from_loadout(loadout)))
+            .then(|| self.image())
+            .flatten()
+    }
+
+    pub fn world_image_for(&self, loadout: &HeroLoadout) -> Option<Handle<Image>> {
+        (self.world_key == Some(HeroPaperdollKey::from_loadout(loadout)))
+            .then(|| self.world_image.clone())
+            .flatten()
+    }
 }
 
 pub struct HeroPaperdollPlugin;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn outfit_layer_alpha_preserves_empty_pixels_and_overlays_opaque_gear() {
+        let mut pixel = [30, 60, 90, 255];
+        blend_rgba(&mut pixel, &[255, 0, 0, 0]);
+        assert_eq!(pixel, [30, 60, 90, 255]);
+        blend_rgba(&mut pixel, &[0, 200, 100, 255]);
+        assert_eq!(pixel, [0, 200, 100, 255]);
+        let mut empty = [0; 4];
+        blend_rgba(&mut empty, &[20, 40, 60, 128]);
+        assert_eq!(empty, [20, 40, 60, 128]);
+    }
+
+    #[test]
+    fn cached_preview_is_only_valid_for_exact_current_outfit() {
+        let mut loadout = HeroLoadout::default();
+        loadout.gear = [None; HeroGearSlot::COUNT];
+        let runtime = HeroPaperdollRuntime {
+            key: Some(HeroPaperdollKey::from_loadout(&loadout)),
+            image: Some(Handle::default()),
+            error_key: None,
+            ..default()
+        };
+        assert!(runtime.image_for(&loadout).is_some());
+        loadout.gear[HeroGearSlot::Armor.idx()] = Some(HeroGear::VowPlate);
+        assert!(runtime.image_for(&loadout).is_none());
+    }
+}
 
 impl Plugin for HeroPaperdollPlugin {
     fn build(&self, app: &mut App) {
@@ -74,7 +122,11 @@ impl Plugin for HeroPaperdollPlugin {
             .add_systems(Startup, load_hero_paperdoll_asset)
             .add_systems(
                 Update,
-                (refresh_hero_paperdoll_image, apply_hero_paperdoll_image),
+                (refresh_hero_paperdoll_image, apply_hero_paperdoll_image).chain(),
+            )
+            .add_systems(
+                Update,
+                apply_animated_outfit.after(crate::build::refresh_hero_visual),
             );
     }
 }
@@ -91,7 +143,21 @@ fn refresh_hero_paperdoll_image(
     mut runtime: ResMut<HeroPaperdollRuntime>,
     mut paperdolls: ResMut<Assets<PaperdollAsset>>,
     mut images: ResMut<Assets<Image>>,
+    mut source_events: MessageReader<AssetEvent<PaperdollAsset>>,
 ) {
+    // A failed composition must not remain permanently cached after the source
+    // asset finishes loading or is repaired through hot reload.
+    let source_changed = source_events.read().any(|event| match event {
+        AssetEvent::Modified { id } | AssetEvent::LoadedWithDependencies { id } => assets
+            .as_ref()
+            .is_some_and(|assets| assets.source.id() == *id),
+        _ => false,
+    });
+    if source_changed {
+        runtime.key = None;
+        runtime.error_key = None;
+        runtime.world_key = None;
+    }
     let key = HeroPaperdollKey::from_loadout(&loadout);
     if runtime.key == Some(key) && runtime.image.is_some() {
         return;
@@ -103,11 +169,13 @@ fn refresh_hero_paperdoll_image(
     let Some(assets) = assets else {
         return;
     };
-    let Some(mut asset) = paperdolls.get_mut(&assets.source) else {
+    // Creating/removing runtime dolls does not change the source artwork. Do
+    // not emit Modified here: that would invalidate our own cache every frame.
+    let Some(asset) = paperdolls.get_mut_untracked(&assets.source) else {
         return;
     };
 
-    match compose_hero_paperdoll(&mut asset, &loadout) {
+    match compose_hero_paperdoll(asset, &loadout) {
         Ok(image) => {
             runtime.image = Some(images.add(image));
             runtime.key = Some(key);
@@ -118,6 +186,112 @@ fn refresh_hero_paperdoll_image(
             runtime.error_key = Some(key);
         }
     }
+}
+
+/// Apply the same equipped fragments to every animation cell, rather than
+/// replacing an animated hero with a static portrait. Always compose from the
+/// original sheet so removing gear cannot leave stale layers behind.
+fn apply_animated_outfit(
+    loadout: Res<HeroLoadout>,
+    walks: Res<crate::build::HeroWalks>,
+    source: Option<Res<HeroPaperdollAssets>>,
+    paperdolls: Res<Assets<PaperdollAsset>>,
+    layouts: Res<Assets<TextureAtlasLayout>>,
+    mut images: ResMut<Assets<Image>>,
+    mut runtime: ResMut<HeroPaperdollRuntime>,
+    mut heroes: Query<&mut Sprite, With<crate::build::HeroWalkAnim>>,
+) {
+    let Some(cfg) = walks
+        .race_worlds
+        .get(&(loadout.weapon, loadout.race))
+        .or_else(|| walks.weapon_walks.get(&loadout.weapon))
+    else {
+        return;
+    };
+    let key = HeroPaperdollKey::from_loadout(&loadout);
+    if runtime.world_key != Some(key) || runtime.world_source.as_ref() != Some(&cfg.image) {
+        let Some(asset) = source
+            .as_ref()
+            .and_then(|source| paperdolls.get(&source.source))
+        else {
+            return;
+        };
+        let (Some(base), Some(layout)) = (images.get(&cfg.image), layouts.get(&cfg.layout)) else {
+            return;
+        };
+        if !matches!(
+            base.texture_descriptor.format,
+            bevy::render::render_resource::TextureFormat::Rgba8Unorm
+                | bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb
+        ) {
+            return;
+        }
+        let mut composed = base.clone();
+        let width = composed.width();
+        let Some(pixels) = composed.data.as_mut() else {
+            return;
+        };
+        for item in loadout.gear.iter().flatten() {
+            let def = item.def();
+            let fragments = asset.get_fragments_by_slot(def.slot.paperdoll_slot());
+            let Some(fragment) = fragments
+                .into_iter()
+                .find(|fragment| fragment.id() == def.paperdoll_fragment)
+            else {
+                return;
+            };
+            let layer = &fragment.image;
+            if layer.width == 0 || layer.height == 0 {
+                return;
+            }
+            for cell in &layout.textures {
+                for y in 0..cell.height() {
+                    for x in 0..cell.width() {
+                        let sx = x * layer.width / cell.width();
+                        let sy = y * layer.height / cell.height();
+                        let src = ((sy * layer.width + sx) * 4) as usize;
+                        let dst = (((cell.min.y + y) * width + cell.min.x + x) * 4) as usize;
+                        if src + 4 <= layer.pixels.len() && dst + 4 <= pixels.len() {
+                            if *item == HeroGear::CarrotWings {
+                                // Back attachments must not cover the face,
+                                // hands or the already-equipped front layers.
+                                let mut behind = [0; 4];
+                                behind.copy_from_slice(&layer.pixels[src..src + 4]);
+                                blend_rgba(&mut behind, &pixels[dst..dst + 4]);
+                                pixels[dst..dst + 4].copy_from_slice(&behind);
+                            } else {
+                                blend_rgba(&mut pixels[dst..dst + 4], &layer.pixels[src..src + 4]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        runtime.world_image = Some(images.add(composed));
+        runtime.world_source = Some(cfg.image.clone());
+        runtime.world_key = Some(key);
+    }
+    if let Some(image) = runtime.world_image_for(&loadout) {
+        for mut sprite in &mut heroes {
+            sprite.image = image.clone();
+        }
+    }
+}
+
+fn blend_rgba(dst: &mut [u8], src: &[u8]) {
+    let alpha = src[3] as f32 / 255.0;
+    if alpha == 0.0 {
+        return;
+    }
+    let base_alpha = dst[3] as f32 / 255.0;
+    let out_alpha = alpha + base_alpha * (1.0 - alpha);
+    for channel in 0..3 {
+        dst[channel] = ((src[channel] as f32 * alpha
+            + dst[channel] as f32 * base_alpha * (1.0 - alpha))
+            / out_alpha)
+            .round() as u8;
+    }
+    dst[3] = (out_alpha * 255.0).round() as u8;
 }
 
 fn compose_hero_paperdoll(

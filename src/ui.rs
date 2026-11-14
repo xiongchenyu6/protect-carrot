@@ -172,6 +172,115 @@ pub struct UiFont(pub Handle<Font>);
 // ---- markers (public so `despawn_with::<_>` can target them from main) ----
 #[derive(Component)]
 pub struct HudRoot;
+/// Opaque HUD surfaces that consume pointer input even between their buttons.
+#[derive(Component)]
+pub struct WorldInputBlocker;
+
+#[cfg(test)]
+mod pointer_tests {
+    use super::*;
+    use bevy::ecs::system::SystemState;
+
+    #[test]
+    fn visible_dock_blocks_ui_not_board_and_hidden_dock_does_not_block() {
+        let mut world = World::new();
+        let dock = world
+            .spawn((
+                DockRoot,
+                InheritedVisibility::VISIBLE,
+                Node::default(),
+                ComputedNode {
+                    size: Vec2::new(400.0, 100.0),
+                    ..default()
+                },
+                UiGlobalTransform::from_translation(Vec2::new(400.0, 600.0)),
+            ))
+            .id();
+        let mut window = Window::default();
+        window.resolution.set_scale_factor_override(Some(2.0));
+        let camera = Camera::default();
+        let mut state = SystemState::<UiPointerBlocker>::new(&mut world);
+        let blocker = state.get(&world).unwrap();
+        assert!(blocker.contains(Vec2::new(200.0, 300.0), &window, &camera));
+        assert!(!blocker.contains(Vec2::new(200.0, 100.0), &window, &camera));
+        world.entity_mut(dock).get_mut::<Node>().unwrap().display = Display::None;
+        assert!(
+            !state
+                .get(&world)
+                .unwrap()
+                .contains(Vec2::new(200.0, 300.0), &window, &camera)
+        );
+    }
+
+    #[test]
+    fn stale_pressed_button_does_not_capture_board_pointer() {
+        let mut world = World::new();
+        world.spawn((
+            UiAction::Upgrade,
+            InheritedVisibility::VISIBLE,
+            Interaction::Pressed,
+            Node::default(),
+            ComputedNode {
+                size: Vec2::splat(50.0),
+                ..default()
+            },
+            UiGlobalTransform::from_translation(Vec2::new(200.0, 300.0)),
+        ));
+        let mut state = SystemState::<UiPointerBlocker>::new(&mut world);
+        let blocker = state.get(&world).unwrap();
+        assert!(blocker.contains(
+            Vec2::new(200.0, 300.0),
+            &Window::default(),
+            &Camera::default()
+        ));
+        assert!(!blocker.contains(
+            Vec2::new(50.0, 50.0),
+            &Window::default(),
+            &Camera::default()
+        ));
+    }
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct UiPointerBlocker<'w, 's> {
+    nodes: Query<
+        'w,
+        's,
+        (
+            &'static Node,
+            &'static ComputedNode,
+            &'static UiGlobalTransform,
+            Option<&'static InheritedVisibility>,
+        ),
+        Or<(
+            With<UiAction>,
+            With<WorldInputBlocker>,
+            With<DockRoot>,
+            With<HeroPanelRoot>,
+            With<RunStatsRoot>,
+            With<SettingsRoot>,
+            With<RogueliteDraftRoot>,
+            With<MobileHudRoot>,
+        )>,
+    >,
+}
+
+impl UiPointerBlocker<'_, '_> {
+    pub fn contains(&self, screen: Vec2, window: &Window, camera: &Camera) -> bool {
+        let origin = camera
+            .physical_viewport_rect()
+            .map_or(Vec2::ZERO, |rect| rect.min.as_vec2());
+        let point = screen * window.scale_factor() - origin;
+        self.nodes
+            .iter()
+            .any(|(node, computed, transform, visibility)| {
+                node.display != Display::None
+                    && visibility.is_none_or(|visibility| visibility.get())
+                    && computed.size().min_element() > 0.0
+                    && computed.contains_point(*transform, point)
+            })
+    }
+}
 /// Full-screen red overlay that flashes when the carrot loses a life. `level` is
 /// the current alpha (decays each frame); driven by [`update_screen_flash`].
 #[derive(Component)]
@@ -2210,6 +2319,7 @@ pub fn spawn_hud(
             BackgroundColor(PANEL_BG),
             ScrollPosition::default(),
             HudRoot,
+            WorldInputBlocker,
         ))
         .with_children(|p| {
             // --- stats (compact, two rows) ---
@@ -6470,6 +6580,7 @@ pub fn update_story_animation(
 pub fn play_story_voiceover(
     mut commands: Commands,
     assets: Res<AssetServer>,
+    audio: Res<crate::audio::AudioSettings>,
     time: Res<Time>,
     mode: Res<GameMode>,
     current: Res<CurrentLevel>,
@@ -6508,7 +6619,7 @@ pub fn play_story_voiceover(
             ),
             PlaybackSettings {
                 mode: PlaybackMode::Despawn,
-                volume: Volume::Linear(0.82),
+                volume: Volume::Linear(0.82 * audio.master * crate::audio::MIX_HEADROOM),
                 ..default()
             },
             StoryRoot,
@@ -7509,7 +7620,7 @@ pub fn update_hero_paperdoll_panel(
 ) {
     let preview = paperdoll
         .as_ref()
-        .and_then(|runtime| runtime.image())
+        .and_then(|runtime| runtime.image_for(&hero))
         .unwrap_or_else(|| sprites.heroes[&hero.weapon].clone());
     for mut image in &mut previews {
         image.image = preview.clone();

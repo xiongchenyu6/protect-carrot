@@ -1153,6 +1153,7 @@ fn run_sim_with_hero(
                 tower::enemy_vs_ally,
                 tower::enemy_vs_tower,
                 enemy::boss_specials,
+                protect_carrot::boss_reinforcements::update,
                 tower::update_fire_grounds,
                 enemy::spawn_enemies,
                 enemy::update_enemies,

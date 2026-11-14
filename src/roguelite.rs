@@ -349,7 +349,7 @@ impl RogueliteRun {
         }
         self.draft = Some(RogueliteDraft {
             wave,
-            choices: draft_choices(loadout, rng),
+            choices: draft_choices(loadout, &self.picked, rng),
         });
         true
     }
@@ -380,9 +380,22 @@ pub fn reset_run(
     talents.rogue_damage_mult = 1.0;
     talents.rogue_range_mult = 1.0;
     talents.rogue_firerate_mult = 1.0;
+    talents.rogue_arrow_damage_mult = 1.0;
+    talents.rogue_arrow_range_mult = 1.0;
+    talents.rogue_cannon_radius_mult = 1.0;
+    talents.rogue_cannon_firerate_mult = 1.0;
+    talents.rogue_magic_damage_mult = 1.0;
+    talents.rogue_magic_firerate_mult = 1.0;
+    talents.rogue_ice_damage_mult = 1.0;
+    talents.rogue_ice_slow_mult = 1.0;
+    talents.rogue_detection_range_mult = 1.0;
 }
 
-fn draft_choices(loadout: &HeroLoadout, rng: &mut Rng) -> [RogueliteTalent; 3] {
+fn draft_choices(
+    loadout: &HeroLoadout,
+    picked: &[RogueliteTalent],
+    rng: &mut Rng,
+) -> [RogueliteTalent; 3] {
     let race_pool: &[RogueliteTalent] = match loadout.race {
         Race::Human => &[
             RogueliteTalent::HumanFormation,
@@ -404,11 +417,43 @@ fn draft_choices(loadout: &HeroLoadout, rng: &mut Rng) -> [RogueliteTalent; 3] {
         RogueliteTalent::GemResonance,
         RogueliteTalent::CarrotDividend,
     ];
-    [
-        race_pool[rng.range(race_pool.len())],
-        weapon_pool[rng.range(weapon_pool.len())],
-        common_pool[rng.range(common_pool.len())],
-    ]
+    let tower_pool = [
+        RogueliteTalent::ArrowVolley,
+        RogueliteTalent::CannonShockwave,
+        RogueliteTalent::ArcaneSurge,
+        RogueliteTalent::Frostbound,
+        RogueliteTalent::ScoutNetwork,
+    ];
+    let mut deck = Vec::with_capacity(
+        race_pool.len() + weapon_pool.len() + common_pool.len() + tower_pool.len(),
+    );
+    deck.extend_from_slice(race_pool);
+    deck.extend_from_slice(&weapon_pool);
+    deck.extend_from_slice(&common_pool);
+    deck.extend_from_slice(&tower_pool);
+
+    // First consume every card the player has not taken. Near the end of a
+    // deck, keep its last one or two unseen cards in the offer and fill the
+    // remaining slots from earlier picks; do not hide new options simply
+    // because there are fewer than three left. Once all cards were taken,
+    // offers naturally begin a fresh, still-distinct cycle.
+    let mut available: Vec<_> = deck
+        .iter()
+        .copied()
+        .filter(|talent| !picked.contains(talent))
+        .collect();
+    let mut choices = Vec::with_capacity(3);
+    while choices.len() < 3 && !available.is_empty() {
+        choices.push(available.swap_remove(rng.range(available.len())));
+    }
+    let mut repeats: Vec<_> = deck
+        .into_iter()
+        .filter(|talent| !choices.contains(talent))
+        .collect();
+    while choices.len() < 3 {
+        choices.push(repeats.swap_remove(rng.range(repeats.len())));
+    }
+    [choices[0], choices[1], choices[2]]
 }
 
 fn weapon_is_melee(weapon: HeroWeapon) -> bool {
@@ -553,7 +598,6 @@ pub fn apply_tower_special_mods(tower: &mut Tower, talents: &Talents) {
             talents.rogue_ice_slow_mult,
         ),
         TowerKind::Detection => (1.0, talents.rogue_detection_range_mult, 1.0, 1.0, 1.0),
-        _ => return,
     };
     scale_tower(tower, damage, range, cooldown, radius, slow);
 }
@@ -611,5 +655,50 @@ mod tests {
     fn family_card_feedback_targets_only_its_family() {
         assert!(RogueliteTalent::ArrowVolley.affects_tower(&tower(TowerKind::Arrow)));
         assert!(!RogueliteTalent::ArrowVolley.affects_tower(&tower(TowerKind::Cannon)));
+    }
+
+    #[test]
+    fn draft_is_distinct_and_avoids_taken_cards() {
+        let mut loadout = HeroLoadout::default();
+        loadout.race = Race::Human;
+        let already_taken = [
+            RogueliteTalent::HumanFormation,
+            RogueliteTalent::WeaponTempo,
+            RogueliteTalent::ArrowVolley,
+        ];
+        let mut rng = Rng(42);
+        let choices = draft_choices(&loadout, &already_taken, &mut rng);
+
+        assert!(choices.iter().all(|choice| !already_taken.contains(choice)));
+        assert!(choices[0] != choices[1]);
+        assert!(choices[0] != choices[2]);
+        assert!(choices[1] != choices[2]);
+    }
+
+    #[test]
+    fn draft_keeps_the_last_unseen_cards_visible() {
+        let mut loadout = HeroLoadout::default();
+        loadout.race = Race::Human;
+        let picked = [
+            RogueliteTalent::HumanFormation,
+            RogueliteTalent::HumanLogistics,
+            RogueliteTalent::WeaponMastery,
+            RogueliteTalent::WeaponTempo,
+            RogueliteTalent::WeaponSignature,
+            RogueliteTalent::TowerOverclock,
+            RogueliteTalent::GemResonance,
+            RogueliteTalent::CarrotDividend,
+            RogueliteTalent::ArrowVolley,
+            RogueliteTalent::ArcaneSurge,
+            RogueliteTalent::ScoutNetwork,
+        ];
+        let mut rng = Rng(7);
+        let choices = draft_choices(&loadout, &picked, &mut rng);
+
+        assert!(choices.contains(&RogueliteTalent::CannonShockwave));
+        assert!(choices.contains(&RogueliteTalent::Frostbound));
+        assert!(choices[0] != choices[1]);
+        assert!(choices[0] != choices[2]);
+        assert!(choices[1] != choices[2]);
     }
 }

@@ -1,0 +1,38 @@
+name: Deploy playable GitHub Pages build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: carrot-pages
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: pages-wasm
+      - name: Check audio bootstrap
+        run: node --test tests/web_audio_unlock.mjs
+      - name: Build WebGPU game and assets
+        run: bash build-web.sh release
+      - name: Publish playable site
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: web
+          publish_branch: gh-pages
+          force_orphan: true
+          commit_message: Deploy game ${{ github.sha }}

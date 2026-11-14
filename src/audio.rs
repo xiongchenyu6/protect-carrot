@@ -7,11 +7,17 @@ use bevy::audio::{PlaybackMode, Volume};
 use bevy::prelude::*;
 use std::collections::HashMap;
 
+/// Leave 6 dB of headroom for simultaneous impacts, deaths and music.
+pub const MIX_HEADROOM: f32 = 0.5;
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Sound {
     Build,
     Shoot,
     Hit,
+    HeavyHit,
+    EmpoweredHit,
+    FinisherHit,
     Explosion,
     Death,
     Meteor,
@@ -42,7 +48,7 @@ impl Sound {
         match self {
             Build => "build",
             Shoot => "shoot",
-            Hit => "hit",
+            Hit | HeavyHit | EmpoweredHit | FinisherHit => "hit",
             Explosion => "explosion",
             Death => "death",
             Meteor => "meteor",
@@ -69,6 +75,9 @@ impl Sound {
     /// Minimum seconds between plays of this sound (throttle spammy ones).
     fn min_gap(self) -> f32 {
         match self {
+            Sound::HeavyHit => 0.12,
+            Sound::EmpoweredHit => 0.14,
+            Sound::FinisherHit => 0.25,
             Sound::Death | Sound::Explosion | Sound::Hit => 0.06,
             Sound::Shoot | Sound::Laser | Sound::Chain | Sound::Poison => 0.05,
             Sound::Summon | Sound::Raise | Sound::Curse => 0.18,
@@ -78,10 +87,21 @@ impl Sound {
     }
     fn volume(self) -> f32 {
         match self {
+            Sound::HeavyHit | Sound::EmpoweredHit => 0.55,
+            Sound::FinisherHit => 0.65,
             Sound::Death | Sound::Hit | Sound::Shoot => 0.4,
             Sound::Explosion => 0.55,
             Sound::Victory | Sound::Defeat => 0.8,
             _ => 0.6,
+        }
+    }
+
+    fn pitch(self) -> f32 {
+        match self {
+            Sound::HeavyHit => 0.82,
+            Sound::EmpoweredHit => 1.14,
+            Sound::FinisherHit => 0.70,
+            _ => 1.0,
         }
     }
 }
@@ -146,10 +166,13 @@ impl Sfx {
 #[derive(Message)]
 pub struct SfxEvent(pub Sound);
 
-const ALL: [Sound; 24] = [
+const ALL: [Sound; 27] = [
     Sound::Build,
     Sound::Shoot,
     Sound::Hit,
+    Sound::HeavyHit,
+    Sound::EmpoweredHit,
+    Sound::FinisherHit,
     Sound::Explosion,
     Sound::Death,
     Sound::Meteor,
@@ -180,7 +203,7 @@ pub fn start_bgm(mut commands: Commands, assets: Res<AssetServer>, audio: Res<Au
         AudioPlayer(assets.load::<AudioSource>("audio/bgm.wav")),
         PlaybackSettings {
             mode: PlaybackMode::Loop,
-            volume: Volume::Linear(BGM_BASE * audio.master),
+            volume: Volume::Linear(BGM_BASE * audio.master * MIX_HEADROOM),
             ..default()
         },
         Bgm,
@@ -205,7 +228,8 @@ pub fn play_oneshot(commands: &mut Commands, sfx: &Sfx, s: Sound, master: f32) {
         AudioPlayer(sfx.handle(s)),
         PlaybackSettings {
             mode: PlaybackMode::Despawn,
-            volume: Volume::Linear(s.volume() * master),
+            volume: Volume::Linear(s.volume() * master * MIX_HEADROOM),
+            speed: s.pitch(),
             ..default()
         },
     ));
@@ -241,7 +265,7 @@ pub fn apply_master_volume(audio: Res<AudioSettings>, mut sinks: Query<&mut Audi
         return;
     }
     for mut sink in &mut sinks {
-        sink.set_volume(Volume::Linear(BGM_BASE * audio.master));
+        sink.set_volume(Volume::Linear(BGM_BASE * audio.master * MIX_HEADROOM));
     }
 }
 
@@ -273,6 +297,51 @@ fn load_volume() -> String {
 #[cfg(target_arch = "wasm32")]
 fn save_volume(value: &str) {
     save_volume_js(value);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+
+    #[test]
+    fn graded_impacts_use_real_playback_pitch_volume_and_master_gain() {
+        for sound in [
+            Sound::Hit,
+            Sound::HeavyHit,
+            Sound::EmpoweredHit,
+            Sound::FinisherHit,
+        ] {
+            let mut app = App::new();
+            let sfx = Sfx {
+                handles: ALL
+                    .into_iter()
+                    .map(|sound| (sound, Handle::default()))
+                    .collect(),
+                last: HashMap::new(),
+            };
+            app.world_mut()
+                .run_system_once(move |mut commands: Commands| {
+                    play_oneshot(&mut commands, &sfx, sound, 0.5);
+                })
+                .unwrap();
+            let world = app.world_mut();
+            let mut query = world.query::<&PlaybackSettings>();
+            let settings = query.single(world).unwrap();
+            assert_eq!(settings.speed, sound.pitch());
+            match settings.volume {
+                Volume::Linear(volume) => {
+                    assert!((volume - sound.volume() * 0.5 * MIX_HEADROOM).abs() < 0.001)
+                }
+                _ => panic!("master gain must be linear"),
+            }
+            assert_eq!(sound.file(), Sound::Hit.file());
+            assert!(sound.min_gap() >= 0.06);
+        }
+        assert!(Sound::HeavyHit.pitch() < Sound::Hit.pitch());
+        assert!(Sound::EmpoweredHit.pitch() > Sound::Hit.pitch());
+        assert!(Sound::FinisherHit.volume() > Sound::Hit.volume());
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
