@@ -52,7 +52,7 @@ sprites are WebP, and all runtime audio is WAV.
 
 > The wasm CLI (`wasm-bindgen-cli`) and the `wasm-bindgen` crate **must be the same
 > version**. The flake pins the CLI and `Cargo.toml` pins the crate to match
-> (`=0.2.121`). If you bump one, bump the other.
+> (`=0.2.126`). If you bump one, bump the other.
 
 ---
 
