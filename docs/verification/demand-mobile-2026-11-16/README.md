@@ -37,4 +37,9 @@ This reproduces and fixes the former touch mismatch (884×409 backing store for 
 - JSON companions record requests and JavaScript errors; logs record test output.
 
 This is browser touch emulation, not certification on a physical Android handset.
-Public deployment verification is recorded separately after publishing.
+Public Pages release `65b419a4fe7e5121cf8b87a364fc9d25af7c5dd6` is verified.
+The final mobile/desktop and offline JSON reports now record the public URL;
+all report zero JavaScript errors. The offline briefing screenshot was reviewed:
+the cached chapter scene, HUD and tutorial render after a full browser restart.
+`public-release.json` records matching hosted build/manifest revisions and
+independently downloaded immutable resource hashes. Physical phone testing remains outstanding.

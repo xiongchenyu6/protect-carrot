@@ -1,0 +1,26 @@
+{
+  "revision": "65b419a4fe7e5121cf8b87a364fc9d25af7c5dd6",
+  "manifestVersion": "861ef4df4700d1eb39f37d7cf06d240caf947635f3233ea0e09bfb0eaf6689aa",
+  "checked": [
+    {
+      "path": "assets/audio/bgm.ogg",
+      "bytes": 5344485,
+      "sha256": "77431d8602e48a3f15b1d8f7925ec1f8b7afa21e3ca1f406fe49bc8c5dc00cf8"
+    },
+    {
+      "path": "icons/icon-192.png",
+      "bytes": 20061,
+      "sha256": "9e41aedef25f44e9d834bcee08d7cc40310860608819d67a3e1015037dd65750"
+    },
+    {
+      "path": "protect_carrot_bg.wasm.gz",
+      "bytes": 9518850,
+      "sha256": "2cec8be885a0701cc7cfc88a72a4f316eb9546e6f0aa43412a3edd3dfa7dc6f4"
+    }
+  ],
+  "browserReports": [
+    "final-mobile.json",
+    "final-desktop.json",
+    "offline/final-desktop.json"
+  ]
+}
