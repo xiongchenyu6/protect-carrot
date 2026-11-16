@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#15201a"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><link rel="manifest" href="./manifest.webmanifest"><link rel="apple-touch-icon" href="./icons/icon-192.png"><link rel="icon" href="favicon.ico"><link rel="stylesheet" href="./launcher.css"><link rel="stylesheet" href="./game-cache.css"><link rel="stylesheet" href="./pwa.css"><title>保卫萝卜</title></head><body>
+<main id="loading"><div class="panel"><nav aria-label="语言 / Language"><button data-language="zh-CN">简中</button><button data-language="en">EN</button></nav><img class="carrot" src="./icons/icon-192.png" alt=""><h1 id="title">保卫萝卜</h1><p id="status" aria-live="polite"></p><button id="start" type="button">开始游戏</button><button id="enter" type="button" hidden>进入游戏</button>
+<section id="cache-card" aria-live="polite"><p id="cache-status"></p><progress id="cache-progress" hidden max="1" value="0"></progress><div id="cache-actions"><button id="cache-update" hidden></button><button id="cache-later" hidden></button></div></section>
+<section id="install-card" hidden><p id="install-summary"></p><button id="install-button" class="install-action"><span id="install-label"></span></button></section></div></main>
+<dialog id="install-dialog"><h2 id="install-title"></h2><ol id="install-steps"></ol><p id="install-note"></p><button id="install-close" class="install-action"></button></dialog>
+<aside id="rotate" hidden><strong id="rotate-title"></strong><p id="rotate-note"></p></aside>
+  <script>
+    // Install before the wasm-bindgen module captures the AudioContext constructor.
+    // CPAL creates its stream during loading, before autoplay is permitted.
+    (() => {
+      const contexts = new Set();
+      for (const name of ['AudioContext', 'webkitAudioContext']) {
+        const NativeContext = window[name];
+        if (!NativeContext) continue;
+        window[name] = class extends NativeContext {
+          constructor(...args) {
+            super(...args);
+            contexts.add(this);
+          }
+        };
+      }
+      function unlockAudio() {
+        for (const context of contexts) {
+          if (context.state === 'closed') contexts.delete(context);
+          else if (context.state === 'suspended') context.resume().catch(() => {});
+        }
+      }
+      // Keep retrying on later gestures after tab/background interruptions.
+      for (const event of ['pointerdown', 'touchend', 'keydown']) {
+        window.addEventListener(event, unlockAudio, { capture: true, passive: true });
+      }
+    })();
+  </script>
+<script type="module">import "./launcher.js";</script></body></html>

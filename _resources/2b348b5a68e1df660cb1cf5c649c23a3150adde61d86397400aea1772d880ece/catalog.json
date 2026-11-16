@@ -1,0 +1,3909 @@
+{
+  "revision": "044e12a45dc9cc312cec50ee606dfc98afe5adc2",
+  "effects": [
+    {
+      "id": "arcane/arcane-beam",
+      "size": [
+        264,
+        100
+      ],
+      "pivot": [
+        26,
+        84
+      ],
+      "fps": 30,
+      "frames": 36,
+      "columns": 4,
+      "looping": true,
+      "contact": 0.1
+    },
+    {
+      "id": "arcane/arcane-missiles",
+      "size": [
+        240,
+        116
+      ],
+      "pivot": [
+        26,
+        88
+      ],
+      "fps": 30,
+      "frames": 54,
+      "columns": 6,
+      "looping": false,
+      "contact": 0.77
+    },
+    {
+      "id": "arcane/arcane-orb",
+      "size": [
+        136,
+        112
+      ],
+      "pivot": [
+        68,
+        104
+      ],
+      "fps": 30,
+      "frames": 72,
+      "columns": 8,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "arcane/blink-in",
+      "size": [
+        136,
+        96
+      ],
+      "pivot": [
+        68,
+        80
+      ],
+      "fps": 30,
+      "frames": 43,
+      "columns": 6,
+      "looping": false,
+      "contact": 0.48
+    },
+    {
+      "id": "arcane/blink-out",
+      "size": [
+        136,
+        96
+      ],
+      "pivot": [
+        68,
+        80
+      ],
+      "fps": 30,
+      "frames": 49,
+      "columns": 6,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "arcane/magic-circle-cast",
+      "size": [
+        200,
+        220
+      ],
+      "pivot": [
+        100,
+        192
+      ],
+      "fps": 30,
+      "frames": 118,
+      "columns": 12,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "arcane/mana-burst",
+      "size": [
+        208,
+        150
+      ],
+      "pivot": [
+        104,
+        124
+      ],
+      "fps": 30,
+      "frames": 55,
+      "columns": 7,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "arcane/portal",
+      "size": [
+        152,
+        116
+      ],
+      "pivot": [
+        76,
+        106
+      ],
+      "fps": 30,
+      "frames": 72,
+      "columns": 8,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "arcane/rune-circle",
+      "size": [
+        136,
+        100
+      ],
+      "pivot": [
+        68,
+        80
+      ],
+      "fps": 30,
+      "frames": 120,
+      "columns": 10,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "arcane/spell-charge",
+      "size": [
+        120,
+        86
+      ],
+      "pivot": [
+        44,
+        80
+      ],
+      "fps": 30,
+      "frames": 48,
+      "columns": 6,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "arcane/star-fall",
+      "size": [
+        232,
+        172
+      ],
+      "pivot": [
+        124,
+        150
+      ],
+      "fps": 30,
+      "frames": 76,
+      "columns": 8,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "arcane/time-stop",
+      "size": [
+        196,
+        136
+      ],
+      "pivot": [
+        98,
+        118
+      ],
+      "fps": 30,
+      "frames": 109,
+      "columns": 9,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "critters/bat",
+      "size": [
+        112,
+        80
+      ],
+      "pivot": [
+        56,
+        40
+      ],
+      "fps": 30,
+      "frames": 72,
+      "columns": 8,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "critters/bird",
+      "size": [
+        112,
+        80
+      ],
+      "pivot": [
+        56,
+        40
+      ],
+      "fps": 30,
+      "frames": 72,
+      "columns": 8,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "critters/butterfly",
+      "size": [
+        128,
+        88
+      ],
+      "pivot": [
+        64,
+        44
+      ],
+      "fps": 30,
+      "frames": 96,
+      "columns": 9,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "critters/eyeball",
+      "size": [
+        96,
+        108
+      ],
+      "pivot": [
+        48,
+        100
+      ],
+      "fps": 30,
+      "frames": 96,
+      "columns": 11,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "critters/fish-school",
+      "size": [
+        136,
+        80
+      ],
+      "pivot": [
+        68,
+        40
+      ],
+      "fps": 30,
+      "frames": 144,
+      "columns": 10,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "critters/flying-skull",
+      "size": [
+        96,
+        132
+      ],
+      "pivot": [
+        48,
+        120
+      ],
+      "fps": 30,
+      "frames": 72,
+      "columns": 10,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "critters/frog",
+      "size": [
+        112,
+        88
+      ],
+      "pivot": [
+        56,
+        80
+      ],
+      "fps": 30,
+      "frames": 78,
+      "columns": 8,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "critters/ghost",
+      "size": [
+        96,
+        100
+      ],
+      "pivot": [
+        48,
+        90
+      ],
+      "fps": 30,
+      "frames": 72,
+      "columns": 9,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "critters/jellyfish",
+      "size": [
+        96,
+        120
+      ],
+      "pivot": [
+        48,
+        38
+      ],
+      "fps": 30,
+      "frames": 96,
+      "columns": 11,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "critters/slime",
+      "size": [
+        112,
+        88
+      ],
+      "pivot": [
+        56,
+        72
+      ],
+      "fps": 30,
+      "frames": 54,
+      "columns": 7,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "critters/snake",
+      "size": [
+        136,
+        56
+      ],
+      "pivot": [
+        68,
+        48
+      ],
+      "fps": 30,
+      "frames": 72,
+      "columns": 6,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "critters/wisp",
+      "size": [
+        128,
+        104
+      ],
+      "pivot": [
+        64,
+        96
+      ],
+      "fps": 30,
+      "frames": 96,
+      "columns": 9,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "explosions/barrel-explosion",
+      "size": [
+        300,
+        240
+      ],
+      "pivot": [
+        150,
+        204
+      ],
+      "fps": 30,
+      "frames": 157,
+      "columns": 12,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "explosions/big-explosion",
+      "size": [
+        360,
+        300
+      ],
+      "pivot": [
+        180,
+        262
+      ],
+      "fps": 30,
+      "frames": 217,
+      "columns": 14,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "explosions/cartoon-pow",
+      "size": [
+        184,
+        144
+      ],
+      "pivot": [
+        92,
+        72
+      ],
+      "fps": 30,
+      "frames": 33,
+      "columns": 6,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "explosions/dirt-explosion",
+      "size": [
+        260,
+        240
+      ],
+      "pivot": [
+        130,
+        206
+      ],
+      "fps": 30,
+      "frames": 109,
+      "columns": 11,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "explosions/firework-burst",
+      "size": [
+        240,
+        248
+      ],
+      "pivot": [
+        120,
+        100
+      ],
+      "fps": 30,
+      "frames": 109,
+      "columns": 11,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "explosions/firework-rocket",
+      "size": [
+        300,
+        300
+      ],
+      "pivot": [
+        150,
+        288
+      ],
+      "fps": 30,
+      "frames": 115,
+      "columns": 11,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "explosions/grenade",
+      "size": [
+        300,
+        200
+      ],
+      "pivot": [
+        160,
+        170
+      ],
+      "fps": 30,
+      "frames": 127,
+      "columns": 10,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "explosions/implosion",
+      "size": [
+        208,
+        184
+      ],
+      "pivot": [
+        104,
+        92
+      ],
+      "fps": 30,
+      "frames": 51,
+      "columns": 7,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "explosions/nuke",
+      "size": [
+        400,
+        320
+      ],
+      "pivot": [
+        200,
+        284
+      ],
+      "fps": 30,
+      "frames": 271,
+      "columns": 15,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "explosions/plasma-explosion",
+      "size": [
+        224,
+        200
+      ],
+      "pivot": [
+        112,
+        100
+      ],
+      "fps": 30,
+      "frames": 52,
+      "columns": 7,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "explosions/small-explosion",
+      "size": [
+        300,
+        240
+      ],
+      "pivot": [
+        150,
+        196
+      ],
+      "fps": 30,
+      "frames": 163,
+      "columns": 12,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "explosions/smoke-bomb",
+      "size": [
+        260,
+        176
+      ],
+      "pivot": [
+        130,
+        156
+      ],
+      "fps": 30,
+      "frames": 151,
+      "columns": 11,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "fire/brazier",
+      "size": [
+        112,
+        148
+      ],
+      "pivot": [
+        56,
+        136
+      ],
+      "fps": 30,
+      "frames": 90,
+      "columns": 11,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "fire/campfire",
+      "size": [
+        128,
+        128
+      ],
+      "pivot": [
+        64,
+        112
+      ],
+      "fps": 30,
+      "frames": 90,
+      "columns": 10,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "fire/candle",
+      "size": [
+        56,
+        76
+      ],
+      "pivot": [
+        28,
+        64
+      ],
+      "fps": 30,
+      "frames": 120,
+      "columns": 13,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "fire/fire-breath",
+      "size": [
+        160,
+        116
+      ],
+      "pivot": [
+        12,
+        72
+      ],
+      "fps": 30,
+      "frames": 45,
+      "columns": 6,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "fire/fire-ring",
+      "size": [
+        224,
+        128
+      ],
+      "pivot": [
+        112,
+        92
+      ],
+      "fps": 30,
+      "frames": 118,
+      "columns": 9,
+      "looping": false,
+      "contact": 0.32
+    },
+    {
+      "id": "fire/fire-tornado",
+      "size": [
+        120,
+        152
+      ],
+      "pivot": [
+        60,
+        136
+      ],
+      "fps": 30,
+      "frames": 60,
+      "columns": 9,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "fire/fireball",
+      "size": [
+        136,
+        56
+      ],
+      "pivot": [
+        112,
+        28
+      ],
+      "fps": 30,
+      "frames": 36,
+      "columns": 4,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "fire/flame-pillar",
+      "size": [
+        184,
+        256
+      ],
+      "pivot": [
+        92,
+        232
+      ],
+      "fps": 30,
+      "frames": 151,
+      "columns": 15,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "fire/flamethrower",
+      "size": [
+        184,
+        104
+      ],
+      "pivot": [
+        30,
+        60
+      ],
+      "fps": 30,
+      "frames": 48,
+      "columns": 6,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "fire/meteor",
+      "size": [
+        272,
+        232
+      ],
+      "pivot": [
+        150,
+        208
+      ],
+      "fps": 30,
+      "frames": 151,
+      "columns": 12,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "fire/spirit-flame",
+      "size": [
+        80,
+        124
+      ],
+      "pivot": [
+        40,
+        94
+      ],
+      "fps": 30,
+      "frames": 90,
+      "columns": 12,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "fire/torch",
+      "size": [
+        72,
+        120
+      ],
+      "pivot": [
+        36,
+        94
+      ],
+      "fps": 30,
+      "frames": 60,
+      "columns": 10,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "holy/blessing",
+      "size": [
+        80,
+        128
+      ],
+      "pivot": [
+        40,
+        108
+      ],
+      "fps": 30,
+      "frames": 90,
+      "columns": 12,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "holy/divine-shield",
+      "size": [
+        88,
+        84
+      ],
+      "pivot": [
+        44,
+        68
+      ],
+      "fps": 30,
+      "frames": 72,
+      "columns": 9,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "holy/feather-burst",
+      "size": [
+        160,
+        160
+      ],
+      "pivot": [
+        80,
+        60
+      ],
+      "fps": 30,
+      "frames": 91,
+      "columns": 10,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "holy/halo",
+      "size": [
+        56,
+        80
+      ],
+      "pivot": [
+        28,
+        70
+      ],
+      "fps": 30,
+      "frames": 60,
+      "columns": 10,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "holy/heal-aoe",
+      "size": [
+        256,
+        136
+      ],
+      "pivot": [
+        128,
+        104
+      ],
+      "fps": 30,
+      "frames": 88,
+      "columns": 7,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "holy/heal",
+      "size": [
+        80,
+        104
+      ],
+      "pivot": [
+        40,
+        92
+      ],
+      "fps": 30,
+      "frames": 58,
+      "columns": 9,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "holy/holy-pillar",
+      "size": [
+        192,
+        232
+      ],
+      "pivot": [
+        96,
+        204
+      ],
+      "fps": 30,
+      "frames": 106,
+      "columns": 12,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "holy/resurrection",
+      "size": [
+        192,
+        160
+      ],
+      "pivot": [
+        96,
+        140
+      ],
+      "fps": 30,
+      "frames": 145,
+      "columns": 11,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "holy/smite",
+      "size": [
+        224,
+        176
+      ],
+      "pivot": [
+        112,
+        148
+      ],
+      "fps": 30,
+      "frames": 85,
+      "columns": 9,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "holy/sunburst",
+      "size": [
+        128,
+        128
+      ],
+      "pivot": [
+        64,
+        64
+      ],
+      "fps": 30,
+      "frames": 120,
+      "columns": 11,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "ice/blizzard-vortex",
+      "size": [
+        128,
+        116
+      ],
+      "pivot": [
+        64,
+        102
+      ],
+      "fps": 30,
+      "frames": 60,
+      "columns": 8,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "ice/freeze",
+      "size": [
+        176,
+        128
+      ],
+      "pivot": [
+        88,
+        108
+      ],
+      "fps": 30,
+      "frames": 121,
+      "columns": 10,
+      "looping": false,
+      "contact": 0.62
+    },
+    {
+      "id": "ice/frost-breath",
+      "size": [
+        184,
+        104
+      ],
+      "pivot": [
+        12,
+        50
+      ],
+      "fps": 30,
+      "frames": 36,
+      "columns": 5,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "ice/frost-nova",
+      "size": [
+        288,
+        192
+      ],
+      "pivot": [
+        144,
+        150
+      ],
+      "fps": 30,
+      "frames": 103,
+      "columns": 9,
+      "looping": false,
+      "contact": 0.42
+    },
+    {
+      "id": "ice/ice-crystal",
+      "size": [
+        96,
+        100
+      ],
+      "pivot": [
+        48,
+        92
+      ],
+      "fps": 30,
+      "frames": 90,
+      "columns": 10,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "ice/ice-lance",
+      "size": [
+        176,
+        64
+      ],
+      "pivot": [
+        146,
+        32
+      ],
+      "fps": 30,
+      "frames": 24,
+      "columns": 3,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "ice/ice-shatter",
+      "size": [
+        224,
+        112
+      ],
+      "pivot": [
+        68,
+        90
+      ],
+      "fps": 30,
+      "frames": 85,
+      "columns": 7,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "ice/ice-spikes",
+      "size": [
+        264,
+        112
+      ],
+      "pivot": [
+        24,
+        96
+      ],
+      "fps": 30,
+      "frames": 91,
+      "columns": 7,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "ice/icicle-fall",
+      "size": [
+        152,
+        120
+      ],
+      "pivot": [
+        76,
+        100
+      ],
+      "fps": 30,
+      "frames": 79,
+      "columns": 8,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "ice/snowflake-burst",
+      "size": [
+        140,
+        120
+      ],
+      "pivot": [
+        70,
+        106
+      ],
+      "fps": 30,
+      "frames": 97,
+      "columns": 10,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "impacts/blunt-hit",
+      "size": [
+        128,
+        88
+      ],
+      "pivot": [
+        64,
+        72
+      ],
+      "fps": 30,
+      "frames": 28,
+      "columns": 5,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "impacts/bullet-impact",
+      "size": [
+        152,
+        100
+      ],
+      "pivot": [
+        116,
+        84
+      ],
+      "fps": 30,
+      "frames": 43,
+      "columns": 6,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "impacts/crit-hit",
+      "size": [
+        216,
+        136
+      ],
+      "pivot": [
+        84,
+        106
+      ],
+      "fps": 30,
+      "frames": 28,
+      "columns": 5,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "impacts/ground-slam",
+      "size": [
+        288,
+        208
+      ],
+      "pivot": [
+        144,
+        164
+      ],
+      "fps": 30,
+      "frames": 97,
+      "columns": 9,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "impacts/heavy-landing",
+      "size": [
+        176,
+        80
+      ],
+      "pivot": [
+        88,
+        60
+      ],
+      "fps": 30,
+      "frames": 49,
+      "columns": 5,
+      "looping": false,
+      "contact": 0.005
+    },
+    {
+      "id": "impacts/hit-flash",
+      "size": [
+        80,
+        64
+      ],
+      "pivot": [
+        40,
+        54
+      ],
+      "fps": 30,
+      "frames": 16,
+      "columns": 4,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "impacts/hit-spark",
+      "size": [
+        136,
+        80
+      ],
+      "pivot": [
+        44,
+        64
+      ],
+      "fps": 30,
+      "frames": 16,
+      "columns": 4,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "impacts/impact-frame",
+      "size": [
+        320,
+        180
+      ],
+      "pivot": [
+        160,
+        90
+      ],
+      "fps": 30,
+      "frames": 10,
+      "columns": 3,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "impacts/parry",
+      "size": [
+        200,
+        112
+      ],
+      "pivot": [
+        100,
+        96
+      ],
+      "fps": 30,
+      "frames": 31,
+      "columns": 5,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "impacts/ricochet",
+      "size": [
+        232,
+        84
+      ],
+      "pivot": [
+        64,
+        60
+      ],
+      "fps": 30,
+      "frames": 34,
+      "columns": 4,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "impacts/shield-block",
+      "size": [
+        148,
+        104
+      ],
+      "pivot": [
+        40,
+        88
+      ],
+      "fps": 30,
+      "frames": 34,
+      "columns": 5,
+      "looping": false,
+      "contact": 0.005
+    },
+    {
+      "id": "lightning/ball-lightning",
+      "size": [
+        136,
+        104
+      ],
+      "pivot": [
+        68,
+        92
+      ],
+      "fps": 30,
+      "frames": 120,
+      "columns": 10,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "lightning/chain-lightning",
+      "size": [
+        248,
+        104
+      ],
+      "pivot": [
+        40,
+        82
+      ],
+      "fps": 30,
+      "frames": 55,
+      "columns": 5,
+      "looping": false,
+      "contact": 0.05
+    },
+    {
+      "id": "lightning/charge-up",
+      "size": [
+        272,
+        184
+      ],
+      "pivot": [
+        124,
+        148
+      ],
+      "fps": 30,
+      "frames": 82,
+      "columns": 8,
+      "looping": false,
+      "contact": 1.6
+    },
+    {
+      "id": "lightning/electrified",
+      "size": [
+        108,
+        92
+      ],
+      "pivot": [
+        54,
+        76
+      ],
+      "fps": 30,
+      "frames": 60,
+      "columns": 8,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "lightning/lightning-strike",
+      "size": [
+        240,
+        264
+      ],
+      "pivot": [
+        120,
+        228
+      ],
+      "fps": 30,
+      "frames": 91,
+      "columns": 11,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "lightning/plasma-ball",
+      "size": [
+        112,
+        104
+      ],
+      "pivot": [
+        56,
+        96
+      ],
+      "fps": 30,
+      "frames": 90,
+      "columns": 10,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "lightning/spark-arc",
+      "size": [
+        124,
+        120
+      ],
+      "pivot": [
+        62,
+        108
+      ],
+      "fps": 30,
+      "frames": 60,
+      "columns": 8,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "lightning/storm-cloud",
+      "size": [
+        168,
+        176
+      ],
+      "pivot": [
+        84,
+        164
+      ],
+      "fps": 30,
+      "frames": 90,
+      "columns": 10,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "lightning/tesla-coil",
+      "size": [
+        224,
+        136
+      ],
+      "pivot": [
+        112,
+        120
+      ],
+      "fps": 30,
+      "frames": 72,
+      "columns": 7,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "lightning/thunderclap",
+      "size": [
+        288,
+        156
+      ],
+      "pivot": [
+        144,
+        124
+      ],
+      "fps": 30,
+      "frames": 58,
+      "columns": 6,
+      "looping": false,
+      "contact": 0.12
+    },
+    {
+      "id": "lightning/zap-hit",
+      "size": [
+        144,
+        112
+      ],
+      "pivot": [
+        76,
+        56
+      ],
+      "fps": 30,
+      "frames": 28,
+      "columns": 5,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "melee/claw-swipe",
+      "size": [
+        128,
+        96
+      ],
+      "pivot": [
+        36,
+        84
+      ],
+      "fps": 30,
+      "frames": 28,
+      "columns": 5,
+      "looping": false,
+      "contact": 0.04
+    },
+    {
+      "id": "melee/dagger-flurry",
+      "size": [
+        148,
+        104
+      ],
+      "pivot": [
+        36,
+        86
+      ],
+      "fps": 30,
+      "frames": 30,
+      "columns": 5,
+      "looping": false,
+      "contact": 0.05
+    },
+    {
+      "id": "melee/double-slash",
+      "size": [
+        164,
+        108
+      ],
+      "pivot": [
+        44,
+        92
+      ],
+      "fps": 30,
+      "frames": 25,
+      "columns": 5,
+      "looping": false,
+      "contact": 0.06
+    },
+    {
+      "id": "melee/hammer-smash",
+      "size": [
+        208,
+        112
+      ],
+      "pivot": [
+        80,
+        92
+      ],
+      "fps": 30,
+      "frames": 61,
+      "columns": 6,
+      "looping": false,
+      "contact": 0.15
+    },
+    {
+      "id": "melee/heavy-cleave",
+      "size": [
+        208,
+        116
+      ],
+      "pivot": [
+        68,
+        96
+      ],
+      "fps": 30,
+      "frames": 58,
+      "columns": 6,
+      "looping": false,
+      "contact": 0.335
+    },
+    {
+      "id": "melee/scythe-reap",
+      "size": [
+        184,
+        116
+      ],
+      "pivot": [
+        84,
+        98
+      ],
+      "fps": 30,
+      "frames": 64,
+      "columns": 7,
+      "looping": false,
+      "contact": 0.14
+    },
+    {
+      "id": "melee/spear-sweep",
+      "size": [
+        216,
+        84
+      ],
+      "pivot": [
+        104,
+        70
+      ],
+      "fps": 30,
+      "frames": 46,
+      "columns": 5,
+      "looping": false,
+      "contact": 0.1
+    },
+    {
+      "id": "melee/spin-slash",
+      "size": [
+        208,
+        104
+      ],
+      "pivot": [
+        104,
+        84
+      ],
+      "fps": 30,
+      "frames": 25,
+      "columns": 4,
+      "looping": false,
+      "contact": 0.17
+    },
+    {
+      "id": "melee/sword-slash",
+      "size": [
+        136,
+        104
+      ],
+      "pivot": [
+        44,
+        92
+      ],
+      "fps": 30,
+      "frames": 24,
+      "columns": 5,
+      "looping": false,
+      "contact": 0.06
+    },
+    {
+      "id": "melee/thrust",
+      "size": [
+        196,
+        76
+      ],
+      "pivot": [
+        34,
+        62
+      ],
+      "fps": 30,
+      "frames": 24,
+      "columns": 4,
+      "looping": false,
+      "contact": 0.07
+    },
+    {
+      "id": "melee/uppercut",
+      "size": [
+        132,
+        128
+      ],
+      "pivot": [
+        48,
+        110
+      ],
+      "fps": 30,
+      "frames": 27,
+      "columns": 6,
+      "looping": false,
+      "contact": 0.076
+    },
+    {
+      "id": "melee/whip-crack",
+      "size": [
+        192,
+        80
+      ],
+      "pivot": [
+        30,
+        68
+      ],
+      "fps": 30,
+      "frames": 27,
+      "columns": 4,
+      "looping": false,
+      "contact": 0.21
+    },
+    {
+      "id": "moves/arrow-shot",
+      "size": [
+        300,
+        74
+      ],
+      "pivot": [
+        38,
+        66
+      ],
+      "fps": 30,
+      "frames": 58,
+      "columns": 4,
+      "looping": false,
+      "contact": 0.8
+    },
+    {
+      "id": "moves/dash-strike",
+      "size": [
+        372,
+        156
+      ],
+      "pivot": [
+        66,
+        136
+      ],
+      "fps": 30,
+      "frames": 70,
+      "columns": 6,
+      "looping": false,
+      "contact": 0.22
+    },
+    {
+      "id": "moves/earth-stomp",
+      "size": [
+        290,
+        142
+      ],
+      "pivot": [
+        50,
+        128
+      ],
+      "fps": 30,
+      "frames": 105,
+      "columns": 8,
+      "looping": false,
+      "contact": 0.06
+    },
+    {
+      "id": "moves/fireball-throw",
+      "size": [
+        356,
+        244
+      ],
+      "pivot": [
+        64,
+        198
+      ],
+      "fps": 30,
+      "frames": 205,
+      "columns": 12,
+      "looping": false,
+      "contact": 1.41
+    },
+    {
+      "id": "moves/ground-pound",
+      "size": [
+        304,
+        204
+      ],
+      "pivot": [
+        152,
+        168
+      ],
+      "fps": 30,
+      "frames": 116,
+      "columns": 9,
+      "looping": false,
+      "contact": 0.62
+    },
+    {
+      "id": "moves/holy-smite",
+      "size": [
+        252,
+        182
+      ],
+      "pivot": [
+        42,
+        151
+      ],
+      "fps": 30,
+      "frames": 85,
+      "columns": 8,
+      "looping": false,
+      "contact": 0.47
+    },
+    {
+      "id": "moves/ice-lance-throw",
+      "size": [
+        310,
+        136
+      ],
+      "pivot": [
+        86,
+        134
+      ],
+      "fps": 30,
+      "frames": 131,
+      "columns": 8,
+      "looping": false,
+      "contact": 1.1400000000000001
+    },
+    {
+      "id": "moves/lightning-call",
+      "size": [
+        290,
+        266
+      ],
+      "pivot": [
+        42,
+        231
+      ],
+      "fps": 30,
+      "frames": 91,
+      "columns": 10,
+      "looping": false,
+      "contact": 0.76
+    },
+    {
+      "id": "moves/meteor-call",
+      "size": [
+        380,
+        240
+      ],
+      "pivot": [
+        92,
+        212
+      ],
+      "fps": 30,
+      "frames": 194,
+      "columns": 12,
+      "looping": false,
+      "contact": 1.52
+    },
+    {
+      "id": "moves/pistol-shots",
+      "size": [
+        378,
+        76
+      ],
+      "pivot": [
+        111,
+        72
+      ],
+      "fps": 30,
+      "frames": 79,
+      "columns": 4,
+      "looping": false,
+      "contact": 0.26
+    },
+    {
+      "id": "moves/rocket-launcher",
+      "size": [
+        480,
+        244
+      ],
+      "pivot": [
+        178,
+        198
+      ],
+      "fps": 30,
+      "frames": 198,
+      "columns": 11,
+      "looping": false,
+      "contact": 0.6
+    },
+    {
+      "id": "moves/sword-combo",
+      "size": [
+        264,
+        150
+      ],
+      "pivot": [
+        72,
+        130
+      ],
+      "fps": 30,
+      "frames": 90,
+      "columns": 8,
+      "looping": false,
+      "contact": 0.06
+    },
+    {
+      "id": "nature/acid-splash",
+      "size": [
+        184,
+        116
+      ],
+      "pivot": [
+        92,
+        100
+      ],
+      "fps": 30,
+      "frames": 85,
+      "columns": 8,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "nature/boulder",
+      "size": [
+        264,
+        120
+      ],
+      "pivot": [
+        40,
+        104
+      ],
+      "fps": 30,
+      "frames": 70,
+      "columns": 6,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "nature/earth-spike",
+      "size": [
+        272,
+        150
+      ],
+      "pivot": [
+        136,
+        132
+      ],
+      "fps": 30,
+      "frames": 103,
+      "columns": 8,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "nature/healing-bloom",
+      "size": [
+        124,
+        120
+      ],
+      "pivot": [
+        62,
+        108
+      ],
+      "fps": 30,
+      "frames": 100,
+      "columns": 10,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "nature/leaf-storm",
+      "size": [
+        112,
+        104
+      ],
+      "pivot": [
+        56,
+        92
+      ],
+      "fps": 30,
+      "frames": 72,
+      "columns": 9,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "nature/poison-cloud",
+      "size": [
+        256,
+        100
+      ],
+      "pivot": [
+        128,
+        86
+      ],
+      "fps": 30,
+      "frames": 120,
+      "columns": 7,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "nature/quake",
+      "size": [
+        288,
+        104
+      ],
+      "pivot": [
+        144,
+        88
+      ],
+      "fps": 30,
+      "frames": 94,
+      "columns": 6,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "nature/root-snare",
+      "size": [
+        128,
+        96
+      ],
+      "pivot": [
+        64,
+        78
+      ],
+      "fps": 30,
+      "frames": 82,
+      "columns": 8,
+      "looping": false,
+      "contact": 0.62
+    },
+    {
+      "id": "nature/spore-burst",
+      "size": [
+        212,
+        132
+      ],
+      "pivot": [
+        106,
+        118
+      ],
+      "fps": 30,
+      "frames": 97,
+      "columns": 8,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "nature/thorns",
+      "size": [
+        232,
+        92
+      ],
+      "pivot": [
+        48,
+        78
+      ],
+      "fps": 30,
+      "frames": 73,
+      "columns": 6,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "nature/tornado",
+      "size": [
+        196,
+        168
+      ],
+      "pivot": [
+        98,
+        152
+      ],
+      "fps": 30,
+      "frames": 60,
+      "columns": 8,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "nature/toxic-puddle",
+      "size": [
+        176,
+        100
+      ],
+      "pivot": [
+        88,
+        86
+      ],
+      "fps": 30,
+      "frames": 120,
+      "columns": 9,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "nature/vine-whip",
+      "size": [
+        216,
+        128
+      ],
+      "pivot": [
+        60,
+        114
+      ],
+      "fps": 30,
+      "frames": 43,
+      "columns": 6,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "pickups/chest-open",
+      "size": [
+        176,
+        112
+      ],
+      "pivot": [
+        88,
+        96
+      ],
+      "fps": 30,
+      "frames": 139,
+      "columns": 10,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "pickups/coin-spin",
+      "size": [
+        56,
+        56
+      ],
+      "pivot": [
+        28,
+        48
+      ],
+      "fps": 30,
+      "frames": 48,
+      "columns": 7,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "pickups/collect-burst",
+      "size": [
+        112,
+        108
+      ],
+      "pivot": [
+        56,
+        94
+      ],
+      "fps": 30,
+      "frames": 42,
+      "columns": 7,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "pickups/crystal-shard",
+      "size": [
+        64,
+        76
+      ],
+      "pivot": [
+        32,
+        68
+      ],
+      "fps": 30,
+      "frames": 96,
+      "columns": 11,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "pickups/gem-spin",
+      "size": [
+        64,
+        64
+      ],
+      "pivot": [
+        32,
+        56
+      ],
+      "fps": 30,
+      "frames": 72,
+      "columns": 9,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "pickups/heart-pickup",
+      "size": [
+        56,
+        60
+      ],
+      "pivot": [
+        28,
+        52
+      ],
+      "fps": 30,
+      "frames": 36,
+      "columns": 7,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "pickups/key-glint",
+      "size": [
+        72,
+        60
+      ],
+      "pivot": [
+        36,
+        54
+      ],
+      "fps": 30,
+      "frames": 60,
+      "columns": 8,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "pickups/loot-beam",
+      "size": [
+        96,
+        176
+      ],
+      "pivot": [
+        48,
+        162
+      ],
+      "fps": 30,
+      "frames": 72,
+      "columns": 12,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "pickups/potion",
+      "size": [
+        56,
+        72
+      ],
+      "pivot": [
+        28,
+        64
+      ],
+      "fps": 30,
+      "frames": 72,
+      "columns": 10,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "pickups/power-star",
+      "size": [
+        88,
+        84
+      ],
+      "pivot": [
+        44,
+        76
+      ],
+      "fps": 30,
+      "frames": 48,
+      "columns": 7,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "pickups/xp-orb",
+      "size": [
+        72,
+        56
+      ],
+      "pivot": [
+        36,
+        48
+      ],
+      "fps": 30,
+      "frames": 54,
+      "columns": 7,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "projectiles/arrow",
+      "size": [
+        112,
+        32
+      ],
+      "pivot": [
+        92,
+        16
+      ],
+      "fps": 30,
+      "frames": 18,
+      "columns": 3,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "projectiles/bullet-tracer",
+      "size": [
+        200,
+        40
+      ],
+      "pivot": [
+        184,
+        18
+      ],
+      "fps": 30,
+      "frames": 18,
+      "columns": 2,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "projectiles/cannonball",
+      "size": [
+        208,
+        116
+      ],
+      "pivot": [
+        48,
+        102
+      ],
+      "fps": 30,
+      "frames": 115,
+      "columns": 9,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "projectiles/energy-disc",
+      "size": [
+        120,
+        52
+      ],
+      "pivot": [
+        92,
+        26
+      ],
+      "fps": 30,
+      "frames": 15,
+      "columns": 3,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "projectiles/flare",
+      "size": [
+        152,
+        232
+      ],
+      "pivot": [
+        76,
+        226
+      ],
+      "fps": 30,
+      "frames": 151,
+      "columns": 16,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "projectiles/homing-missile",
+      "size": [
+        248,
+        140
+      ],
+      "pivot": [
+        160,
+        120
+      ],
+      "fps": 30,
+      "frames": 115,
+      "columns": 9,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "projectiles/laser-bolt",
+      "size": [
+        128,
+        32
+      ],
+      "pivot": [
+        108,
+        16
+      ],
+      "fps": 30,
+      "frames": 15,
+      "columns": 2,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "projectiles/magic-missile",
+      "size": [
+        208,
+        112
+      ],
+      "pivot": [
+        24,
+        104
+      ],
+      "fps": 30,
+      "frames": 58,
+      "columns": 6,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "projectiles/muzzle-pistol",
+      "size": [
+        96,
+        72
+      ],
+      "pivot": [
+        44,
+        66
+      ],
+      "fps": 30,
+      "frames": 55,
+      "columns": 7,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "projectiles/muzzle-shotgun",
+      "size": [
+        160,
+        88
+      ],
+      "pivot": [
+        44,
+        82
+      ],
+      "fps": 30,
+      "frames": 97,
+      "columns": 8,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "projectiles/muzzle-smg",
+      "size": [
+        112,
+        72
+      ],
+      "pivot": [
+        56,
+        66
+      ],
+      "fps": 30,
+      "frames": 30,
+      "columns": 5,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "projectiles/plasma-shot",
+      "size": [
+        144,
+        60
+      ],
+      "pivot": [
+        108,
+        30
+      ],
+      "fps": 30,
+      "frames": 24,
+      "columns": 4,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "projectiles/rocket",
+      "size": [
+        288,
+        76
+      ],
+      "pivot": [
+        252,
+        42
+      ],
+      "fps": 30,
+      "frames": 36,
+      "columns": 4,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "scifi/emp-blast",
+      "size": [
+        152,
+        116
+      ],
+      "pivot": [
+        76,
+        84
+      ],
+      "fps": 30,
+      "frames": 97,
+      "columns": 9,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "scifi/energy-core",
+      "size": [
+        112,
+        100
+      ],
+      "pivot": [
+        56,
+        88
+      ],
+      "fps": 30,
+      "frames": 72,
+      "columns": 9,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "scifi/force-field",
+      "size": [
+        184,
+        104
+      ],
+      "pivot": [
+        76,
+        84
+      ],
+      "fps": 30,
+      "frames": 72,
+      "columns": 7,
+      "looping": true,
+      "contact": 0.42
+    },
+    {
+      "id": "scifi/glitch",
+      "size": [
+        88,
+        64
+      ],
+      "pivot": [
+        44,
+        54
+      ],
+      "fps": 30,
+      "frames": 72,
+      "columns": 8,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "scifi/hologram",
+      "size": [
+        112,
+        104
+      ],
+      "pivot": [
+        56,
+        92
+      ],
+      "fps": 30,
+      "frames": 120,
+      "columns": 11,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "scifi/jetpack",
+      "size": [
+        96,
+        116
+      ],
+      "pivot": [
+        48,
+        30
+      ],
+      "fps": 30,
+      "frames": 60,
+      "columns": 9,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "scifi/laser-grid",
+      "size": [
+        128,
+        84
+      ],
+      "pivot": [
+        64,
+        76
+      ],
+      "fps": 30,
+      "frames": 90,
+      "columns": 8,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "scifi/scanner",
+      "size": [
+        112,
+        78
+      ],
+      "pivot": [
+        42,
+        58
+      ],
+      "fps": 30,
+      "frames": 96,
+      "columns": 9,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "scifi/teleporter-pad",
+      "size": [
+        96,
+        104
+      ],
+      "pivot": [
+        48,
+        92
+      ],
+      "fps": 30,
+      "frames": 72,
+      "columns": 9,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "scifi/tractor-beam",
+      "size": [
+        120,
+        132
+      ],
+      "pivot": [
+        60,
+        114
+      ],
+      "fps": 30,
+      "frames": 90,
+      "columns": 10,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "scifi/warp-in",
+      "size": [
+        192,
+        168
+      ],
+      "pivot": [
+        96,
+        128
+      ],
+      "fps": 30,
+      "frames": 91,
+      "columns": 9,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "scifi/warp-out",
+      "size": [
+        128,
+        168
+      ],
+      "pivot": [
+        64,
+        128
+      ],
+      "fps": 30,
+      "frames": 79,
+      "columns": 11,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "shadow/black-hole",
+      "size": [
+        184,
+        132
+      ],
+      "pivot": [
+        92,
+        124
+      ],
+      "fps": 30,
+      "frames": 120,
+      "columns": 10,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "shadow/curse",
+      "size": [
+        112,
+        124
+      ],
+      "pivot": [
+        56,
+        108
+      ],
+      "fps": 30,
+      "frames": 103,
+      "columns": 11,
+      "looping": false,
+      "contact": 0.55
+    },
+    {
+      "id": "shadow/dark-explosion",
+      "size": [
+        280,
+        248
+      ],
+      "pivot": [
+        140,
+        206
+      ],
+      "fps": 30,
+      "frames": 115,
+      "columns": 11,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "shadow/eclipse",
+      "size": [
+        160,
+        144
+      ],
+      "pivot": [
+        80,
+        72
+      ],
+      "fps": 30,
+      "frames": 120,
+      "columns": 11,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "shadow/grasping-hands",
+      "size": [
+        200,
+        116
+      ],
+      "pivot": [
+        100,
+        100
+      ],
+      "fps": 30,
+      "frames": 94,
+      "columns": 8,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "shadow/hex-sigil",
+      "size": [
+        168,
+        128
+      ],
+      "pivot": [
+        84,
+        112
+      ],
+      "fps": 30,
+      "frames": 127,
+      "columns": 10,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "shadow/life-steal",
+      "size": [
+        184,
+        100
+      ],
+      "pivot": [
+        36,
+        92
+      ],
+      "fps": 30,
+      "frames": 67,
+      "columns": 7,
+      "looping": false,
+      "contact": 0.01
+    },
+    {
+      "id": "shadow/necro-skulls",
+      "size": [
+        136,
+        116
+      ],
+      "pivot": [
+        68,
+        108
+      ],
+      "fps": 30,
+      "frames": 90,
+      "columns": 9,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "shadow/shadow-flames",
+      "size": [
+        104,
+        112
+      ],
+      "pivot": [
+        52,
+        102
+      ],
+      "fps": 30,
+      "frames": 72,
+      "columns": 9,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "shadow/shadow-tendrils",
+      "size": [
+        208,
+        130
+      ],
+      "pivot": [
+        104,
+        106
+      ],
+      "fps": 30,
+      "frames": 97,
+      "columns": 8,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "shadow/soul-drain",
+      "size": [
+        208,
+        120
+      ],
+      "pivot": [
+        40,
+        110
+      ],
+      "fps": 30,
+      "frames": 96,
+      "columns": 8,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "shadow/void-orb",
+      "size": [
+        168,
+        160
+      ],
+      "pivot": [
+        84,
+        150
+      ],
+      "fps": 30,
+      "frames": 96,
+      "columns": 10,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "spawn/coin-drop",
+      "size": [
+        160,
+        88
+      ],
+      "pivot": [
+        80,
+        78
+      ],
+      "fps": 30,
+      "frames": 91,
+      "columns": 8,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "spawn/disintegrate",
+      "size": [
+        176,
+        100
+      ],
+      "pivot": [
+        48,
+        86
+      ],
+      "fps": 30,
+      "frames": 103,
+      "columns": 8,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "spawn/dissolve-burn",
+      "size": [
+        96,
+        112
+      ],
+      "pivot": [
+        48,
+        100
+      ],
+      "fps": 30,
+      "frames": 109,
+      "columns": 12,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "spawn/egg-hatch",
+      "size": [
+        120,
+        96
+      ],
+      "pivot": [
+        60,
+        84
+      ],
+      "fps": 30,
+      "frames": 94,
+      "columns": 9,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "spawn/poof",
+      "size": [
+        112,
+        92
+      ],
+      "pivot": [
+        56,
+        80
+      ],
+      "fps": 30,
+      "frames": 49,
+      "columns": 7,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "spawn/respawn-beam",
+      "size": [
+        128,
+        150
+      ],
+      "pivot": [
+        64,
+        136
+      ],
+      "fps": 30,
+      "frames": 76,
+      "columns": 10,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "spawn/shatter-death",
+      "size": [
+        172,
+        96
+      ],
+      "pivot": [
+        84,
+        84
+      ],
+      "fps": 30,
+      "frames": 100,
+      "columns": 8,
+      "looping": false,
+      "contact": 0.5
+    },
+    {
+      "id": "spawn/soul-rise",
+      "size": [
+        96,
+        140
+      ],
+      "pivot": [
+        48,
+        126
+      ],
+      "fps": 30,
+      "frames": 97,
+      "columns": 12,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "spawn/spawn-portal",
+      "size": [
+        208,
+        150
+      ],
+      "pivot": [
+        104,
+        122
+      ],
+      "fps": 30,
+      "frames": 115,
+      "columns": 10,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "spawn/summon-rise",
+      "size": [
+        176,
+        116
+      ],
+      "pivot": [
+        88,
+        94
+      ],
+      "fps": 30,
+      "frames": 139,
+      "columns": 10,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "status/bleeding",
+      "size": [
+        60,
+        56
+      ],
+      "pivot": [
+        30,
+        46
+      ],
+      "fps": 30,
+      "frames": 72,
+      "columns": 9,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "status/burning",
+      "size": [
+        72,
+        80
+      ],
+      "pivot": [
+        36,
+        70
+      ],
+      "fps": 30,
+      "frames": 36,
+      "columns": 7,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "status/charmed",
+      "size": [
+        60,
+        76
+      ],
+      "pivot": [
+        30,
+        68
+      ],
+      "fps": 30,
+      "frames": 72,
+      "columns": 10,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "status/confused",
+      "size": [
+        60,
+        78
+      ],
+      "pivot": [
+        30,
+        70
+      ],
+      "fps": 30,
+      "frames": 72,
+      "columns": 10,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "status/cursed",
+      "size": [
+        64,
+        84
+      ],
+      "pivot": [
+        32,
+        76
+      ],
+      "fps": 30,
+      "frames": 72,
+      "columns": 10,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "status/frozen",
+      "size": [
+        72,
+        64
+      ],
+      "pivot": [
+        36,
+        54
+      ],
+      "fps": 30,
+      "frames": 60,
+      "columns": 8,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "status/haste",
+      "size": [
+        100,
+        56
+      ],
+      "pivot": [
+        64,
+        48
+      ],
+      "fps": 30,
+      "frames": 36,
+      "columns": 5,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "status/petrified",
+      "size": [
+        120,
+        74
+      ],
+      "pivot": [
+        60,
+        64
+      ],
+      "fps": 30,
+      "frames": 115,
+      "columns": 9,
+      "looping": false,
+      "contact": 2.2
+    },
+    {
+      "id": "status/poisoned",
+      "size": [
+        72,
+        64
+      ],
+      "pivot": [
+        36,
+        54
+      ],
+      "fps": 30,
+      "frames": 48,
+      "columns": 7,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "status/rage",
+      "size": [
+        80,
+        80
+      ],
+      "pivot": [
+        40,
+        70
+      ],
+      "fps": 30,
+      "frames": 36,
+      "columns": 6,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "status/sleep",
+      "size": [
+        60,
+        82
+      ],
+      "pivot": [
+        26,
+        74
+      ],
+      "fps": 30,
+      "frames": 72,
+      "columns": 10,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "status/slowed",
+      "size": [
+        64,
+        76
+      ],
+      "pivot": [
+        32,
+        68
+      ],
+      "fps": 30,
+      "frames": 72,
+      "columns": 10,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "status/stunned",
+      "size": [
+        60,
+        64
+      ],
+      "pivot": [
+        30,
+        56
+      ],
+      "fps": 30,
+      "frames": 60,
+      "columns": 8,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "transitions/blinds",
+      "size": [
+        320,
+        180
+      ],
+      "pivot": [
+        0,
+        0
+      ],
+      "fps": 30,
+      "frames": 61,
+      "columns": 6,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "transitions/burn-away",
+      "size": [
+        320,
+        180
+      ],
+      "pivot": [
+        0,
+        0
+      ],
+      "fps": 30,
+      "frames": 91,
+      "columns": 8,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "transitions/crt-off",
+      "size": [
+        320,
+        180
+      ],
+      "pivot": [
+        0,
+        0
+      ],
+      "fps": 30,
+      "frames": 61,
+      "columns": 6,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "transitions/diamond-wipe",
+      "size": [
+        320,
+        180
+      ],
+      "pivot": [
+        0,
+        0
+      ],
+      "fps": 30,
+      "frames": 61,
+      "columns": 6,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "transitions/glitch-wipe",
+      "size": [
+        320,
+        180
+      ],
+      "pivot": [
+        0,
+        0
+      ],
+      "fps": 30,
+      "frames": 55,
+      "columns": 6,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "transitions/iris",
+      "size": [
+        320,
+        180
+      ],
+      "pivot": [
+        0,
+        0
+      ],
+      "fps": 30,
+      "frames": 67,
+      "columns": 7,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "transitions/pixel-dissolve",
+      "size": [
+        320,
+        180
+      ],
+      "pivot": [
+        0,
+        0
+      ],
+      "fps": 30,
+      "frames": 67,
+      "columns": 7,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "transitions/shatter-wipe",
+      "size": [
+        320,
+        180
+      ],
+      "pivot": [
+        0,
+        0
+      ],
+      "fps": 30,
+      "frames": 85,
+      "columns": 7,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "transitions/slash-wipe",
+      "size": [
+        320,
+        180
+      ],
+      "pivot": [
+        0,
+        0
+      ],
+      "fps": 30,
+      "frames": 52,
+      "columns": 6,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "transitions/star-iris",
+      "size": [
+        320,
+        180
+      ],
+      "pivot": [
+        0,
+        0
+      ],
+      "fps": 30,
+      "frames": 67,
+      "columns": 7,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "ui/achievement",
+      "size": [
+        220,
+        72
+      ],
+      "pivot": [
+        110,
+        36
+      ],
+      "fps": 30,
+      "frames": 73,
+      "columns": 5,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "ui/coin-collect",
+      "size": [
+        176,
+        116
+      ],
+      "pivot": [
+        60,
+        102
+      ],
+      "fps": 30,
+      "frames": 75,
+      "columns": 8,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "ui/combo-counter",
+      "size": [
+        208,
+        100
+      ],
+      "pivot": [
+        104,
+        50
+      ],
+      "fps": 30,
+      "frames": 45,
+      "columns": 5,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "ui/confetti",
+      "size": [
+        200,
+        140
+      ],
+      "pivot": [
+        100,
+        126
+      ],
+      "fps": 30,
+      "frames": 103,
+      "columns": 9,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "ui/countdown",
+      "size": [
+        152,
+        136
+      ],
+      "pivot": [
+        76,
+        68
+      ],
+      "fps": 30,
+      "frames": 94,
+      "columns": 10,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "ui/crit-number",
+      "size": [
+        152,
+        120
+      ],
+      "pivot": [
+        76,
+        60
+      ],
+      "fps": 30,
+      "frames": 46,
+      "columns": 7,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "ui/damage-number",
+      "size": [
+        76,
+        68
+      ],
+      "pivot": [
+        30,
+        52
+      ],
+      "fps": 30,
+      "frames": 33,
+      "columns": 6,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "ui/exclamation",
+      "size": [
+        84,
+        104
+      ],
+      "pivot": [
+        42,
+        92
+      ],
+      "fps": 30,
+      "frames": 43,
+      "columns": 8,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "ui/health-bar-hit",
+      "size": [
+        160,
+        64
+      ],
+      "pivot": [
+        80,
+        30
+      ],
+      "fps": 30,
+      "frames": 61,
+      "columns": 5,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "ui/heart-lost",
+      "size": [
+        96,
+        88
+      ],
+      "pivot": [
+        48,
+        34
+      ],
+      "fps": 30,
+      "frames": 46,
+      "columns": 7,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "ui/level-up",
+      "size": [
+        176,
+        138
+      ],
+      "pivot": [
+        88,
+        114
+      ],
+      "fps": 30,
+      "frames": 97,
+      "columns": 9,
+      "looping": false,
+      "contact": 0.28
+    },
+    {
+      "id": "ui/quest-complete",
+      "size": [
+        204,
+        92
+      ],
+      "pivot": [
+        102,
+        46
+      ],
+      "fps": 30,
+      "frames": 79,
+      "columns": 6,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "water/bubbles",
+      "size": [
+        104,
+        112
+      ],
+      "pivot": [
+        52,
+        104
+      ],
+      "fps": 30,
+      "frames": 120,
+      "columns": 12,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "water/drip",
+      "size": [
+        72,
+        88
+      ],
+      "pivot": [
+        36,
+        78
+      ],
+      "fps": 30,
+      "frames": 48,
+      "columns": 8,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "water/fountain",
+      "size": [
+        120,
+        104
+      ],
+      "pivot": [
+        60,
+        96
+      ],
+      "fps": 30,
+      "frames": 60,
+      "columns": 8,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "water/geyser",
+      "size": [
+        184,
+        168
+      ],
+      "pivot": [
+        92,
+        146
+      ],
+      "fps": 30,
+      "frames": 151,
+      "columns": 12,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "water/rain-splash",
+      "size": [
+        176,
+        80
+      ],
+      "pivot": [
+        88,
+        50
+      ],
+      "fps": 30,
+      "frames": 72,
+      "columns": 6,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "water/ripples",
+      "size": [
+        136,
+        52
+      ],
+      "pivot": [
+        68,
+        30
+      ],
+      "fps": 30,
+      "frames": 60,
+      "columns": 5,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "water/splash",
+      "size": [
+        176,
+        100
+      ],
+      "pivot": [
+        88,
+        78
+      ],
+      "fps": 30,
+      "frames": 76,
+      "columns": 7,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "water/water-jet",
+      "size": [
+        188,
+        80
+      ],
+      "pivot": [
+        14,
+        32
+      ],
+      "fps": 30,
+      "frames": 30,
+      "columns": 4,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "water/water-orb",
+      "size": [
+        100,
+        108
+      ],
+      "pivot": [
+        50,
+        100
+      ],
+      "fps": 30,
+      "frames": 90,
+      "columns": 10,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "water/waterfall",
+      "size": [
+        144,
+        136
+      ],
+      "pivot": [
+        72,
+        118
+      ],
+      "fps": 30,
+      "frames": 60,
+      "columns": 8,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "water/wave-crash",
+      "size": [
+        224,
+        104
+      ],
+      "pivot": [
+        112,
+        86
+      ],
+      "fps": 30,
+      "frames": 97,
+      "columns": 7,
+      "looping": false,
+      "contact": 0
+    },
+    {
+      "id": "water/whirlpool",
+      "size": [
+        128,
+        84
+      ],
+      "pivot": [
+        64,
+        42
+      ],
+      "fps": 30,
+      "frames": 90,
+      "columns": 8,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "weather/aurora",
+      "size": [
+        320,
+        180
+      ],
+      "pivot": [
+        160,
+        180
+      ],
+      "fps": 30,
+      "frames": 360,
+      "columns": 15,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "weather/blizzard",
+      "size": [
+        320,
+        180
+      ],
+      "pivot": [
+        160,
+        170
+      ],
+      "fps": 30,
+      "frames": 240,
+      "columns": 12,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "weather/cherry-blossoms",
+      "size": [
+        320,
+        180
+      ],
+      "pivot": [
+        160,
+        170
+      ],
+      "fps": 30,
+      "frames": 300,
+      "columns": 13,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "weather/clouds",
+      "size": [
+        320,
+        180
+      ],
+      "pivot": [
+        160,
+        180
+      ],
+      "fps": 30,
+      "frames": 360,
+      "columns": 15,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "weather/falling-leaves",
+      "size": [
+        320,
+        180
+      ],
+      "pivot": [
+        160,
+        170
+      ],
+      "fps": 30,
+      "frames": 300,
+      "columns": 13,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "weather/fireflies",
+      "size": [
+        320,
+        180
+      ],
+      "pivot": [
+        160,
+        170
+      ],
+      "fps": 30,
+      "frames": 360,
+      "columns": 15,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "weather/fog",
+      "size": [
+        320,
+        180
+      ],
+      "pivot": [
+        160,
+        170
+      ],
+      "fps": 30,
+      "frames": 360,
+      "columns": 15,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "weather/god-rays",
+      "size": [
+        320,
+        180
+      ],
+      "pivot": [
+        160,
+        170
+      ],
+      "fps": 30,
+      "frames": 300,
+      "columns": 13,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "weather/rain",
+      "size": [
+        320,
+        180
+      ],
+      "pivot": [
+        160,
+        170
+      ],
+      "fps": 30,
+      "frames": 240,
+      "columns": 12,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "weather/shooting-stars",
+      "size": [
+        320,
+        180
+      ],
+      "pivot": [
+        160,
+        180
+      ],
+      "fps": 30,
+      "frames": 300,
+      "columns": 13,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "weather/snow",
+      "size": [
+        320,
+        180
+      ],
+      "pivot": [
+        160,
+        170
+      ],
+      "fps": 30,
+      "frames": 360,
+      "columns": 15,
+      "looping": true,
+      "contact": 0
+    },
+    {
+      "id": "weather/storm",
+      "size": [
+        320,
+        180
+      ],
+      "pivot": [
+        160,
+        170
+      ],
+      "fps": 30,
+      "frames": 300,
+      "columns": 13,
+      "looping": true,
+      "contact": 0
+    }
+  ]
+}
