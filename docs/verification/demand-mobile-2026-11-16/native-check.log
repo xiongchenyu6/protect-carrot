@@ -1,0 +1,41 @@
+warning: Git tree '/home/freeman.xiong/Desktop/protect-carrot' is dirty
+warning: unused import: `prelude::*`
+ --> vendor/bevy_firefly/src/app.rs:8:5
+  |
+8 |     prelude::*,
+  |     ^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `change_detection::Tick`
+ --> vendor/bevy_firefly/src/lights.rs:6:9
+  |
+6 |         change_detection::Tick,
+  |         ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `TextureFormat` and `query::QueryItem`
+  --> vendor/bevy_firefly/src/nodes.rs:4:11
+   |
+ 4 |     ecs::{query::QueryItem, system::lifetimeless::Read},
+   |           ^^^^^^^^^^^^^^^^
+...
+10 |             TextureAspect, TextureFormat, TextureUsages, TextureViewDescriptor,
+   |                            ^^^^^^^^^^^^^
+
+warning: unused import: `ViewTarget`
+  --> vendor/bevy_firefly/src/pipelines.rs:25:44
+   |
+25 |             COLOR_TARGET_FORMAT_MASK_BITS, ViewTarget, ViewUniform, texture_format_from_code,
+   |                                            ^^^^^^^^^^
+
+warning: use of deprecated method `bevy::bevy_asset::AssetServer::load_with_settings`: Use `asset_server.load_builder().with_settings(settings).load(path)` instead
+   --> vendor/bevy_firefly/src/sprites.rs:220:26
+    |
+220 |             asset_server.load_with_settings(path, |x: &mut ImageLoaderSettings| x.is_srgb = false);
+    |                          ^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: `bevy_firefly` (lib) generated 5 warnings (run `cargo fix --lib -p bevy_firefly` to apply 4 suggestions)
+    Checking protect_carrot v0.1.0 (/home/freeman.xiong/Desktop/protect-carrot)
+    Finished `dev` profile [optimized + debuginfo] target(s) in 18.93s

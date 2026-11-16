@@ -27,3 +27,13 @@ __pycache__/
 
 # internal deploy script (contains infra hostnames/credentials)
 /deploy.sh
+
+# Authored PWA shell and update runtime
+!/web/*.js
+/web/protect_carrot.js
+!/web/*.css
+!/web/manifest.webmanifest
+!/web/icons/
+
+/web/sw.js
+/web/snippets/

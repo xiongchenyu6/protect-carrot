@@ -157,6 +157,7 @@ impl RobustHttpAssetReader {
 
 impl AssetReader for RobustHttpAssetReader {
     async fn read<'a>(&'a self, path: &'a Path) -> Result<impl Reader + 'a, AssetReaderError> {
+        protect_carrot::demand_assets::gate::wait(path).await;
         let full = self.root.join(path);
         self.fetch_retrying(&full).await.map(VecReader::new)
     }

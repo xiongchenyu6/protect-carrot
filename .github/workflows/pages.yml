@@ -26,8 +26,14 @@ jobs:
           key: pages-wasm
       - name: Check audio bootstrap
         run: node --test tests/web_audio_unlock.mjs
+      - name: Verify content manifest and retention
+        run: python3 -m unittest discover -s tools -p "test_*.py"
       - name: Build WebGPU game and assets
+        env:
+          WASM_REUSE_BASE_URL: https://xiongchenyu6.github.io/protect-carrot/
         run: bash build-web.sh release
+      - name: Retain previous immutable release for safe updates
+        run: python3 tools/retain_web_releases.py web --base-url https://xiongchenyu6.github.io/protect-carrot/
       - name: Publish playable site
         uses: peaceiris/actions-gh-pages@v4
         with:

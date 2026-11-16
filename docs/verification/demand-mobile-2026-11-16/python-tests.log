@@ -1,0 +1,39 @@
+..127.0.0.1 - - [16/Nov/2026 11:01:52] "GET /release-index.json?release-check=1794798112537911494 HTTP/1.1" 200 -
+127.0.0.1 - - [16/Nov/2026 11:01:52] "GET /_releases/e584c238c58dcaf091c3d6a0deb253c17b5be751941489e5a76794c6654fe18b.json HTTP/1.1" 200 -
+127.0.0.1 - - [16/Nov/2026 11:01:52] "GET /_releases/26eaf7310242ae4fc3d7b33a63551c2f60aa81177ca72093d1966b54c85fc576.json HTTP/1.1" 200 -
+127.0.0.1 - - [16/Nov/2026 11:01:52] "GET /_resources/e57013d7f34b17e80a4833acd33d66144e9e3b24d6eecb9fa4ab0b0ae891070b/index.html HTTP/1.1" 200 -
+127.0.0.1 - - [16/Nov/2026 11:01:52] "GET /_resources/fab9a62caae2bfb477be117858900df667e20050dcb82d17e238615afef15d19/index.html HTTP/1.1" 200 -
+..127.0.0.1 - - [16/Nov/2026 11:01:53] "GET /release-index.json?release-check=1794798113185241445 HTTP/1.1" 200 -
+127.0.0.1 - - [16/Nov/2026 11:01:53] "GET /_releases/afd1456cdc8ba913a229f466303c04c813b9d3c8fd710afaae7a9dff5808d0eb.json HTTP/1.1" 200 -
+127.0.0.1 - - [16/Nov/2026 11:01:53] "GET /_resources/65e2c41ac94172f6e00b93aafdc68b026b25791c4455809f24e04f52fdcd28b7/index.html HTTP/1.1" 200 -
+127.0.0.1 - - [16/Nov/2026 11:01:53] "GET /_resources/efa5093d741a4b92ca17cc9d39a80d15dc4758060663d932d56d6c214166b2f2/old.glb HTTP/1.1" 200 -
+127.0.0.1 - - [16/Nov/2026 11:01:53] "GET /release-index.json?release-check=1794798113218780479 HTTP/1.1" 200 -
+127.0.0.1 - - [16/Nov/2026 11:01:53] "GET /_releases/afd1456cdc8ba913a229f466303c04c813b9d3c8fd710afaae7a9dff5808d0eb.json HTTP/1.1" 200 -
+127.0.0.1 - - [16/Nov/2026 11:01:53] "GET /_resources/efa5093d741a4b92ca17cc9d39a80d15dc4758060663d932d56d6c214166b2f2/old.glb HTTP/1.1" 200 -
+..........
+----------------------------------------------------------------------
+Ran 14 tests in 4.873s
+
+OK
+{
+  "release": "10761223f5b20aac61eff67c46cb92090be82ee24df9338b01c482d817514a7d",
+  "retained_releases": 2,
+  "groups": {
+    "core": {
+      "total_bytes": 6,
+      "changed_bytes": 6
+    }
+  }
+}
+{
+  "release": "edc8d40fd34a26a0ae85b2229440139db95ff4a42913df7381f71a9643343f2b",
+  "retained_releases": 1,
+  "groups": {
+    "core": {
+      "total_bytes": 8,
+      "changed_bytes": 8
+    }
+  }
+}
+Staged 5 runtime assets
+Staged 4 runtime assets

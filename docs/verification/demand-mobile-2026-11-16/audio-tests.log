@@ -1,0 +1,10 @@
+✔ audio unlock is installed before the wasm module and retries trusted gestures (3.223758ms)
+✔ browsers without Web Audio still reach the WebGPU fallback (0.960605ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 113.869468

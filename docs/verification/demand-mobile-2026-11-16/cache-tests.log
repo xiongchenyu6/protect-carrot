@@ -1,0 +1,12 @@
+PASS first concurrent preparation verifies and persists assets, deduplicates identical hashes and downloads gzip only
+PASS re-entry performs zero shell, model, texture or engine network requests
+PASS browser process restart preserves cache and cold offline navigation works
+PASS detecting/deferring an update downloads no game assets and keeps old version playable
+PASS closing every tab after deferring does not silently commit the naturally activated update
+PASS accepted update downloads only changed hashes; old open tab remains pinned to old assets
+PASS same-size hash corruption prevents activation and leaves old cached version intact
+PASS retry after integrity failure recovers and activates complete version
+PASS interrupted update retains the old complete version for offline use
+PASS raw-WASM capability path saves only raw engine and works offline
+
+10 real-browser scenarios passed; evidence: /home/freeman.xiong/Desktop/protect-carrot/target/pwa-cache-tests

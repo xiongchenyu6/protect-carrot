@@ -25,6 +25,7 @@ bevy = { version = "0.19", default-features = false, features = [
   "ui_bevy_render",
   "ui_picking",
   "wav",
+  "vorbis",
   "wayland",
   "webp",
 ] }

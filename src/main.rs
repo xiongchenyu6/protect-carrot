@@ -106,7 +106,6 @@ impl AutostartLevel {
 fn signal_game_ready(
     assets: Res<AssetServer>,
     sprites: Res<sprites::Sprites>,
-    effects: Res<protect_carrot::pixelfx::PixelFxLibrary>,
     mut frames: Local<u32>,
     mut done: Local<bool>,
 ) {
@@ -116,9 +115,8 @@ fn signal_game_ready(
     *frames += 1;
     let sprites_ready = sprites.heroes.values().all(|h| assets.is_loaded(h.id()))
         && assets.is_loaded(sprites.carrot.id());
-    // Signal once the menu's sprites are loaded; fall back after ~4s so the "enter"
-    // button always appears even if asset load-state never reports ready.
-    if ((*frames > 3 && sprites_ready) || *frames > 240) && effects.ready(&assets) {
+    // No timeout bypass: only reveal the menu after its real assets are ready.
+    if *frames > 3 && sprites_ready {
         *done = true;
         carrot_game_ready();
     }
@@ -211,6 +209,7 @@ fn main() {
         );
     }
 
+    app.add_plugins(protect_carrot::demand_assets::DemandAssetsPlugin);
     app.add_plugins(
         DefaultPlugins
             // Bevy 0.19's text backend (parley→icu_segmenter) has no bundled CJK
@@ -740,7 +739,12 @@ fn setup(mut commands: Commands) {
 /// Scale `bevy_ui` to match the camera's scaling so the HUD grows with the board.
 /// The camera (AutoMin) scales the world by `window_height / VIRTUAL_H` on wide
 /// windows; matching `UiScale` keeps the HUD panel aligned with the board.
-fn fit_ui_scale(windows: Query<&Window>, mode: Res<ui::TouchMode>, mut ui_scale: ResMut<UiScale>) {
+fn fit_ui_scale(
+    windows: Query<&Window>,
+    mode: Res<ui::TouchMode>,
+    state: Res<State<GameState>>,
+    mut ui_scale: ResMut<UiScale>,
+) {
     if let Ok(win) = windows.single() {
         // In touch mode the virtual area also reserves the left strip, so UI + world
         // shrink together and stay aligned with the reserved regions.
@@ -749,7 +753,11 @@ fn fit_ui_scale(windows: Query<&Window>, mode: Res<ui::TouchMode>, mut ui_scale:
         } else {
             VIRTUAL_W
         };
-        let s = (win.width() / vw).min(win.height() / VIRTUAL_H);
+        let mut s = (win.width() / vw).min(win.height() / VIRTUAL_H);
+        // Menus scroll instead of shrinking phone text to unreadable world scale.
+        if mode.0 && *state.get() == GameState::Menu {
+            s = s.max(0.95);
+        }
         if s.is_finite() && s > 0.0 {
             ui_scale.0 = s;
         }

@@ -16,6 +16,7 @@ pub mod combat_feel;
 pub mod components;
 pub mod creatures;
 pub mod data;
+pub mod demand_assets;
 pub mod enemy;
 pub mod equipment;
 pub mod fluent_i18n;

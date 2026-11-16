@@ -1,0 +1,13 @@
+PASS first Start saves shell/config/engine without combat or optional resources
+PASS updating a core-only installation does not acquire changed combat or optional packs
+PASS old open version lazily fetches its original immutable model after a new release
+PASS canceling a queued download in another tab never starts its optional transfer
+PASS canceling chapter download leaves launcher usable and retry reuses already verified files
+PASS first chapter fetches combat once; another chapter reuses shared combat with zero downloads
+PASS installed group ledger survives worker activation before navigation or status can reconstruct it
+PASS chapter balance-only update downloads one JSON file and no engine, model or unused optional files
+PASS installed combat updates must pass integrity before activation; failed update retains offline old chapter
+PASS explicit full offline download survives complete browser process restart with networking disabled
+PASS storage cleanup can remove optional bytes but refuses core and active battle resources
+
+11 demand-update scenarios passed; request receipts: /home/freeman.xiong/Desktop/protect-carrot/target/pwa-demand-tests

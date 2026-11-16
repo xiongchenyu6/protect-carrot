@@ -20,27 +20,35 @@ wasm_bindgen_version_ok() {
 }
 
 resolve_wasm_bindgen() {
-  local cargo_home="${CARGO_HOME:-$HOME/.cargo}"
-  local cargo_bin="$cargo_home/bin/wasm-bindgen"
-  if [ -x "$cargo_bin" ] && wasm_bindgen_version_ok "$cargo_bin"; then
-    printf '%s\n' "$cargo_bin"
-    return
+  # Snapshot the matching CLI in this repository: another game may install a
+  # different global wasm-bindgen while our Rust compiler is still running.
+  local tool_root="$PWD/target/web-tools/wasm-bindgen-$WASM_BINDGEN_VERSION"
+  local pinned="$tool_root/bin/wasm-bindgen"
+  if [ -x "$pinned" ] && wasm_bindgen_version_ok "$pinned"; then
+    printf '%s\n' "$pinned"; return
   fi
-
-  if command -v wasm-bindgen >/dev/null 2>&1; then
-    local path_bin
-    path_bin="$(command -v wasm-bindgen)"
-    if wasm_bindgen_version_ok "$path_bin"; then
-      printf '%s\n' "$path_bin"
-      return
+  local cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin/wasm-bindgen"
+  local candidate
+  for candidate in "$(command -v wasm-bindgen || true)" "$cargo_bin"; do
+    if [ -x "$candidate" ] && wasm_bindgen_version_ok "$candidate"; then
+      mkdir -p "$tool_root/bin"
+      cp "$candidate" "$pinned.tmp"
+      chmod +x "$pinned.tmp"
+      if wasm_bindgen_version_ok "$pinned.tmp"; then
+        mv "$pinned.tmp" "$pinned"
+        printf '%s\n' "$pinned"; return
+      fi
     fi
-  fi
-
-  echo ">> installing wasm-bindgen-cli $WASM_BINDGEN_VERSION" >&2
-  cargo install -q --locked wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION"
-  printf '%s\n' "$cargo_bin"
+  done
+  echo ">> installing isolated wasm-bindgen-cli $WASM_BINDGEN_VERSION" >&2
+  cargo install -q --locked --root "$tool_root" wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION"
+  wasm_bindgen_version_ok "$pinned"
+  printf '%s\n' "$pinned"
 }
 
+engine_inputs_sha256="$(python3 tools/web_engine_inputs.py)"
+build_engine() {
+rm -rf web/snippets
 WASM_BINDGEN_BIN="$(resolve_wasm_bindgen)"
 
 echo ">> cargo build ($PROFILE, WebGPU) for $TARGET"
@@ -52,6 +60,7 @@ else
   WASM="target/$TARGET/debug/$NAME.wasm"
 fi
 
+wasm_bindgen_version_ok "$WASM_BINDGEN_BIN" || { echo "Pinned wasm-bindgen version changed" >&2; exit 1; }
 echo ">> wasm-bindgen -> web/"
 "$WASM_BINDGEN_BIN" --no-typescript --target web --out-dir web --out-name "$NAME" "$WASM"
 
@@ -83,40 +92,27 @@ if [ "$PROFILE" = "release" ] && command -v wasm-opt >/dev/null; then
   fi
 fi
 
-echo ">> copying assets -> web/assets (AssetServer fetches these over HTTP)"
-rm -rf web/assets
-cp -r assets web/assets
 
-# Release: pre-compress the big text/wasm so the server can serve them compressed
-# (massive win on slow connections). Images/audio are already compressed — skip.
-# Produce both .gz (gzip_static) and .br (brotli_static, ~25-30% smaller on wasm).
-if [ "$PROFILE" = "release" ]; then
-  for ff in "web/${NAME}_bg.wasm" "web/${NAME}.js"; do
-    gzip -9 -k -f "$ff"
-    line=">> compressed $(basename "$ff"): $(du -h "$ff" | cut -f1) -> gz $(du -h "$ff.gz" | cut -f1)"
-    if command -v brotli >/dev/null; then
-      brotli -q 11 -k -f "$ff"
-      line="$line, br $(du -h "$ff.br" | cut -f1)"
-    fi
-    echo "$line"
-  done
-  # Record the UNCOMPRESSED wasm size so the loader can show an accurate progress bar
-  # while the browser/CDN transparently decompresses br/gz (the body streams decoded).
-  stat -c%s "web/${NAME}_bg.wasm" > "web/wasm_size.txt" 2>/dev/null \
-    || wc -c < "web/${NAME}_bg.wasm" | tr -d ' ' > "web/wasm_size.txt"
-  echo ">> wrote web/wasm_size.txt ($(cat web/wasm_size.txt) bytes uncompressed)"
-fi
-
-echo ">> done. Serve:  ./tools/serve_https.sh 8443   (HTTPS, gzip-aware)"
-
-# The public receipt identifies the exact source and executable being served.
-python3 - <<'PY'
-import hashlib, json, pathlib, subprocess
-wasm = pathlib.Path('web/protect_carrot_bg.wasm')
-receipt = {
-    'revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
-    'wasm_sha256': hashlib.sha256(wasm.read_bytes()).hexdigest(),
-    'wasm_bytes': wasm.stat().st_size,
+gzip -n -9 -k -f web/protect_carrot_bg.wasm
 }
-pathlib.Path('web/build.json').write_text(json.dumps(receipt, indent=2) + '\n')
-PY
+if [ "$PROFILE" = "release" ] && [ -n "${WASM_REUSE_BASE_URL:-}" ] && python3 tools/reuse_web_engine.py --base-url "$WASM_REUSE_BASE_URL" --output web --fingerprint "$engine_inputs_sha256"; then
+  echo "Unchanged compiled inputs: verified published engine reused."
+else
+  build_engine
+fi
+rm -rf web/_resources web/_releases
+python3 tools/stage_web_assets.py
+python3 - "$engine_inputs_sha256" <<'RECEIPT'
+import hashlib, json, pathlib, subprocess, sys
+sys.path.insert(0, 'tools')
+from web_engine_inputs import fingerprint
+if fingerprint(pathlib.Path.cwd())[0] != sys.argv[1]:
+    raise SystemExit('Compiled inputs changed during build; rebuild before publishing')
+wasm=pathlib.Path('web/protect_carrot_bg.wasm')
+pathlib.Path('web/build.json').write_text(json.dumps({'revision':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),'engine_inputs_sha256':sys.argv[1],'wasm_sha256':hashlib.sha256(wasm.read_bytes()).hexdigest(),'wasm_bytes':wasm.stat().st_size},indent=2)+'\n')
+RECEIPT
+rm -f web/*.br web/protect_carrot.js.gz web/wasm_size.txt
+python3 tools/generate_web_manifest.py web --revision "$(git rev-parse HEAD)" --template tools/sw-template.js
+# Raw precompressed legacy files are not part of the published content set.
+rm -f web/*.br web/protect_carrot.js.gz web/wasm_size.txt
+touch web/.nojekyll

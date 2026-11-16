@@ -196,11 +196,11 @@ const ALL: [Sound; 27] = [
     Sound::Curse,
 ];
 
-/// Start the looping background music (Suno-generated, `assets/audio/bgm.wav`).
+/// Start the looping background music (Suno-generated, `assets/audio/bgm.ogg`).
 /// On the web it begins once the browser resumes audio after the first gesture.
 pub fn start_bgm(mut commands: Commands, assets: Res<AssetServer>, audio: Res<AudioSettings>) {
     commands.spawn((
-        AudioPlayer(assets.load::<AudioSource>("audio/bgm.wav")),
+        AudioPlayer(assets.load::<AudioSource>("audio/bgm.ogg")),
         PlaybackSettings {
             mode: PlaybackMode::Loop,
             volume: Volume::Linear(BGM_BASE * audio.master * MIX_HEADROOM),

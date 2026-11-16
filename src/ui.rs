@@ -576,6 +576,7 @@ pub enum UiAction {
     CycleBrightness,
     CycleVolume,
     CycleLanguage,
+    OpenDownloads,
     /// Open/close the menu settings popup (画质/音量/语言/全屏).
     ToggleMenuSettings,
     /// A non-interactive stat/icon that only exists to show a tooltip on hover/tap.
@@ -3812,10 +3813,22 @@ fn side_icon_button(
 }
 
 /// One large, equal-width touch button for the mobile bottom bar.
-/// Sticky flag: becomes true the first time any touch input is seen, and the
-/// mobile touch bar reveals itself. Mouse-only sessions never flip it.
-#[derive(Resource, Default)]
+/// Detect coarse-pointer browsers before the first frame; native touch input
+/// can also enable the mobile layout later.
+#[derive(Resource)]
 pub struct TouchMode(pub bool);
+impl Default for TouchMode {
+    fn default() -> Self {
+        #[cfg(target_arch = "wasm32")]
+        {
+            Self(crate::demand_assets::initial_touch_mode())
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Self(false)
+        }
+    }
+}
 
 /// Identity of a costly/irreversible action that requires a confirming second tap
 /// on touch (so a stray tap never spends gold or sells a tower). Desktop acts
@@ -7697,6 +7710,7 @@ pub fn spawn_menu(
     lighting: Res<LightingSettings>,
     episode: Res<SelectedEpisode>,
     mut dirty: ResMut<MenuDirty>,
+    touch: Res<TouchMode>,
 ) {
     dirty.0 = false;
     let lang = lang.lang;
@@ -7755,8 +7769,8 @@ pub fn spawn_menu(
                     position_type: PositionType::Absolute,
                     top: Val::Px(10.0),
                     right: Val::Px(10.0),
-                    width: Val::Px(40.0),
-                    height: Val::Px(40.0),
+                    width: Val::Px(48.0),
+                    height: Val::Px(48.0),
                     padding: UiRect::all(Val::Px(5.0)),
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
@@ -7783,6 +7797,9 @@ pub fn spawn_menu(
                     top: Val::Px(56.0),
                     right: Val::Px(10.0),
                     width: Val::Px(248.0),
+                    height: Val::Px(440.0),
+                    max_height: Val::Vh(80.0),
+                    overflow: Overflow::scroll_y(),
                     display: Display::None,
                     flex_direction: FlexDirection::Column,
                     padding: UiRect::all(Val::Px(12.0)),
@@ -7792,6 +7809,7 @@ pub fn spawn_menu(
                 BackgroundColor(Color::srgba(0.07, 0.08, 0.09, 0.99)),
                 GlobalZIndex(61),
                 MenuSettingsRoot,
+                ScrollPosition::default(),
             ))
             .with_children(|s| {
                 s.spawn((
@@ -7799,6 +7817,18 @@ pub fn spawn_menu(
                     text_font(f, 18.0),
                     TextColor(Color::srgb(0.9, 0.95, 1.0)),
                 ));
+                #[cfg(target_arch = "wasm32")]
+                button(
+                    s,
+                    f,
+                    if crate::i18n::current_lang() == crate::i18n::Lang::En {
+                        "Downloads & offline play"
+                    } else {
+                        "下载与离线游玩"
+                    },
+                    UiAction::OpenDownloads,
+                    BTN_BG,
+                );
                 // 画质
                 s.spawn((
                     Text::new(format!("{}：{}", tr("画质"), tr("标准"))),
@@ -7856,7 +7886,8 @@ pub fn spawn_menu(
             });
             p.spawn((
                 Node {
-                    width: Val::Px(318.0),
+                    width: Val::Px(if touch.0 { 220.0 } else { 318.0 }),
+                    flex_shrink: 0.0,
                     height: Val::Percent(100.0),
                     flex_direction: FlexDirection::Column,
                     padding: UiRect::all(Val::Px(12.0)),
@@ -8030,10 +8061,12 @@ pub fn spawn_menu(
                     flex_direction: FlexDirection::Column,
                     padding: UiRect::all(Val::Px(12.0)),
                     row_gap: Val::Px(9.0),
-                    overflow: Overflow::clip(),
+                    overflow: Overflow::scroll_y(),
+                    min_width: Val::Px(0.0),
                     ..default()
                 },
                 BackgroundColor(UI_PANEL),
+                ScrollPosition::default(),
             ))
             .with_children(|right| {
                 right
@@ -8150,6 +8183,7 @@ pub fn spawn_menu(
                     .spawn(Node {
                         flex_direction: FlexDirection::Row,
                         flex_wrap: FlexWrap::Wrap,
+                        flex_shrink: 0.0,
                         justify_content: JustifyContent::Center,
                         row_gap: Val::Px(5.0),
                         column_gap: Val::Px(5.0),
@@ -8182,6 +8216,7 @@ pub fn spawn_menu(
                                     Node {
                                         width: Val::Px(120.0),
                                         height: Val::Px(70.0),
+                                        flex_shrink: 0.0,
                                         flex_direction: FlexDirection::Column,
                                         justify_content: JustifyContent::SpaceBetween,
                                         padding: UiRect::all(Val::Px(4.0)),
@@ -8665,6 +8700,7 @@ pub fn update_language_label(lang: Res<Language>, mut q: Query<&mut Text, With<L
 pub fn menu_buttons(
     mut actions: MessageReader<UiActionActivated>,
     mut current: ResMut<CurrentLevel>,
+    mut pending: ResMut<crate::demand_assets::PendingBattle>,
     mut diff: ResMut<GameDifficulty>,
     mut quality: ResMut<GraphicsQuality>,
     mut lighting: ResMut<LightingSettings>,
@@ -8709,18 +8745,22 @@ pub fn menu_buttons(
             UiAction::PlayLevel(i) => {
                 mode.0 = RunMode::Campaign;
                 current.0 = *i;
-                next.set(if *i == 0 {
-                    GameState::Story
-                } else {
-                    GameState::Briefing
-                });
+                crate::demand_assets::request(
+                    &mut pending,
+                    &mut next,
+                    if *i == 0 {
+                        GameState::Story
+                    } else {
+                        GameState::Briefing
+                    },
+                );
             }
             UiAction::PlayEndless => {
                 mode.0 = RunMode::Endless;
                 // 无尽基线用第一章终关（index 19）：战役扩到 100 关后，
                 // “最后一关”带第 5 章 ×9 血量倍率，再叠无尽成长会开局即地狱。
                 current.0 = (crate::data::EPISODE_LEN - 1).min(levels.0.len() - 1);
-                next.set(GameState::Story);
+                crate::demand_assets::request(&mut pending, &mut next, GameState::Story);
             }
             UiAction::OpenBestiary => next.set(GameState::Bestiary),
             UiAction::OpenArmory => next.set(GameState::Armory),
