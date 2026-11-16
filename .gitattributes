@@ -19,3 +19,6 @@
 # favicon — as plain git blobs so they survive the github: fetch intact.
 assets/** -filter -diff -merge -text
 web/favicon.ico -filter -diff -merge -text
+
+# Install icons are runtime assets on Pages; do not publish LFS pointers.
+web/icons/** -filter -diff -merge -text
